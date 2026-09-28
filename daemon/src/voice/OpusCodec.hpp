@@ -17,7 +17,8 @@ inline constexpr int kMaxPacketBytes = 1275;
 
 class OpusVoiceEncoder {
 public:
-    OpusVoiceEncoder();
+    // Voice by default; `music` tunes for arbitrary sound (screen-share audio).
+    explicit OpusVoiceEncoder(bool music = false);
     ~OpusVoiceEncoder();
 
     bool valid() const { return m_enc != nullptr; }

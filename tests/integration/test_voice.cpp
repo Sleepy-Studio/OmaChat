@@ -263,3 +263,43 @@ TEST_F(VoiceFixture, ScreenShareTravelsToWatchersAndStops)
     // Watching someone who is not sharing is refused.
     EXPECT_FALSE(bob->call(QStringLiteral("stream.watch"), {{"user", "alice"}}).ok);
 }
+
+TEST_F(VoiceFixture, ScreenShareAudioReachesOnlyWatchers)
+{
+    // Alice shares (synthetic screen + a 440 Hz tone as "application audio");
+    // she does not speak, so anything Bob hears is the share.
+    ASSERT_TRUE(alice->call(QStringLiteral("stream.start"), {}, 30000).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return alice->call(QStringLiteral("stream.stats"))
+                   .result.value("share")
+                   .toObject()
+                   .value("audio_frames")
+                   .toDouble()
+            > 10;
+    })) << "the share encodes sound";
+
+    auto listen = [&](int frames) {
+        std::vector<float> heard, out(960), sink(960);
+        for (int f = 0; f < frames; ++f) {
+            waitFor([] { return false; }, 20);
+            bob->audio().pumpPlayback(out.data(), out.size());
+            alice->audio().pumpPlayback(sink.data(), sink.size());
+            heard.insert(heard.end(), out.begin(), out.end());
+        }
+        return heard;
+    };
+    EXPECT_LT(rms(listen(40)), 1e-4) << "not watching: nothing arrives";
+
+    ASSERT_TRUE(bob->call(QStringLiteral("stream.watch"), {{"user", "alice"}}).ok);
+    const auto heard = listen(100);
+    const std::size_t settle = 960 * 30;
+    EXPECT_GT(rms(heard, settle), 0.05) << "watching: the share's sound plays";
+    EXPECT_NEAR(dominantHz(heard, settle), 440.0, 25.0);
+    // It is not a voice: nobody lights up as speaking.
+    for (const auto& p : bob->daemon().statusJson().value("voice").toObject().value("participants").toArray())
+        EXPECT_FALSE(p.toObject().value("speaking").toBool()) << p.toObject().value("name").toString().toStdString();
+
+    ASSERT_TRUE(bob->call(QStringLiteral("stream.unwatch"), {{"user", "alice"}}).ok);
+    listen(20);
+    EXPECT_LT(rms(listen(30)), 1e-3) << "unwatching stops it";
+}

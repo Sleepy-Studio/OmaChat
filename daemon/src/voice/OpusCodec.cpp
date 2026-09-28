@@ -6,16 +6,16 @@
 
 namespace omachat::voice {
 
-OpusVoiceEncoder::OpusVoiceEncoder()
+OpusVoiceEncoder::OpusVoiceEncoder(bool music)
 {
     int err = 0;
-    m_enc = opus_encoder_create(kSampleRate, kChannels, OPUS_APPLICATION_VOIP, &err);
+    m_enc = opus_encoder_create(kSampleRate, kChannels, music ? OPUS_APPLICATION_AUDIO : OPUS_APPLICATION_VOIP, &err);
     if (err != OPUS_OK) {
         m_enc = nullptr;
         return;
     }
-    opus_encoder_ctl(m_enc, OPUS_SET_BITRATE(40000));
-    opus_encoder_ctl(m_enc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+    opus_encoder_ctl(m_enc, OPUS_SET_BITRATE(music ? 96000 : 40000));
+    opus_encoder_ctl(m_enc, OPUS_SET_SIGNAL(music ? OPUS_SIGNAL_MUSIC : OPUS_SIGNAL_VOICE));
     opus_encoder_ctl(m_enc, OPUS_SET_COMPLEXITY(8));
     opus_encoder_ctl(m_enc, OPUS_SET_VBR(1));
     opus_encoder_ctl(m_enc, OPUS_SET_DTX(0));

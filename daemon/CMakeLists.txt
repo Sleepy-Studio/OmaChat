@@ -26,6 +26,7 @@ add_library(omachat_daemon_core STATIC
     src/video/ScreenSource.cpp
     src/video/PortalScreenSource.cpp
     src/video/VideoManager.cpp
+    src/video/ScreenAudio.cpp
     src/crypto/E2E.cpp
     src/crypto/E2EManager.cpp
 )

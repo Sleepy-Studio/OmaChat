@@ -83,6 +83,9 @@ Built-in roles on server creation: Guest (default, read + join voice), Member
   permission change that removes `STREAM` ends the share.
 - What is shared is chosen in the desktop's own portal dialog; OmaChat never
   captures the screen without it.
+- Shared sound is everything other applications play while you share (not
+  only the shared window; not OmaChat's own sound). Turn it off in
+  Settings → Screen sharing or with `stream start --no-audio`.
 - Decoded frames sit in `$XDG_RUNTIME_DIR/omachat/video` (0700 directory,
   0600 files) and are deleted when you stop watching.
 

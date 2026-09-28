@@ -270,7 +270,7 @@ void VoiceEngine::mixerLoop()
                     const bool voiced = slot.kind == JitterBuffer::Kind::Packet || slot.kind == JitterBuffer::Kind::Fec;
                     sp->framesSinceVoice = voiced ? 0 : sp->framesSinceVoice + 1;
                     const bool speaking = sp->framesSinceVoice < 10; // 200 ms hold
-                    if (speaking != sp->speaking) {
+                    if (speaking != sp->speaking && !(userId & kScreenAudioKey)) {
                         sp->speaking = speaking;
                         changes.emplace_back(userId, speaking);
                     }
@@ -301,6 +301,42 @@ void VoiceEngine::mixerLoop()
 bool VoiceEngine::sendVideo(std::uint32_t timestamp90k, std::span<const std::uint8_t> payload, bool keyframe)
 {
     return m_running.load() && m_transport.sendVideo(timestamp90k, payload, keyframe);
+}
+
+bool VoiceEngine::sendScreenAudio(std::uint32_t timestamp48k, std::span<const std::uint8_t> payload)
+{
+    return m_running.load() && m_transport.sendScreenAudio(timestamp48k, payload);
+}
+
+void VoiceEngine::pushScreenAudio(
+    std::uint64_t userId, std::uint32_t timestamp48k, std::span<const std::uint8_t> payload)
+{
+    if (payload.size() <= 4 || !m_running.load())
+        return;
+    const std::uint32_t seq = (std::uint32_t{payload[0]} << 24) | (std::uint32_t{payload[1]} << 16)
+        | (std::uint32_t{payload[2]} << 8) | payload[3];
+    const std::uint64_t key = userId | kScreenAudioKey;
+    std::lock_guard lock(m_speakersMutex);
+    auto it = m_speakers.find(key);
+    if (it == m_speakers.end()) {
+        int minMs = 20, maxMs = 200;
+        {
+            std::lock_guard slock(m_settingsMutex);
+            minMs = m_settings.jitterMinMs;
+            maxMs = m_settings.jitterMaxMs;
+        }
+        auto sp = std::make_unique<Speaker>(minMs, maxMs);
+        if (auto g = m_gains.find(key); g != m_gains.end())
+            sp->gain.store(g->second);
+        it = m_speakers.emplace(key, std::move(sp)).first;
+    }
+    it->second->jitter.push(seq, timestamp48k, payload.subspan(4), false);
+}
+
+void VoiceEngine::removeScreenAudio(std::uint64_t userId)
+{
+    std::lock_guard lock(m_speakersMutex);
+    m_speakers.erase(userId | kScreenAudioKey);
 }
 
 void VoiceEngine::requestKeyframe(std::uint32_t sourceStream)

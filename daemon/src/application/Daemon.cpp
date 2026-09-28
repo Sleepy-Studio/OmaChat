@@ -103,8 +103,10 @@ bool Daemon::start(QString* error)
     m_video = std::make_unique<video::VideoManager>(*m_voice, this);
     m_video->setSettings(videoSettings());
     m_video->setFrameDirectory(paths::runtimeDir() + QStringLiteral("/video"));
-    if (m_options.syntheticScreen)
+    if (m_options.syntheticScreen) {
         m_video->setSourceFactory([] { return std::make_unique<video::SyntheticScreenSource>(1280, 720, 30); });
+        m_video->setAudioFactory([] { return std::make_unique<video::ToneAudioSource>(440.0); });
+    }
     connect(m_video.get(), &video::VideoManager::changed, this, &Daemon::scheduleStatus);
     connect(m_video.get(), &video::VideoManager::sharingEnded, this, [this] {
         OMA_INFO("video", "screen sharing ended from the desktop");

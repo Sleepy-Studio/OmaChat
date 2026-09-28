@@ -44,6 +44,7 @@ enum PacketFlags : std::uint8_t {
     FlagNone = 0,
     FlagEndOfSpeech = 1 << 0, // final audio frame of a talk spurt
     FlagKeyframe = 1 << 1, // video: fragment belongs to a keyframe
+    FlagScreenAudio = 1 << 2, // video stream: the payload is screen-share audio, not a fragment
 };
 
 enum class Direction : std::uint8_t {

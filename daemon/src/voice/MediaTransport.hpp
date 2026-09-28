@@ -35,6 +35,8 @@ public:
 
     bool sendAudio(std::uint32_t timestamp, std::span<const std::uint8_t> opus, bool endOfSpeech);
     bool sendVideo(std::uint32_t timestamp, std::span<const std::uint8_t> payload, bool keyframe);
+    // Screen-share audio rides the video stream so only watchers receive it.
+    bool sendScreenAudio(std::uint32_t timestamp, std::span<const std::uint8_t> payload);
     void sendControl(media::ControlType type, std::span<const std::uint8_t> extra = {});
 
     struct Stats {

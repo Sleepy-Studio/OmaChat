@@ -992,7 +992,7 @@ void Daemon::registerMethods()
 
     // ------------------------------------------------------- screen sharing
     // stream.start answers once the desktop picker is done: call it without a timeout.
-    m[QStringLiteral("stream.start")] = [this](const QJsonObject&, const Responder& r) {
+    m[QStringLiteral("stream.start")] = [this](const QJsonObject& p, const Responder& r) {
         if (!requireConnected(r))
             return;
         if (!m_conn->capabilities().contains(QStringLiteral("video.h264"))) {
@@ -1003,6 +1003,7 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("join a voice channel to share your screen"));
             return;
         }
+        m_video->setShareAudio(p.value(QStringLiteral("audio")).toBool(m_config.video.audio));
         m_video->startSharing([this, r](bool ok, const QString& error) {
             if (!ok) {
                 r.error(error == u"cancelled" ? e::BadRequest : e::MediaDeviceUnavailable, error);
@@ -1141,7 +1142,7 @@ void Daemon::registerMethods()
     m[QStringLiteral("video.settings")] = [this](const QJsonObject&, const Responder& r) {
         const auto& v = m_config.video;
         r.ok({{"fps", v.fps}, {"max_height", v.maxHeight}, {"bitrate_kbps", v.bitrateKbps}, {"encoder", v.encoder},
-            {"encoders", QJsonArray::fromStringList(video::H264Encoder::available())}});
+            {"audio", v.audio}, {"encoders", QJsonArray::fromStringList(video::H264Encoder::available())}});
     };
     m[QStringLiteral("video.set")] = [this](const QJsonObject& p, const Responder& r) {
         auto& v = m_config.video;
@@ -1151,6 +1152,8 @@ void Daemon::registerMethods()
             v.maxHeight = std::clamp(p.value(QStringLiteral("max_height")).toInt(), 360, 1440);
         if (p.contains(QStringLiteral("bitrate_kbps")))
             v.bitrateKbps = std::clamp(p.value(QStringLiteral("bitrate_kbps")).toInt(), 500, 20000);
+        if (p.contains(QStringLiteral("audio")))
+            v.audio = p.value(QStringLiteral("audio")).toBool();
         if (p.contains(QStringLiteral("encoder"))) {
             const QString enc = p.value(QStringLiteral("encoder")).toString();
             if (enc != u"auto" && !video::H264Encoder::available().contains(enc)) {

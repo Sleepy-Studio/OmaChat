@@ -118,6 +118,7 @@ ClientConfig ClientConfig::load(const QString& path, QString* error)
     cfg.video.maxHeight = num(v["max_height"], cfg.video.maxHeight, 360, 1440);
     cfg.video.bitrateKbps = num(v["bitrate_kbps"], cfg.video.bitrateKbps, 500, 20000);
     cfg.video.encoder = str(v["encoder"], cfg.video.encoder);
+    cfg.video.audio = flag(v["audio"], cfg.video.audio);
 
     auto n = t["notifications"];
     cfg.notifications.messages = flag(n["messages"], cfg.notifications.messages);
@@ -167,7 +168,7 @@ bool ClientConfig::save(const QString& path, QString* error) const
         });
     root.insert("video",
         toml::table{{"fps", video.fps}, {"max_height", video.maxHeight}, {"bitrate_kbps", video.bitrateKbps},
-            {"encoder", video.encoder.toStdString()}});
+            {"encoder", video.encoder.toStdString()}, {"audio", video.audio}});
     root.insert("notifications",
         toml::table{{"messages", notifications.messages}, {"mentions", notifications.mentions},
             {"voice_join", notifications.voiceJoin}});

@@ -269,12 +269,18 @@ Dialog {
                         Accessible.name: qsTr("Encoder")
                     }
                 }
+                Toggle {
+                    text: qsTr("Share sound from other applications")
+                    checked: App.videoSettings.audio !== false
+                    onToggled: App.setVideo("audio", checked)
+                }
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     color: Theme.textFaint
                     font.pixelSize: Theme.px(11)
-                    text: qsTr("Changes apply the next time you share. Automatic tries your GPU first and falls back to the CPU. "
+                    text: qsTr("Sound comes from every other program's playback, never from OmaChat itself, so the "
+                               + "call is not echoed back. Changes apply the next time you share. Automatic tries your GPU first and falls back to the CPU. "
                                + "Only the people in your voice channel who choose to watch receive your screen.")
                 }
                 Item { Layout.fillHeight: true }

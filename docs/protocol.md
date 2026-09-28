@@ -175,7 +175,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?}` → `{path, cached}`, `transfer.list`, `transfer.cancel {id}` |
 | voice | `voice.join`, `voice.leave`, `voice.mute`, `voice.unmute`, `voice.toggle_mute`, `voice.deafen`, `voice.undeafen`, `voice.toggle_deafen`, `voice.mode`, `voice.stats`, `ptt.begin`, `ptt.end` |
 | encryption | `e2e.status` → `{enabled, ready, device}`, `e2e.safety {user}` → `{number, devices, verified}`, `e2e.verify {user, verified?}` |
-| screen sharing | `stream.start` (answers after the desktop picker; no timeout), `stream.stop`, `stream.watch {user}` → `{path}`, `stream.unwatch {user}`, `stream.stats`, `video.settings`, `video.set` |
+| screen sharing | `stream.start {audio?}` (answers after the desktop picker; no timeout), `stream.stop`, `stream.watch {user}` → `{path}`, `stream.unwatch {user}`, `stream.stats`, `video.settings`, `video.set` |
 | audio | `audio.devices`, `audio.settings`, `audio.set`, `audio.user_volume` |
 | moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update` (fields left out are kept), `role.delete`, `role.assign`, `override.set {channel, role \| user, allow, deny, remove?}`, `override.list` |
 | ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.reload` |

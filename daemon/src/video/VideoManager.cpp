@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QRandomGenerator>
 
+#include <array>
 #include <chrono>
 
 namespace omachat::video {
@@ -31,10 +32,11 @@ constexpr std::int64_t kKeyframeRetryMs = 500;
 
 // ============================================================== ScreenShare
 
-ScreenShare::ScreenShare(std::unique_ptr<ScreenSource> source, const H264Encoder::Settings& settings,
-    voice::VoiceEngine& voice, QObject* parent)
+ScreenShare::ScreenShare(std::unique_ptr<ScreenSource> source, std::unique_ptr<ScreenAudioSource> audio,
+    const H264Encoder::Settings& settings, voice::VoiceEngine& voice, QObject* parent)
     : QObject(parent)
     , m_source(std::move(source))
+    , m_audio(std::move(audio))
     , m_settings(settings)
     , m_voice(voice)
     , m_frameNumber(QRandomGenerator::global()->generate()) // viewers never mistake a new share for old frames
@@ -66,10 +68,61 @@ void ScreenShare::start()
         m_fresh = true;
         m_wake.notify_one();
     });
+    // Sound is best effort: a share without it still works.
+    if (m_audio) {
+        m_audioLive = true;
+        QString error;
+        const bool ok
+            = m_audio->start([this](const float* mono, std::size_t count) { m_audioRing.push(mono, count); }, &error);
+        if (ok) {
+            m_audioThread = std::thread([this] { audioLoop(); });
+        } else {
+            m_audioLive = false;
+            std::lock_guard stats(m_statsMutex);
+            m_audioError = error;
+            OMA_WARN("video", "sharing without sound", {"reason", error});
+        }
+    }
+}
+
+void ScreenShare::audioLoop()
+{
+    // 20 ms Opus frames, as fast as capture fills them; the payload leads
+    // with a frame number because the video stream's sequence numbers are
+    // shared with picture fragments.
+    voice::OpusVoiceEncoder encoder(/*music=*/true);
+    std::array<float, voice::kFrameSamples> pcm{};
+    std::array<std::uint8_t, 4 + voice::kMaxPacketBytes> packet{};
+    std::uint32_t frame = QRandomGenerator::global()->generate();
+    std::uint32_t timestamp = QRandomGenerator::global()->generate();
+    while (m_audioLive) {
+        if (m_audioRing.size() < pcm.size()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
+        m_audioRing.pop(pcm.data(), pcm.size());
+        const std::size_t n = encoder.encode(pcm, std::span<std::uint8_t>(packet).subspan(4));
+        timestamp += voice::kFrameSamples;
+        if (n == 0)
+            continue;
+        ++frame;
+        packet[0] = static_cast<std::uint8_t>(frame >> 24);
+        packet[1] = static_cast<std::uint8_t>(frame >> 16);
+        packet[2] = static_cast<std::uint8_t>(frame >> 8);
+        packet[3] = static_cast<std::uint8_t>(frame);
+        m_voice.sendScreenAudio(timestamp, std::span<const std::uint8_t>(packet.data(), 4 + n));
+        std::lock_guard stats(m_statsMutex);
+        ++m_audioFrames;
+    }
 }
 
 void ScreenShare::stop()
 {
+    if (m_audio)
+        m_audio->stop();
+    m_audioLive = false;
+    if (m_audioThread.joinable())
+        m_audioThread.join();
     if (m_source)
         m_source->stop();
     {
@@ -193,7 +246,10 @@ QJsonObject ScreenShare::statsJson() const
     return {{"source", m_source ? m_source->name() : QString()}, {"encoder", m_encoderName}, {"width", m_width},
         {"height", m_height}, {"fps", m_settings.fps}, {"bitrate_kbps", m_settings.bitrateKbps},
         {"frames", static_cast<double>(m_frames)}, {"keyframes", static_cast<double>(m_keyframes)},
-        {"bytes", static_cast<double>(m_bytes)}, {"send_drops", static_cast<double>(m_sendDrops)}};
+        {"bytes", static_cast<double>(m_bytes)}, {"send_drops", static_cast<double>(m_sendDrops)},
+        {"audio", m_audio && m_audioLive.load()}, {"audio_source", m_audio ? m_audio->name() : QString()},
+        {"audio_applications", m_audio ? m_audio->applications() : 0},
+        {"audio_frames", static_cast<double>(m_audioFrames)}, {"audio_error", m_audioError}};
 }
 
 // ============================================================= StreamViewer
@@ -322,6 +378,10 @@ void VideoManager::onVideoPacket(const media::Header& h, std::span<const std::ui
     auto it = m_viewers.find(h.senderId);
     if (it == m_viewers.end())
         return;
+    if (h.flags & media::FlagScreenAudio) {
+        m_voice.pushScreenAudio(h.senderId, h.timestamp, payload);
+        return;
+    }
     it->second->onPacket(h, payload);
     if (it->second->wantsKeyframe())
         m_voice.requestKeyframe(it->second->sourceStream());
@@ -334,7 +394,10 @@ void VideoManager::startSharing(std::function<void(bool ok, const QString& error
         return;
     }
     auto source = m_factory ? m_factory() : makePortalSource();
-    m_share = std::make_unique<ScreenShare>(std::move(source), m_settings, m_voice);
+    std::unique_ptr<ScreenAudioSource> audio;
+    if (m_shareAudio)
+        audio = m_audioFactory ? m_audioFactory() : makeApplicationAudioSource();
+    m_share = std::make_unique<ScreenShare>(std::move(source), std::move(audio), m_settings, m_voice);
     auto once = std::make_shared<std::function<void(bool, const QString&)>>(std::move(done));
     auto finish = [once](bool ok, const QString& error) {
         if (*once)
@@ -398,6 +461,7 @@ void VideoManager::unwatch(std::uint64_t userId)
 {
     if (m_viewers.erase(userId) == 0)
         return;
+    m_voice.removeScreenAudio(userId);
     if (m_viewers.empty())
         m_keyframeTimer.stop();
     emit changed();
@@ -407,6 +471,8 @@ void VideoManager::stopAll()
 {
     stopSharing();
     if (!m_viewers.empty()) {
+        for (const auto& [id, v] : m_viewers)
+            m_voice.removeScreenAudio(id);
         m_viewers.clear();
         m_keyframeTimer.stop();
         emit changed();

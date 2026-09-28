@@ -51,7 +51,9 @@ VAD/PTT), reconnect/resume, CLI, Omarchy bar widget, Arch packaging, and:
 - Screen sharing: xdg-desktop-portal + PipeWire capture, H.264 via NVENC /
   AMF / x264, keyframe-on-demand over the relay, decoded in the daemon and
   shown from shared memory (voice panel monitor button; LIVE badge → click
-  to watch; CLI `stream …`; Settings → Screen sharing).
+  to watch; CLI `stream …`; Settings → Screen sharing). Carries other
+  applications' sound (PipeWire links into a private capture node; OmaChat's
+  own sound excluded), played to watchers only.
 - End-to-end encryption of direct and group conversations, text and files,
   with key-change warnings and safety numbers (lock icon; CLI `e2e …`).
   Limits are in `docs/security.md`.
@@ -71,8 +73,12 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
    "stop sharing" control. Watching your share needs a second account in
    voice (another machine, or a second GUI instance as bob).
 3. **Watching**: `bob voice join General`, `bob stream start`; join General
-   in the GUI, click bob's LIVE badge → the pattern appears above the chat;
-   maximize, close.
+   in the GUI, click bob's LIVE badge → the pattern appears above the chat
+   and a 440 Hz tone plays (bob's synthetic "application sound"); maximize,
+   close → the tone stops.
+3b. **Shared sound, for real**: while sharing (step 2), play music or a
+   video → the watcher hears it; talk on the call → the watcher does not
+   hear your voice twice. Toggle Settings → Screen sharing → sound off.
 4. **Encryption**: `bob dm howie "hi"` → lock icon in the DM header, message
    readable; open the lock → safety number equals
    `scripts/dev-sandbox.sh bob e2e safety howie`; mark verified. Send a file
@@ -99,7 +105,8 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
 
 - Forward secrecy for encrypted conversations (a ratchet); end-to-end voice
   and screen sharing (would need group media keys).
-- Screen-share audio; DMA-BUF capture and VAAPI encoding.
+- Stereo screen-share sound, and only the shared window's sound; DMA-BUF
+  capture and VAAPI encoding.
 - `pkgver` bump and a tag when cutting a release.
 
 ## Decisions to keep

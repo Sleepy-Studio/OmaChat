@@ -28,7 +28,7 @@ assistants, bots or LLM features.
   volume, RNNoise noise suppression, device hot-plug via PipeWire
 - Screen sharing in voice channels: the desktop's own screen/window picker
   (xdg-desktop-portal), H.264 on the GPU (NVENC, AMF) or CPU (x264), up to
-  1440p60; people choose whether to watch
+  1440p60, with other applications' sound; people choose whether to watch
 - Roles and per-channel permission overrides with an editor in the GUI,
   kick, ban, server mute — all enforced by the server
 - Several accounts (on one or more servers) connected at once, switched
@@ -179,6 +179,7 @@ fps = 30                   # 5 - 60
 max_height = 1080          # 360 - 1440
 bitrate_kbps = 4000        # 500 - 20000
 encoder = "auto"           # auto | nvenc | amf | x264
+audio = true               # share other applications' sound
 
 [notifications]
 messages = true            # direct messages
@@ -244,7 +245,8 @@ Not done yet — be aware:
 - **Voice between two separate machines has not been tested yet**, and
   mouth-to-ear latency on real hardware has not been measured.
 - Screen capture through the desktop portal has not been tried by hand
-  yet (the rest of the video path is tested); screen shares carry no audio.
+  yet (the rest of the video path is tested). Shared sound is mono and
+  comes from all other applications, not only the shared window.
 - See [docs/status.md](docs/status.md) for the current list.
 
 ## License

@@ -3,7 +3,9 @@
 #include "omachat/media/FrameBuffer.hpp"
 #include "omachat/media/VideoFragments.hpp"
 #include "video/H264Codec.hpp"
+#include "video/ScreenAudio.hpp"
 #include "video/ScreenSource.hpp"
+#include "voice/SpscRing.hpp"
 #include "voice/VoiceEngine.hpp"
 
 #include <QJsonArray>
@@ -29,8 +31,9 @@ namespace omachat::video {
 class ScreenShare : public QObject {
     Q_OBJECT
 public:
-    ScreenShare(std::unique_ptr<ScreenSource> source, const H264Encoder::Settings& settings, voice::VoiceEngine& voice,
-        QObject* parent = nullptr);
+    // `audio` may be null: a share without sound.
+    ScreenShare(std::unique_ptr<ScreenSource> source, std::unique_ptr<ScreenAudioSource> audio,
+        const H264Encoder::Settings& settings, voice::VoiceEngine& voice, QObject* parent = nullptr);
     ~ScreenShare() override;
 
     void start();
@@ -45,9 +48,16 @@ signals:
 
 private:
     void encoderLoop();
+    void audioLoop();
     void sendFrame(const std::vector<std::uint8_t>& au, bool keyframe, std::uint32_t ts90k);
 
     std::unique_ptr<ScreenSource> m_source;
+    std::unique_ptr<ScreenAudioSource> m_audio;
+    voice::SpscRing<float> m_audioRing{48000}; // 1 s; capture thread -> audio thread
+    std::thread m_audioThread;
+    std::atomic<bool> m_audioLive{false};
+    QString m_audioError;
+    std::uint64_t m_audioFrames = 0; // audio thread writes, read under m_statsMutex
     H264Encoder::Settings m_settings;
     voice::VoiceEngine& m_voice;
 
@@ -120,6 +130,9 @@ public:
 
     void setSettings(const H264Encoder::Settings& s) { m_settings = s; }
     void setSourceFactory(SourceFactory f) { m_factory = std::move(f); }
+    using AudioFactory = std::function<std::unique_ptr<ScreenAudioSource>()>;
+    void setAudioFactory(AudioFactory f) { m_audioFactory = std::move(f); }
+    void setShareAudio(bool enabled) { m_shareAudio = enabled; }
     void setFrameDirectory(const QString& dir) { m_frameDir = dir; }
 
     // Starts capturing and sending; `done` runs once with the outcome
@@ -147,6 +160,8 @@ private:
     voice::VoiceEngine& m_voice;
     H264Encoder::Settings m_settings;
     SourceFactory m_factory;
+    AudioFactory m_audioFactory;
+    bool m_shareAudio = true;
     QString m_frameDir;
     std::unique_ptr<ScreenShare> m_share;
     bool m_shareLive = false;

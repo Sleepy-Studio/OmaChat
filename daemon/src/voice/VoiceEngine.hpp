@@ -82,6 +82,13 @@ public:
     bool sendVideo(std::uint32_t timestamp90k, std::span<const std::uint8_t> payload, bool keyframe);
     void requestKeyframe(std::uint32_t sourceStream);
 
+    // Screen-share audio: payload is [frame number:4][Opus]. Played through
+    // the mixer like a voice, but it never counts as speaking.
+    bool sendScreenAudio(std::uint32_t timestamp48k, std::span<const std::uint8_t> payload);
+    void pushScreenAudio(std::uint64_t userId, std::uint32_t timestamp48k, std::span<const std::uint8_t> payload);
+    void removeScreenAudio(std::uint64_t userId);
+    static constexpr std::uint64_t kScreenAudioKey = std::uint64_t{1} << 63; // user ids never set bit 63
+
 signals:
     void speakingChanged(quint64 userId, bool speaking);
     void transmittingChanged(bool transmitting);

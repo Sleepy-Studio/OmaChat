@@ -133,5 +133,20 @@ up to 2560×1600 BGRA pixels. The daemon writes; the GUI copies the newest
 complete frame at display rate. The file is deleted when you stop
 watching. Decoded streams larger than that are scaled down.
 
-**Not yet:** audio of the shared screen or window; DMA-BUF (zero-copy)
-capture; VAAPI/QSV encoding.
+**Sound.** A share carries the sound of every *other* application
+(`[video] audio`, Settings → Screen sharing, `stream start --no-audio`).
+The daemon creates a PipeWire input node that is not auto-connected and
+links each application playback stream (`Stream/Output/Audio`) into its
+single mono port, following streams as they appear and go; PipeWire mixes
+and downmixes. Nodes of OmaChat itself (its `application.id` or process)
+are never linked, so voice is not echoed back through the share. The mix is
+Opus in music mode (96 kbit/s, 20 ms, mono) sent as video-type packets
+with flag bit2 (`FlagScreenAudio`), so the relay delivers it only to
+watchers. Payload: `[frame number:4][Opus]` (the video sequence numbers are
+shared with picture fragments). Receivers play it through the voice mixer
+with its own jitter buffer, separate from the sharer's voice; it never
+shows as speaking, and deafen silences it.
+
+**Not yet:** stereo, sound of only the shared window (the portal does not
+say which program owns it), DMA-BUF (zero-copy) capture, VAAPI/QSV
+encoding.
