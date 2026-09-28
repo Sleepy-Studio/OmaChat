@@ -1,0 +1,48 @@
+# Coolify Git-based Docker Compose application for the OmaChat server.
+# Set Base Directory to / and Docker Compose Location to /docker-compose.coolify.yml.
+# The image is built and published to GHCR by .github/workflows/docker.yml;
+# Coolify pulls it rather than building source code.
+#
+# OmaChat serves its own TLS over TCP and media over UDP. Neither protocol
+# belongs behind Coolify's HTTP proxy, so expose both ports directly. Coolify's
+# SERVICE_URL_/SERVICE_FQDN_ domain generation and proxy labels do not apply.
+services:
+  omachat-server:
+    image: ghcr.io/sleepy-studio/omachat-server:${OMACHAT_IMAGE_TAG:-latest}
+    restart: unless-stopped
+
+    ports:
+      - target: ${OMACHAT_PORT:-6473}
+        published: "${OMACHAT_PORT:-6473}"
+        protocol: tcp
+      - target: ${OMACHAT_MEDIA_PORT:-6474}
+        published: "${OMACHAT_MEDIA_PORT:-6474}"
+        protocol: udp
+
+    # Coolify discovers this Compose-owned persistent volume. It contains the
+    # SQLite database, attachments, generated config and TLS identity.
+    volumes:
+      - omachat-data:/var/lib/omachat
+
+    # Interpolated values appear in Coolify's Environment Variables panel.
+    # The required hostname is used for the first-run self-signed certificate.
+    environment:
+      OMACHAT_HOSTNAME: ${OMACHAT_HOSTNAME:?Set the public hostname or IP clients will use}
+      OMACHAT_NAME: ${OMACHAT_NAME:-OmaChat}
+      OMACHAT_PORT: ${OMACHAT_PORT:-6473}
+      OMACHAT_MEDIA_PORT: ${OMACHAT_MEDIA_PORT:-6474}
+      OMACHAT_REGISTRATION_OPEN: ${OMACHAT_REGISTRATION_OPEN:-true}
+      OMACHAT_NODE_ID: ${OMACHAT_NODE_ID:-1}
+      OMACHAT_MAX_UPLOAD_MB: ${OMACHAT_MAX_UPLOAD_MB:-50}
+      OMACHAT_LOG_LEVEL: ${OMACHAT_LOG_LEVEL:-info}
+
+    # No HTTP health endpoint exists. Bash is present in the published image.
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/${OMACHAT_PORT:-6473}"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  omachat-data:

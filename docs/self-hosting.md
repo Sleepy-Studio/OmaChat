@@ -33,6 +33,33 @@ before first start.
 
 Skip to [Firewall](#4-firewall) below — TLS and config are already done.
 
+## Coolify
+
+Create a Git-based **Docker Compose** application from this repository. Set
+**Base Directory** to `/` and **Docker Compose Location** to
+`/docker-compose.coolify.yml`. The Compose file pulls the published
+`ghcr.io/sleepy-studio/omachat-server` image; Coolify does not build it.
+Its `OMACHAT_IMAGE_TAG` variable defaults to `latest` and can be set to a
+published version tag for a controlled upgrade.
+
+In Coolify's Environment Variables, set the required `OMACHAT_HOSTNAME` to
+the public DNS name or IP clients will enter. Review the defaults for the
+server name, TCP and UDP ports, registration, node ID, upload limit, and log
+level. Open the selected TCP and UDP ports on the server firewall. The server
+uses its own TLS and UDP transport, so leave the service's HTTP Domains field
+empty; Coolify's HTTP proxy and generated `SERVICE_URL_`/`SERVICE_FQDN_`
+variables do not apply. The Compose health check probes the TLS listener and
+Coolify displays the named data volume under Persistent Storage.
+
+The image must be public in GHCR for an unauthenticated pull, or the Coolify
+server must have registry credentials. The image was initially published as a
+private org package; check its visibility before the first deployment. The
+first boot writes `server.toml` and a certificate into the persistent volume.
+Later changes to `OMACHAT_*` variables do not rewrite that config or
+certificate: edit the stored files (or deliberately regenerate them) when
+changing server settings or the certificate identity. Keep the volume when
+redeploying or upgrading.
+
 ## Native (systemd), the alternative to Docker
 
 ### 1. Install
