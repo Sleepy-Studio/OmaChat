@@ -94,9 +94,13 @@ From a terminal: `omachatctl account register chat.example.org:6473 you`,
 
 ## Backups
 
-The whole server state is the SQLite database (WAL mode). Back it up with
+Server state is the SQLite database (WAL mode) plus the attachment files.
+Back up the database with
 `sqlite3 /var/lib/omachat/omachat.db ".backup /backup/omachat.db"` while
-running, plus your TLS key.
+running, then copy `/var/lib/omachat/files/` (files are write-once, so
+`rsync` is enough), plus your TLS key. Take the database copy first: a file
+without a database row is swept on the next start, while a row whose file
+is missing only makes that one attachment fail to download.
 
 ## Upgrades
 

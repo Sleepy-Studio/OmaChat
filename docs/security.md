@@ -42,6 +42,27 @@ someone you share a server with.
 Built-in roles on server creation: Guest (default, read + join voice), Member
 (assigned on joining by invite), Moderator, Admin, Owner.
 
+## Attachments
+
+- Stored under `files.path` (created 0700) as `<attachment id>`, mode 0600.
+  Client filenames are metadata only and never become paths: separators turn
+  into `_`, control characters are dropped, `.`/`..` are refused.
+- Uploads need `VIEW_CHANNEL`, `SEND_MESSAGES` and `ATTACH_FILES`; size is
+  capped by `files.max_upload_mb`; chunks must arrive in order and the
+  optional SHA-256 is verified before the file is kept. An upload belongs
+  to the connection that started it.
+- A finished attachment is private to its uploader until a message in the
+  same channel claims it (once). Downloads then require `VIEW_CHANNEL` and
+  `READ_HISTORY` on that channel; anything else answers "not found".
+  Unsent attachments are purged after an hour; deleting a message, channel
+  or server deletes its files.
+- The daemon saves downloads without overwriting (`name (1).ext`) and caches
+  previews under `$XDG_CACHE_HOME/omachat/attachments` (pruned after 30
+  days). The GUI hands a received file to the desktop only when its
+  *content* sniffs as an image, audio, video, PDF or plain text; anything
+  else (scripts, `.desktop` files, archives) is saved to Downloads instead.
+  Image previews decode at most 800×600 pixels.
+
 ## Logging
 
 Structured `key=value` logs; journald priorities when run under systemd.
@@ -51,6 +72,4 @@ Passwords, tokens, keys and auth headers are never passed to the logger.
 
 - End-to-end encryption: the server can read messages and, because it
   re-seals media per recipient, could decode voice. Self-host a server you trust.
-- Attachments (planned for 0.2; `ObjectStore` path config exists but the
-  upload endpoint does not).
 - Account recovery, 2FA, OIDC/passkeys.

@@ -66,6 +66,7 @@ private:
         std::function<void(bool ok, const QString& code, const QString& message,
             const std::vector<proto::Attachment>& attachments)>
             finish);
+    void pruneAttachmentCache();
     QString downloadDestination(Id attachmentId, const QString& filename, const QString& to, QString* error) const;
 
     // voice

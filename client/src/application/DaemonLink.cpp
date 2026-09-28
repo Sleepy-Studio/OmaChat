@@ -76,9 +76,9 @@ void DaemonLink::retry()
     start();
 }
 
-void DaemonLink::request(const QString& method, const QJsonObject& params, ipc::IpcClient::Callback cb)
+void DaemonLink::request(const QString& method, const QJsonObject& params, ipc::IpcClient::Callback cb, int timeoutMs)
 {
-    m_client.request(method, params, std::move(cb));
+    m_client.request(method, params, std::move(cb), timeoutMs);
 }
 
 void DaemonLink::onConnectFailed()

@@ -10,6 +10,8 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSocketNotifier>
@@ -68,11 +70,14 @@ Servers and channels
   channel topic CHANNEL TEXT | delete CHANNEL | mute CHANNEL | unmute CHANNEL
 
 Messages
-  message send CHANNEL TEXT...
+  message send CHANNEL [TEXT...] [--attach FILE]...
   message history CHANNEL [--limit N]
   message edit MESSAGE_ID TEXT... | delete MESSAGE_ID
   message search CHANNEL QUERY...
   dm USER TEXT...
+  attachment get ATTACHMENT_ID [--name NAME] [--output DIR|FILE]
+                                          saves to ~/Downloads unless --output is given
+  transfer list | cancel TRANSFER_ID
   presence online|idle|dnd
 
 Voice
@@ -98,6 +103,7 @@ struct Invocation {
     std::function<void(const QJsonObject&)> print; // human output
     bool stream = false; // "events": keep running
     bool holdPtt = false;
+    int timeoutMs = 20000; // 0 = as long as the transfer takes
 };
 
 QString joinRest(const QStringList& a, int from)
@@ -154,6 +160,15 @@ std::pair<QString, int> hostPort(const QString& s)
     return {s, kDefaultControlPort};
 }
 
+QString humanSize(double bytes)
+{
+    if (bytes < 1024)
+        return QStringLiteral("%1 B").arg(bytes);
+    if (bytes < 1024 * 1024)
+        return QStringLiteral("%1 KB").arg(bytes / 1024, 0, 'f', 1);
+    return QStringLiteral("%1 MB").arg(bytes / (1024 * 1024), 0, 'f', 1);
+}
+
 void printMessages(const QJsonObject& r)
 {
     const auto msgs = r.value(QStringLiteral("messages")).toArray();
@@ -162,6 +177,11 @@ void printMessages(const QJsonObject& r)
         const auto ts = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(m.value("timestamp").toDouble()));
         out() << ts.toString(QStringLiteral("yyyy-MM-dd HH:mm")) << "  [" << m.value("id").toString() << "] "
               << m.value("author_id").toString() << ": " << m.value("content").toString() << "\n";
+        for (const auto& a : m.value("attachments").toArray()) {
+            const auto o = a.toObject();
+            out() << "                    attachment [" << o.value("id").toString() << "] "
+                  << o.value("filename").toString() << " (" << humanSize(o.value("size").toDouble()) << ")\n";
+        }
     }
 }
 
@@ -370,10 +390,23 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             return std::nullopt;
         }
     } else if (cmd == u"message") {
-        if (sub == u"send" && need(4)) {
+        QJsonArray files;
+        // The daemon has its own working directory, so paths go over absolute.
+        while (const auto f = optionValue(args, QStringLiteral("--attach")))
+            files.append(QFileInfo(*f).absoluteFilePath());
+        if (sub == u"send" && need(files.isEmpty() ? 4 : 3)) {
             inv.method = QStringLiteral("message.send");
             inv.params = {{"channel", args.at(2)}, {"content", joinRest(args, 3)}};
-            inv.print = [](const QJsonObject& r) { out() << "sent " << r.value("id").toString() << "\n"; };
+            if (!files.isEmpty()) {
+                inv.params.insert(QStringLiteral("files"), files);
+                inv.timeoutMs = 0;
+            }
+            inv.print = [](const QJsonObject& r) {
+                out() << "sent " << r.value("id").toString() << "\n";
+                for (const auto& a : r.value("attachments").toArray())
+                    out() << "attached " << a.toObject().value("filename").toString() << " ["
+                          << a.toObject().value("id").toString() << "]\n";
+            };
         } else if (sub == u"history" && need(3)) {
             const auto lim = optionValue(args, QStringLiteral("--limit"));
             inv.method = QStringLiteral("message.history");
@@ -393,6 +426,43 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.print = printMessages;
         } else {
             usageError = QStringLiteral("unknown message command");
+            return std::nullopt;
+        }
+    } else if (cmd == u"attachment") {
+        const auto name = optionValue(args, QStringLiteral("--name"));
+        const auto output = optionValue(args, QStringLiteral("--output"));
+        if (sub == u"get" && need(3)) {
+            inv.method = QStringLiteral("attachment.download");
+            inv.params = {{"attachment", args.at(2)},
+                {"to", output ? QFileInfo(*output).absoluteFilePath() : QStringLiteral("downloads")}};
+            if (name)
+                inv.params.insert(QStringLiteral("filename"), *name);
+            inv.timeoutMs = 0;
+            inv.print = [](const QJsonObject& r) { out() << r.value("path").toString() << "\n"; };
+        } else {
+            usageError = QStringLiteral("unknown attachment command");
+            return std::nullopt;
+        }
+    } else if (cmd == u"transfer") {
+        if (sub == u"list") {
+            inv.method = QStringLiteral("transfer.list");
+            inv.print = [](const QJsonObject& r) {
+                const auto list = r.value("transfers").toArray();
+                if (list.isEmpty())
+                    out() << "no transfers in progress\n";
+                for (const auto& t : list) {
+                    const auto o = t.toObject();
+                    out() << o.value("id").toString() << "  " << o.value("direction").toString() << "  "
+                          << o.value("name").toString() << "  " << humanSize(o.value("transferred").toDouble())
+                          << " / " << humanSize(o.value("total").toDouble()) << "\n";
+                }
+            };
+        } else if (sub == u"cancel" && need(3)) {
+            inv.method = QStringLiteral("transfer.cancel");
+            inv.params = {{"id", args.at(2)}};
+            inv.print = simpleOk(QStringLiteral("cancelled"));
+        } else {
+            usageError = QStringLiteral("unknown transfer command");
             return std::nullopt;
         }
     } else if (cmd == u"dm" && need(3)) {
@@ -603,7 +673,7 @@ int main(int argc, char** argv)
                 }
                 finish(Ok);
             },
-            inv->method.startsWith(u"account.") ? 60000 : 20000);
+            inv->method.startsWith(u"account.") ? 60000 : inv->timeoutMs);
     };
 
     // Ctrl+C / SIGTERM / stdin EOF end a streaming or held command cleanly

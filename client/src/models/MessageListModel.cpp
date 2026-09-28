@@ -37,7 +37,8 @@ QHash<int, QByteArray> MessageListModel::roleNames() const
         {AuthorColorRole, "authorColor"}, {ContentRole, "content"}, {HtmlRole, "html"}, {TimestampRole, "timestamp"},
         {TimeTextRole, "timeText"}, {DayTextRole, "dayText"}, {EditedRole, "edited"}, {IsActionRole, "isAction"},
         {ReplyToRole, "replyTo"}, {ReplyPreviewRole, "replyPreview"}, {MentionsMeRole, "mentionsMe"},
-        {ReactionsRole, "reactions"}, {GroupStartRole, "groupStart"}, {DayStartRole, "dayStart"}, {IsOwnRole, "isOwn"}};
+        {ReactionsRole, "reactions"}, {GroupStartRole, "groupStart"}, {DayStartRole, "dayStart"}, {IsOwnRole, "isOwn"},
+        {AttachmentsRole, "attachments"}};
 }
 
 QVariant MessageListModel::data(const QModelIndex& index, int role) const
@@ -95,6 +96,8 @@ QVariant MessageListModel::data(const QModelIndex& index, int role) const
         return m.value(QStringLiteral("mentions_me")).toBool();
     case ReactionsRole:
         return m.value(QStringLiteral("reactions")).toArray().toVariantList();
+    case AttachmentsRole:
+        return m.value(QStringLiteral("attachments")).toArray().toVariantList();
     case GroupStartRole: {
         if (!older)
             return true;

@@ -87,6 +87,11 @@ class AppController : public QObject {
     Q_PROPERTY(QString typingText READ typingText NOTIFY typingChanged)
 
     // transient feedback
+    Q_PROPERTY(QVariantList pendingFiles READ pendingFiles NOTIFY attachmentsChanged)
+    Q_PROPERTY(QVariantList uploads READ uploads NOTIFY attachmentsChanged)
+    Q_PROPERTY(QVariantMap previews READ previews NOTIFY previewsChanged)
+    Q_PROPERTY(bool attachmentsSupported READ attachmentsSupported NOTIFY statusChanged)
+
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(bool noticeIsError READ noticeIsError NOTIFY noticeChanged)
 
@@ -171,6 +176,10 @@ public:
     QString replyToId() const { return m_replyTo; }
     QString replyToPreview() const { return m_replyPreview; }
     QString typingText() const { return m_typingText; }
+    QVariantList pendingFiles() const { return m_pendingFiles; }
+    QVariantList uploads() const;
+    QVariantMap previews() const { return m_previews; }
+    bool attachmentsSupported() const { return maxUploadBytes() > 0; }
     QString notice() const { return m_notice; }
     bool noticeIsError() const { return m_noticeError; }
 
@@ -250,7 +259,15 @@ public:
     Q_INVOKABLE void setNotification(const QString& key, bool enabled);
     Q_INVOKABLE void setWindowFocused(bool focused);
     Q_INVOKABLE void dismissNotice();
-    Q_INVOKABLE void showAttachmentNotice();
+
+    // ---- attachments (AttachmentActions.cpp)
+    Q_INVOKABLE void addFiles(const QVariantList& urls);
+    Q_INVOKABLE void removePendingFile(int index);
+    Q_INVOKABLE void requestPreview(const QString& attachmentId, const QString& filename, double size);
+    Q_INVOKABLE void saveAttachment(const QString& attachmentId, const QString& filename);
+    Q_INVOKABLE void openAttachment(const QString& attachmentId, const QString& filename, double size);
+    Q_INVOKABLE void cancelTransfer(const QString& transferId);
+    Q_INVOKABLE QString formatSize(double bytes) const;
 
     Q_INVOKABLE QString userName(const QString& userId) const;
     Q_INVOKABLE QString userColor(const QString& userId) const;
@@ -267,6 +284,8 @@ signals:
     void noticeChanged();
     void configChanged();
     void audioChanged();
+    void attachmentsChanged();
+    void previewsChanged();
     // QML hooks
     void composerRestore(const QString& text);
     void focusComposer();
@@ -296,8 +315,10 @@ private:
     QString roleColorFor(const QString& serverId, const QString& userId) const;
     QString renderMarkdown(const QString& content) const;
     void runCommand(const struct Command& cmd, const QString& original);
-    void sendMessage(
-        const QString& channelId, const QString& content, const QString& replyTo, bool action, const QString& original);
+    void sendMessage(const QString& channelId, const QString& content, const QString& replyTo, bool action,
+        const QString& original, const QVariantList& files = {});
+    double maxUploadBytes() const { return m_status.value(QStringLiteral("max_upload_bytes")).toDouble(); }
+    void onTransferProgress(const QJsonObject& data);
     void persistSelection();
 
     config::ClientConfig m_config;
@@ -337,6 +358,11 @@ private:
     QTimer m_typingTimer;
     qint64 m_lastTypingSent = 0;
     QString m_lastTypingChannel;
+
+    QVariantList m_pendingFiles; // {path, name, size} waiting in the composer
+    QHash<QString, QJsonObject> m_uploads; // transfer id -> progress
+    QVariantMap m_previews; // attachment id -> local file URL
+    QSet<QString> m_previewRequests;
 
     QVariantList m_inputDevices;
     QVariantList m_outputDevices;

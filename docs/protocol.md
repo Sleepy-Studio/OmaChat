@@ -18,8 +18,10 @@ protocol ([media.md](media.md)), and the local IPC protocol.
 1. Client sends `Hello{protocol_major, protocol_minor, client_version, capabilities}`.
 2. Server replies `HelloReply{…, instance_name, registration_open, media_udp_port}`
    or `ERROR_PROTOCOL_MISMATCH` (different major) and closes.
-   Current version: **1.0**. Minor versions negotiate through capability
-   strings (`resume`, `voice.opus`, `media.chacha20poly1305`, `search.fts`).
+   Current version: **1.1**. Minor versions negotiate through capability
+   strings (`resume`, `voice.opus`, `media.chacha20poly1305`, `search.fts`,
+   `attachments`). `HelloReply.max_upload_bytes` is 0 when a server takes no
+   attachments.
 3. Unauthenticated connections have 30 s to finish authenticating.
 
 ### Authentication and sessions
@@ -58,6 +60,25 @@ because JavaScript numbers cannot hold 64-bit integers.
 default 50, max 100, with `has_more`. `SearchMessages` uses SQLite FTS5;
 user input is quoted so it can never use FTS query syntax.
 
+### Attachments
+
+Files ride the control connection in chunks, so no extra port is needed.
+
+1. `BeginUpload{channel_id, filename, mime_type, size}` → `UploadTicket{attachment_id, chunk_size}`
+   (512 KiB). `ERROR_TOO_LARGE` above `files.max_upload_mb`.
+2. `UploadChunk{attachment_id, offset, data}` → `Ok`. `offset` must equal the
+   bytes received so far; a gap or overrun cancels the upload. Clients may
+   pipeline chunks (omachatd keeps four in flight).
+3. `FinishUpload{attachment_id, sha256?}` → `Attachment`. The attachment is
+   now pending: visible only to its uploader, purged after an hour.
+4. `SendMessage{…, attachment_ids}` (≤ 10) claims pending attachments of the
+   same author and channel. The text may then be empty.
+
+`CancelUpload` drops an upload in progress or a pending attachment. An
+upload in progress dies with its connection. `Download{attachment_id,
+offset, length}` → `FileChunk{offset, data, total_size}` for anyone who may
+read the message's channel history.
+
 ### Rate limits (per connection unless noted)
 
 | Bucket | Burst / refill |
@@ -68,6 +89,8 @@ user input is quoted so it can never use FTS query syntax.
 | presence | 5 / 0.2 per s |
 | invites create/join | 5 / 0.1 per s |
 | history & search | 30 / 5 per s |
+| upload starts | 10 / 1 per s |
+| upload and download chunks | 64 / 40 per s |
 | login (per IP) · (per username) | 10 per min · 5 per min |
 | registration (per IP) | 5 per 10 min |
 | connections per IP | `limits.max_connections_per_ip` (16) |
@@ -95,7 +118,7 @@ it without code generation.
 Error codes: `BadRequest UnknownMethod NotConnected NetworkError
 AuthenticationError PermissionDenied NotFound Conflict RateLimited
 ProtocolMismatch CertificateError ServerUnavailable MediaDeviceUnavailable
-StorageError Timeout Internal`.
+StorageError Timeout TooLarge Internal`.
 
 ### Methods
 
@@ -107,7 +130,8 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.logout`, `account.remove`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
 | servers | `server.list`, `server.create`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
 | channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open` |
-| messages | `message.history`, `message.send`, `message.edit`, `message.delete`, `message.search`, `message.react`, `typing`, `presence.set` |
+| messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search`, `message.react`, `typing`, `presence.set` |
+| attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?}` → `{path, cached}`, `transfer.list`, `transfer.cancel {id}` |
 | voice | `voice.join`, `voice.leave`, `voice.mute`, `voice.unmute`, `voice.toggle_mute`, `voice.deafen`, `voice.undeafen`, `voice.toggle_deafen`, `voice.mode`, `voice.stats`, `ptt.begin`, `ptt.end` |
 | audio | `audio.devices`, `audio.settings`, `audio.set`, `audio.user_volume` |
 | moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update`, `role.delete`, `role.assign`, `override.set`, `override.list` |
@@ -123,7 +147,13 @@ disconnects.
 `typing`, `channel.created/updated/deleted/muted`, `member.joined/updated/left`,
 `server.updated/removed`, `user.updated`, `presence`, `role.updated/deleted`,
 `voice.state`, `voice.speaking`, `voice.self`, `voice.ptt`, `voice.error`,
-`audio.devices`, `ui.navigate`.
+`audio.devices`, `ui.navigate`, `transfer.progress` (`{id, direction,
+name, transferred, total}` plus `complete` or `error` at the end).
+
+`message.send` with `files` (absolute paths, read by the daemon) and
+`attachment.download` answer when the transfer ends; clients should call
+them without a timeout. Transfers belong to the daemon, so closing the GUI
+does not cancel them.
 
 ### Status JSON (stable contract: `omachatctl status --json`)
 
@@ -136,6 +166,7 @@ disconnects.
   "reconnect_in_ms": 0,
   "account": {"id": "1", "host": "chat.example.org", "port": 6473, "username": "howie"},
   "instance": "OmaChat",
+  "max_upload_bytes": 52428800,
   "user": {"id": "2301…", "username": "howie", "display_name": "Howie", "status": "online"},
   "server": {"id": "2301…", "name": "Sleepy Studio"},
   "voice": {"joined": true, "pending": false, "channel_id": "2301…", "channel": "Development",

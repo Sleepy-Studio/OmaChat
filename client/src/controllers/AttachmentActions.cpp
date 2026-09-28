@@ -1,0 +1,174 @@
+// Composer attachments, upload progress, image previews and saving files.
+// The daemon does all transfers; this file only keeps the UI's view of them.
+
+#include "controllers/AppController.hpp"
+
+#include <QDesktopServices>
+#include <QDir>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QMimeDatabase>
+#include <QUrl>
+
+namespace omachat::client {
+
+namespace {
+
+constexpr int kMaxFilesPerMessage = 10;
+// Previews download automatically, so keep them to what a glance needs.
+constexpr double kMaxPreviewBytes = 10.0 * 1024 * 1024;
+
+QString localPath(const QVariant& v)
+{
+    QUrl url = v.toUrl();
+    if (!url.isValid() || url.scheme().isEmpty())
+        url = QUrl::fromUserInput(v.toString());
+    return url.isLocalFile() ? url.toLocalFile() : QString();
+}
+
+// Handing a received file to the desktop is only done for types whose
+// default handlers are viewers; anything else (scripts, .desktop entries,
+// archives) is saved instead so opening it is a deliberate user action.
+bool safeToOpen(const QString& path)
+{
+    const QMimeType type = QMimeDatabase().mimeTypeForFile(path, QMimeDatabase::MatchContent);
+    const QString name = type.name();
+    return name.startsWith(u"image/") || name.startsWith(u"video/") || name.startsWith(u"audio/")
+        || name == u"application/pdf" || name == u"text/plain";
+}
+
+} // namespace
+
+QString AppController::formatSize(double bytes) const
+{
+    if (bytes < 1024)
+        return tr("%1 B").arg(bytes);
+    if (bytes < 1024 * 1024)
+        return tr("%1 KB").arg(bytes / 1024, 0, 'f', 1);
+    return tr("%1 MB").arg(bytes / (1024 * 1024), 0, 'f', 1);
+}
+
+QVariantList AppController::uploads() const
+{
+    QVariantList out;
+    for (const auto& t : m_uploads)
+        out.append(t.toVariantMap());
+    return out;
+}
+
+void AppController::addFiles(const QVariantList& urls)
+{
+    if (!attachmentsSupported()) {
+        showNotice(tr("This server does not accept attachments."), true);
+        return;
+    }
+    const double limit = maxUploadBytes();
+    for (const auto& v : urls) {
+        const QString path = localPath(v);
+        const QFileInfo info(path);
+        if (path.isEmpty() || !info.isFile()) {
+            showNotice(tr("Only local files can be attached."), true);
+            continue;
+        }
+        if (info.size() == 0) {
+            showNotice(tr("%1 is empty.").arg(info.fileName()), true);
+            continue;
+        }
+        if (static_cast<double>(info.size()) > limit) {
+            showNotice(tr("%1 is larger than this server's %2 limit.").arg(info.fileName(), formatSize(limit)), true);
+            continue;
+        }
+        const bool duplicate = std::ranges::any_of(m_pendingFiles,
+            [&](const QVariant& f) { return f.toMap().value(QStringLiteral("path")) == info.absoluteFilePath(); });
+        if (duplicate)
+            continue;
+        if (m_pendingFiles.size() >= kMaxFilesPerMessage) {
+            showNotice(tr("A message can carry at most %1 files.").arg(kMaxFilesPerMessage), true);
+            break;
+        }
+        m_pendingFiles.append(QVariantMap{{"path", info.absoluteFilePath()}, {"name", info.fileName()},
+            {"size", static_cast<double>(info.size())}});
+    }
+    emit attachmentsChanged();
+    emit focusComposer();
+}
+
+void AppController::removePendingFile(int index)
+{
+    if (index < 0 || index >= m_pendingFiles.size())
+        return;
+    m_pendingFiles.removeAt(index);
+    emit attachmentsChanged();
+}
+
+void AppController::onTransferProgress(const QJsonObject& data)
+{
+    if (data.value(QStringLiteral("direction")).toString() != u"upload")
+        return;
+    const QString id = data.value(QStringLiteral("id")).toString();
+    if (data.value(QStringLiteral("complete")).toBool() || data.contains(QStringLiteral("error")))
+        m_uploads.remove(id);
+    else
+        m_uploads.insert(id, data);
+    emit attachmentsChanged();
+}
+
+void AppController::cancelTransfer(const QString& transferId)
+{
+    call(QStringLiteral("transfer.cancel"), {{"id", transferId}});
+}
+
+void AppController::requestPreview(const QString& attachmentId, const QString& filename, double size)
+{
+    if (size > kMaxPreviewBytes || m_previews.contains(attachmentId) || m_previewRequests.contains(attachmentId))
+        return;
+    m_previewRequests.insert(attachmentId); // one attempt per session, even if it fails
+    m_link.request(
+        QStringLiteral("attachment.download"),
+        {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}, {"size", size}},
+        [this, attachmentId](const ipc::Reply& r) {
+            if (!r.ok)
+                return;
+            m_previews.insert(attachmentId, QUrl::fromLocalFile(r.result.value(QStringLiteral("path")).toString()));
+            emit previewsChanged();
+        },
+        0);
+}
+
+void AppController::saveAttachment(const QString& attachmentId, const QString& filename)
+{
+    showNotice(tr("Downloading %1…").arg(filename));
+    m_link.request(
+        QStringLiteral("attachment.download"), {{"attachment", attachmentId}, {"filename", filename}},
+        [this](const ipc::Reply& r) {
+            if (!r.ok) {
+                showNotice(tr("Download failed: %1").arg(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage),
+                    true);
+                return;
+            }
+            const QString path = r.result.value(QStringLiteral("path")).toString();
+            showNotice(tr("Saved to %1").arg(QDir::toNativeSeparators(path)));
+        },
+        0);
+}
+
+void AppController::openAttachment(const QString& attachmentId, const QString& filename, double size)
+{
+    m_link.request(
+        QStringLiteral("attachment.download"),
+        {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}, {"size", size}},
+        [this, attachmentId, filename](const ipc::Reply& r) {
+            if (!r.ok) {
+                showNotice(tr("Cannot open %1: %2").arg(filename, r.errorMessage), true);
+                return;
+            }
+            const QString path = r.result.value(QStringLiteral("path")).toString();
+            if (safeToOpen(path))
+                QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+            else
+                saveAttachment(attachmentId, filename);
+        },
+        0);
+}
+
+} // namespace omachat::client

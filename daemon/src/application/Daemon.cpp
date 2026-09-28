@@ -5,6 +5,8 @@
 #include "omachat/core/Paths.hpp"
 #include "omachat/core/Version.hpp"
 
+#include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 
@@ -26,6 +28,20 @@ Daemon::~Daemon()
     shutdown();
 }
 
+void Daemon::pruneAttachmentCache()
+{
+    // Cached copies can always be fetched again; drop any older than a month.
+    const QDir cache(paths::cacheDir() + QStringLiteral("/attachments"));
+    const QDateTime cutoff = QDateTime::currentDateTime().addDays(-30);
+    int removed = 0;
+    for (const QFileInfo& entry : cache.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (entry.lastModified() < cutoff && QDir(entry.absoluteFilePath()).removeRecursively())
+            ++removed;
+    }
+    if (removed > 0)
+        OMA_INFO("daemon", "pruned attachment cache", {"entries", removed});
+}
+
 bool Daemon::start(QString* error)
 {
     QString configError;
@@ -40,6 +56,7 @@ bool Daemon::start(QString* error)
     paths::ensurePrivateDir(QFileInfo(m_options.databasePath).absolutePath());
     if (!m_store.open(m_options.databasePath, error))
         return false;
+    pruneAttachmentCache();
 
     if (m_options.memoryCredentials)
         m_credentials = std::make_unique<MemoryCredentialStore>();

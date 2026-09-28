@@ -98,6 +98,8 @@ omachatctl status --json
 omachatctl server list
 omachatctl channel list
 omachatctl message send general "hello"
+omachatctl message send general "logs" --attach ./crash.log --attach ./shot.png
+omachatctl attachment get ATTACHMENT_ID --output ~/Downloads
 omachatctl voice join General
 omachatctl mute | unmute | deafen | undeafen
 omachatctl ptt begin | ptt end
@@ -207,7 +209,9 @@ DMs, presence, typing, roles/overrides/kick/ban/server-mute enforced
 server-side, voice (verified end-to-end through the relay with a synthetic
 device clock, and with real PipeWire devices on one machine), mute, deafen,
 VAD, push-to-talk, reconnect after server restart with automatic voice
-rejoin, CLI with JSON, desktop notifications, Omarchy bar widget.
+rejoin, file attachments (picker, drag and drop, inline image previews,
+uploads that survive closing the window), CLI with JSON, desktop
+notifications, Omarchy bar widget.
 
 Not done yet — be aware:
 
@@ -215,7 +219,6 @@ Not done yet — be aware:
   mouth-to-ear latency on real hardware has not been measured.
 - **Screen sharing** (portal + PipeWire + H.264) is not implemented; the
   media protocol reserves a video packet type for it.
-- **File attachments** are not implemented (the composer says so).
 - Group DMs, custom role/permission editing UI (roles work via
   `omachatctl role …`), server-wide search.
 - One active account at a time in the daemon (several can be saved).

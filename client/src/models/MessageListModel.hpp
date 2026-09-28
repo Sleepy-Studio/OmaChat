@@ -38,6 +38,7 @@ public:
         GroupStartRole,
         DayStartRole,
         IsOwnRole,
+        AttachmentsRole,
     };
 
     struct Hooks {

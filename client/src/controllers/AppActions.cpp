@@ -176,25 +176,37 @@ void AppController::toggleCategory(const QString& id)
 
 // -------------------------------------------------------------- messages
 
-void AppController::sendMessage(
-    const QString& channelId, const QString& content, const QString& replyTo, bool action, const QString& original)
+void AppController::sendMessage(const QString& channelId, const QString& content, const QString& replyTo, bool action,
+    const QString& original, const QVariantList& files)
 {
     QJsonObject params{{"channel", channelId}, {"content", content}, {"action", action}};
     if (!replyTo.isEmpty())
         params.insert(QStringLiteral("reply_to"), replyTo);
-    m_link.request(QStringLiteral("message.send"), params, [this, original](const ipc::Reply& r) {
-        if (!r.ok) {
-            showNotice(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage, true);
-            emit composerRestore(original); // never lose what the user typed
-        }
-    });
+    QJsonArray paths;
+    for (const auto& f : files)
+        paths.append(f.toMap().value(QStringLiteral("path")).toString());
+    if (!paths.isEmpty())
+        params.insert(QStringLiteral("files"), paths);
+    m_link.request(
+        QStringLiteral("message.send"), params,
+        [this, original, files](const ipc::Reply& r) {
+            if (!r.ok) {
+                showNotice(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage, true);
+                emit composerRestore(original); // never lose what the user typed
+                if (!files.isEmpty() && m_pendingFiles.isEmpty()) {
+                    m_pendingFiles = files; // nor what they attached
+                    emit attachmentsChanged();
+                }
+            }
+        },
+        files.isEmpty() ? 20000 : 0); // uploads report progress through events
 }
 
 bool AppController::sendComposer(const QString& text)
 {
-    if (text.trimmed().isEmpty())
+    if (text.trimmed().isEmpty() && m_pendingFiles.isEmpty())
         return false;
-    if (auto cmd = CommandParser::parse(text)) {
+    if (auto cmd = !text.trimmed().isEmpty() ? CommandParser::parse(text) : std::nullopt) {
         runCommand(*cmd, text);
         return true;
     }
@@ -206,7 +218,10 @@ bool AppController::sendComposer(const QString& text)
         showNotice(tr("You do not have permission to send messages here."), true);
         return false;
     }
-    sendMessage(m_selectedChannel, CommandParser::unescape(text), m_replyTo, false, text);
+    const QVariantList files = std::exchange(m_pendingFiles, {});
+    if (!files.isEmpty())
+        emit attachmentsChanged();
+    sendMessage(m_selectedChannel, CommandParser::unescape(text), m_replyTo, false, text, files);
     cancelReply();
     m_lastTypingSent = 0;
     return true;
@@ -749,15 +764,6 @@ void AppController::setWindowFocused(bool focused)
     if (focused)
         markRead(m_selectedChannel);
     persistSelection();
-}
-
-} // namespace omachat::client
-
-namespace omachat::client {
-
-void AppController::showAttachmentNotice()
-{
-    showNotice(tr("File attachments are not available in this release yet — they are planned for OmaChat 0.2."), true);
 }
 
 } // namespace omachat::client

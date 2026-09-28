@@ -266,6 +266,10 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         applyStatus(data);
         return;
     }
+    if (name == u"transfer.progress") {
+        onTransferProgress(data);
+        return;
+    }
     if (name == u"state.reset") {
         loadSnapshot();
         return;

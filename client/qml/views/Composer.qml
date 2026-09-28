@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import OmaChat
 
@@ -31,7 +32,7 @@ Item {
 
     function submit() {
         const text = input.text
-        if (text.trim().length === 0)
+        if (text.trim().length === 0 && (composer.editingId.length > 0 || App.pendingFiles.length === 0))
             return
         if (composer.editingId.length > 0) {
             App.editMessage(composer.editingId, text)
@@ -74,6 +75,13 @@ Item {
         }
     }
 
+    FileDialog {
+        id: filePicker
+        title: qsTr("Attach files")
+        fileMode: FileDialog.OpenFiles
+        onAccepted: App.addFiles(selectedFiles)
+    }
+
     ColumnLayout {
         id: column
         anchors.left: parent.left
@@ -111,6 +119,94 @@ Item {
                     iconName: "x"
                     tip: qsTr("Cancel")
                     onClicked: composer.editingId.length > 0 ? composer.finishEdit() : App.cancelReply()
+                }
+            }
+        }
+
+        // Files waiting to go out with the next message
+        Flow {
+            visible: App.pendingFiles.length > 0
+            Layout.fillWidth: true
+            Layout.bottomMargin: Theme.px(6)
+            spacing: Theme.px(6)
+            Repeater {
+                model: App.pendingFiles
+                delegate: Rectangle {
+                    required property var modelData
+                    required property int index
+                    implicitHeight: Theme.px(30)
+                    implicitWidth: Math.min(chipRow.implicitWidth + Theme.px(12), Theme.px(280))
+                    radius: Theme.px(6)
+                    color: Theme.surface
+                    border.color: Theme.border
+                    Row {
+                        id: chipRow
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: Theme.px(8)
+                        spacing: Theme.px(6)
+                        Icon { name: "file"; size: Theme.px(14); anchors.verticalCenter: parent.verticalCenter }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, Theme.px(170))
+                            elide: Text.ElideMiddle
+                            color: Theme.text
+                            font.pixelSize: Theme.px(12)
+                            text: modelData.name
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: Theme.textFaint
+                            font.pixelSize: Theme.px(11)
+                            text: App.formatSize(modelData.size)
+                        }
+                        IconButton {
+                            anchors.verticalCenter: parent.verticalCenter
+                            implicitWidth: Theme.px(20)
+                            implicitHeight: Theme.px(20)
+                            iconSize: Theme.px(12)
+                            iconName: "x"
+                            tip: qsTr("Remove %1").arg(modelData.name)
+                            onClicked: App.removePendingFile(index)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Uploads in flight (they continue even if this window closes)
+        Repeater {
+            model: App.uploads
+            delegate: RowLayout {
+                required property var modelData
+                Layout.fillWidth: true
+                Layout.bottomMargin: Theme.px(4)
+                spacing: Theme.px(8)
+                Text {
+                    Layout.preferredWidth: Theme.px(180)
+                    elide: Text.ElideMiddle
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(12)
+                    text: qsTr("Uploading %1").arg(modelData.name)
+                }
+                ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: Math.max(1, modelData.total)
+                    value: modelData.transferred
+                }
+                Text {
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.px(11)
+                    text: App.formatSize(modelData.transferred) + " / " + App.formatSize(modelData.total)
+                }
+                IconButton {
+                    implicitWidth: Theme.px(22)
+                    implicitHeight: Theme.px(22)
+                    iconSize: Theme.px(12)
+                    iconName: "x"
+                    tip: qsTr("Cancel upload")
+                    onClicked: App.cancelTransfer(modelData.id)
                 }
             }
         }
@@ -181,17 +277,27 @@ Item {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: Theme.px(4)
-                iconName: "plus"
-                tip: qsTr("Attach a file")
-                enabled: App.canSend
-                onClicked: App.showAttachmentNotice()
+                iconName: "paperclip"
+                tip: App.attachmentsSupported ? qsTr("Attach files") : qsTr("This server does not accept attachments")
+                enabled: App.canSend && App.attachmentsSupported && composer.editingId.length === 0
+                onClicked: filePicker.open()
             }
 
-            // Drag & drop: attachments arrive in OmaChat 0.2; say so plainly.
             DropArea {
                 anchors.fill: parent
-                onEntered: drag => drag.accept(Qt.CopyAction)
-                onDropped: drop => App.showAttachmentNotice()
+                enabled: App.canSend && composer.editingId.length === 0
+                onEntered: drag => {
+                    if (drag.hasUrls)
+                        drag.accept(Qt.CopyAction)
+                    else
+                        drag.accepted = false
+                }
+                onDropped: drop => {
+                    if (drop.hasUrls) {
+                        App.addFiles(drop.urls)
+                        drop.accept(Qt.CopyAction)
+                    }
+                }
                 Rectangle {
                     anchors.fill: parent
                     visible: parent.containsDrag

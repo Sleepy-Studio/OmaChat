@@ -22,6 +22,7 @@ qt_add_qml_module(omachat
         src/application/DaemonLink.hpp src/application/DaemonLink.cpp
         src/controllers/AppController.hpp src/controllers/AppController.cpp
         src/controllers/AppActions.cpp
+        src/controllers/AttachmentActions.cpp
         src/models/RowListModel.hpp src/models/RowListModel.cpp
         src/models/MessageListModel.hpp src/models/MessageListModel.cpp
         src/platform/ThemeProvider.hpp src/platform/ThemeProvider.cpp
@@ -47,6 +48,7 @@ qt_add_qml_module(omachat
         qml/views/ChannelSidebar.qml
         qml/views/ChatPane.qml
         qml/views/MessageDelegate.qml
+        qml/views/AttachmentView.qml
         qml/views/Composer.qml
         qml/views/MemberList.qml
         qml/views/BottomBar.qml
@@ -68,6 +70,7 @@ qt_add_qml_module(omachat
         icons/chevron-down.svg icons/chevron-right.svg icons/hangup.svg icons/message.svg
         icons/smile.svg icons/link.svg icons/logout.svg icons/bell-off.svg icons/users.svg
         icons/server.svg icons/alert.svg icons/shield.svg icons/crown.svg
+        icons/paperclip.svg icons/file.svg icons/download.svg
 )
 
 omachat_set_warnings(omachat)

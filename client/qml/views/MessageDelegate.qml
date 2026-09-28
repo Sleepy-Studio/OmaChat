@@ -23,6 +23,7 @@ Item {
     required property string replyPreview
     required property bool mentionsMe
     required property var reactions
+    required property var attachments
     required property bool groupStart
     required property bool dayStart
     required property bool isOwn
@@ -156,6 +157,7 @@ Item {
 
                         TextEdit {
                             id: text
+                            visible: root.content.length > 0 || root.isAction
                             Layout.fillWidth: true
                             readOnly: true
                             selectByMouse: true
@@ -176,6 +178,22 @@ Item {
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: root.ListView.view.openMenu(root)
+                            }
+                        }
+
+                        // Attachments: images preview inline, other files are cards.
+                        Flow {
+                            visible: root.attachments && root.attachments.length > 0
+                            Layout.fillWidth: true
+                            Layout.topMargin: Theme.px(2)
+                            spacing: Theme.px(6)
+                            Repeater {
+                                model: root.attachments
+                                delegate: AttachmentView {
+                                    required property var modelData
+                                    attachment: modelData
+                                    maxWidth: body.width - Theme.px(46)
+                                }
                             }
                         }
 
