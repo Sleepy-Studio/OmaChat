@@ -4,8 +4,8 @@
 #include "omachat/ipc/IpcMessage.hpp"
 
 #include <QCryptographicHash>
-#include <QDesktopServices>
 #include <QHostAddress>
+#include <QProcess>
 #include <QRandomGenerator>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -120,8 +120,12 @@ void OAuthLoginFlow::beginBrowserFlow()
     q.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("S256"));
     url.setQuery(q);
 
-    if (!QDesktopServices::openUrl(url)) {
-        finish(false, e::Internal, QStringLiteral("could not open your browser"));
+    // QDesktopServices::openUrl needs a QGuiApplication to reliably shell
+    // out on Linux; omachatd is a QCoreApplication (headless daemon), so it
+    // can silently refuse even with a perfectly good desktop session
+    // present. Launching xdg-open directly has no such requirement.
+    if (!QProcess::startDetached(QStringLiteral("xdg-open"), {url.toString()})) {
+        finish(false, e::Internal, QStringLiteral("could not open your browser (is xdg-utils installed?)"));
         return;
     }
 

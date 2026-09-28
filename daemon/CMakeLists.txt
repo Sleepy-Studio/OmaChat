@@ -1,4 +1,4 @@
-find_package(Qt6 REQUIRED COMPONENTS DBus Gui)
+find_package(Qt6 REQUIRED COMPONENTS DBus)
 find_package(Qt6Keychain REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
@@ -34,7 +34,7 @@ add_library(omachat_daemon_core STATIC
 omachat_set_warnings(omachat_daemon_core)
 target_include_directories(omachat_daemon_core PUBLIC src)
 target_link_libraries(omachat_daemon_core
-    PUBLIC omachat_shared Qt6::Core Qt6::Network Qt6::Sql Qt6::DBus Qt6::Gui
+    PUBLIC omachat_shared Qt6::Core Qt6::Network Qt6::Sql Qt6::DBus
            qt6keychain PkgConfig::PIPEWIRE PkgConfig::OPUS PkgConfig::FFMPEG)
 if(RNNOISE_FOUND)
     target_link_libraries(omachat_daemon_core PUBLIC PkgConfig::RNNOISE)
