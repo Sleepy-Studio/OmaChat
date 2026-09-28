@@ -27,9 +27,19 @@ restart the container.
 Environment variables: `OMACHAT_NAME`, `OMACHAT_HOSTNAME`, `OMACHAT_PORT`
 (6473), `OMACHAT_MEDIA_PORT` (6474), `OMACHAT_REGISTRATION_OPEN` (true),
 `OMACHAT_NODE_ID` (1), `OMACHAT_MAX_UPLOAD_MB` (50), `OMACHAT_LOG_LEVEL`
-(info). To use a real certificate instead of the generated self-signed one,
-mount it at `/var/lib/omachat/cert.pem` and `/var/lib/omachat/key.pem`
-before first start.
+(info), and the OAuth pairs below. To use a real certificate instead of the
+generated self-signed one, mount it at `/var/lib/omachat/cert.pem` and
+`/var/lib/omachat/key.pem` before first start.
+
+**Sign in with Discord/GitHub/Google**: set
+`OMACHAT_OAUTH_DISCORD_CLIENT_ID`/`_SECRET`,
+`OMACHAT_OAUTH_GITHUB_CLIENT_ID`/`_SECRET`, and/or
+`OMACHAT_OAUTH_GOOGLE_CLIENT_ID`/`_SECRET`. A provider is only enabled once
+both its id and secret are set; unlike the rest of `server.toml`, these are
+appended to an *existing* config too on container start (so turning one on
+later, or on a volume from before this existed, doesn't need a manual edit).
+See [Optional: sign in with Discord, GitHub or Google](#optional-sign-in-with-discord-github-or-google)
+below for how to register each provider's app.
 
 Skip to [Firewall](#4-firewall) below — TLS and config are already done.
 

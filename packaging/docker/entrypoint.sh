@@ -19,6 +19,15 @@ KEY_PATH="$DATA_DIR/key.pem"
 : "${OMACHAT_NODE_ID:=1}"
 : "${OMACHAT_MAX_UPLOAD_MB:=50}"
 : "${OMACHAT_LOG_LEVEL:=info}"
+# OAuth sign-in: all optional and unset by default. Each provider needs both
+# its client id and secret to do anything; see server.toml.example for where
+# to register an app with each one.
+: "${OMACHAT_OAUTH_DISCORD_CLIENT_ID:=}"
+: "${OMACHAT_OAUTH_DISCORD_CLIENT_SECRET:=}"
+: "${OMACHAT_OAUTH_GITHUB_CLIENT_ID:=}"
+: "${OMACHAT_OAUTH_GITHUB_CLIENT_SECRET:=}"
+: "${OMACHAT_OAUTH_GOOGLE_CLIENT_ID:=}"
+: "${OMACHAT_OAUTH_GOOGLE_CLIENT_SECRET:=}"
 
 if [[ ! -f "$CONFIG_PATH" ]]; then
     echo "omachat-entrypoint: writing $CONFIG_PATH (first run)"
@@ -52,6 +61,27 @@ max_upload_mb = $OMACHAT_MAX_UPLOAD_MB
 level = "$OMACHAT_LOG_LEVEL"
 EOF
 fi
+
+# Appends an [oauth.PROVIDER] section the first time credentials for it are
+# supplied, even to a config.toml left over from before this existed or from
+# an earlier run without them set — but never touches one already there, so
+# hand edits (or rotating just the secret by editing the file directly)
+# survive a restart.
+add_oauth_section() {
+    local provider="$1" client_id="$2" client_secret="$3"
+    [[ -z "$client_id" || -z "$client_secret" ]] && return 0
+    grep -q "^\[oauth\.$provider\]" "$CONFIG_PATH" && return 0
+    echo "omachat-entrypoint: enabling OAuth sign-in for $provider"
+    cat >>"$CONFIG_PATH" <<EOF
+
+[oauth.$provider]
+client_id = "$client_id"
+client_secret = "$client_secret"
+EOF
+}
+add_oauth_section discord "$OMACHAT_OAUTH_DISCORD_CLIENT_ID" "$OMACHAT_OAUTH_DISCORD_CLIENT_SECRET"
+add_oauth_section github "$OMACHAT_OAUTH_GITHUB_CLIENT_ID" "$OMACHAT_OAUTH_GITHUB_CLIENT_SECRET"
+add_oauth_section google "$OMACHAT_OAUTH_GOOGLE_CLIENT_ID" "$OMACHAT_OAUTH_GOOGLE_CLIENT_SECRET"
 
 if [[ ! -f "$CERT_PATH" || ! -f "$KEY_PATH" ]]; then
     echo "omachat-entrypoint: generating a self-signed certificate for '$OMACHAT_HOSTNAME'"

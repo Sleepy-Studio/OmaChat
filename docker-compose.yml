@@ -20,6 +20,16 @@ services:
       OMACHAT_NAME: "OmaChat"
       OMACHAT_HOSTNAME: "localhost" # change to your real domain or IP
       OMACHAT_REGISTRATION_OPEN: "true"
+      # Optional: "sign in with Discord/GitHub/Google". Leave a provider's
+      # id/secret empty (or unset) to keep it disabled; only supplying both
+      # enables it. Register the app as an "installed app"/"loopback
+      # redirect" type on the provider's side — see docs/self-hosting.md.
+      # OMACHAT_OAUTH_DISCORD_CLIENT_ID: ""
+      # OMACHAT_OAUTH_DISCORD_CLIENT_SECRET: ""
+      # OMACHAT_OAUTH_GITHUB_CLIENT_ID: ""
+      # OMACHAT_OAUTH_GITHUB_CLIENT_SECRET: ""
+      # OMACHAT_OAUTH_GOOGLE_CLIENT_ID: ""
+      # OMACHAT_OAUTH_GOOGLE_CLIENT_SECRET: ""
 
 volumes:
   omachat-data:
