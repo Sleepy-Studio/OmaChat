@@ -10,6 +10,8 @@ using namespace omachat::permissions;
 
 namespace {
 
+constexpr int kMaxAttachmentsPerMessage = 10;
+
 bool isMessageChannel(const ChannelRecord& c)
 {
     return c.kind == ChannelKind::Text || c.kind == ChannelKind::Dm || c.kind == ChannelKind::GroupDm;
@@ -51,12 +53,29 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot send messages here"));
         return;
     }
-    if (m.attachment_ids_size() > 0) {
-        replyError(
-            s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("attachments are not supported by this server yet"));
+    std::vector<AttachmentRecord> attachments;
+    if (m.attachment_ids_size() > kMaxAttachmentsPerMessage) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST,
+            QStringLiteral("at most %1 attachments per message").arg(kMaxAttachmentsPerMessage));
         return;
     }
-    const auto content = validation::messageContent(QString::fromStdString(m.content()));
+    for (Id aid : m.attachment_ids()) {
+        auto a = m_store.attachment(aid);
+        if (!a || a->uploaderId != s.userId || a->channelId != c->id || a->messageId != 0
+            || std::ranges::any_of(attachments, [aid](const auto& x) { return x.id == aid; })) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("attachment is not available to send here"));
+            return;
+        }
+        attachments.push_back(std::move(*a));
+    }
+    if (!attachments.empty() && !m_state.can(c->id, s.userId, AttachFiles)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot attach files here"));
+        return;
+    }
+    // A message may be only attachments; otherwise it needs text.
+    auto content = validation::messageContent(QString::fromStdString(m.content()));
+    if (!content && !attachments.empty() && QString::fromStdString(m.content()).trimmed().isEmpty())
+        content = QString();
     if (!content) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST,
             QStringLiteral("messages must be 1-%1 characters").arg(validation::kMaxMessageLength));
@@ -74,6 +93,7 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
             msg.replyTo = parent->id;
     }
     msg.mentions = extractMentions(c->id, msg.content);
+    msg.attachments = std::move(attachments);
     if (!m_store.insertMessage(msg)) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not store message"));
         return;
@@ -100,7 +120,9 @@ void ChatServer::handleEditMessage(Session& s, std::uint64_t rid, const proto::E
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you can only edit your own messages"));
         return;
     }
-    const auto content = validation::messageContent(QString::fromStdString(m.content()));
+    auto content = validation::messageContent(QString::fromStdString(m.content()));
+    if (!content && !msg->attachments.empty() && QString::fromStdString(m.content()).trimmed().isEmpty())
+        content = QString();
     if (!content) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST,
             QStringLiteral("messages must be 1-%1 characters").arg(validation::kMaxMessageLength));
@@ -136,6 +158,10 @@ void ChatServer::handleDeleteMessage(Session& s, std::uint64_t rid, const proto:
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not delete message"));
         return;
     }
+    std::vector<Id> files;
+    for (const auto& a : msg->attachments)
+        files.push_back(a.id);
+    removeAttachmentFiles(files);
     proto::Event e;
     auto* d = e.mutable_message_delete();
     d->set_channel_id(msg->channelId);

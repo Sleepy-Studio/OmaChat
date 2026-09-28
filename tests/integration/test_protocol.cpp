@@ -4,6 +4,8 @@
 #include "Harness.hpp"
 #include "omachat/core/Permissions.hpp"
 
+#include <QCryptographicHash>
+
 #include <gtest/gtest.h>
 
 using namespace omachat;
@@ -427,4 +429,196 @@ TEST_F(Fixture, DirectMessagesRequireSharedServer)
     spam.mutable_open_dm()->set_user_id(aliceId);
     EXPECT_EQ(stranger->call(spam)->error().code(), proto::ERROR_PERMISSION_DENIED);
     EXPECT_EQ(send(*stranger, dm->channel().id(), "let me in").error().code(), proto::ERROR_NOT_FOUND);
+}
+
+namespace {
+
+proto::Envelope beginUpload(RawClient& c, std::uint64_t channel, const std::string& name, std::uint64_t size)
+{
+    proto::Envelope env;
+    auto* b = env.mutable_begin_upload();
+    b->set_channel_id(channel);
+    b->set_filename(name);
+    b->set_mime_type("text/plain; charset=utf-8");
+    b->set_size(size);
+    return c.call(env).value_or(proto::Envelope{});
+}
+
+proto::Envelope uploadChunk(RawClient& c, std::uint64_t id, std::uint64_t offset, const std::string& data)
+{
+    proto::Envelope env;
+    auto* ch = env.mutable_upload_chunk();
+    ch->set_attachment_id(id);
+    ch->set_offset(offset);
+    ch->set_data(data);
+    return c.call(env).value_or(proto::Envelope{});
+}
+
+proto::Envelope finishUpload(RawClient& c, std::uint64_t id, const std::string& sha256 = {})
+{
+    proto::Envelope env;
+    env.mutable_finish_upload()->set_attachment_id(id);
+    env.mutable_finish_upload()->set_sha256(sha256);
+    return c.call(env).value_or(proto::Envelope{});
+}
+
+proto::Envelope download(RawClient& c, std::uint64_t id, std::uint64_t offset, std::uint32_t length = 0)
+{
+    proto::Envelope env;
+    env.mutable_download()->set_attachment_id(id);
+    env.mutable_download()->set_offset(offset);
+    env.mutable_download()->set_length(length);
+    return c.call(env).value_or(proto::Envelope{});
+}
+
+std::string sha256(const std::string& data)
+{
+    return QCryptographicHash::hash(QByteArrayView(data.data(), static_cast<qsizetype>(data.size())),
+        QCryptographicHash::Sha256)
+        .toStdString();
+}
+
+} // namespace
+
+TEST_F(Fixture, AttachmentsUploadSendAndDownload)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    const auto sid = createServer(*alice, "Files");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+    const auto general = channelNamed(sync(*alice), "general", proto::CHANNEL_TYPE_TEXT);
+
+    // Larger than one chunk so the multi-chunk path is exercised.
+    std::string data;
+    for (int i = 0; data.size() < 700 * 1024; ++i)
+        data += "line " + std::to_string(i) + "\n";
+
+    const auto ticket = beginUpload(*alice, general, "../../etc/notes.txt", data.size());
+    ASSERT_TRUE(ticket.has_upload_ticket()) << ticket.error().message();
+    const auto id = ticket.upload_ticket().attachment_id();
+    const std::size_t chunk = ticket.upload_ticket().chunk_size();
+    ASSERT_GT(chunk, 0u);
+    for (std::size_t off = 0; off < data.size(); off += chunk)
+        ASSERT_TRUE(uploadChunk(*alice, id, off, data.substr(off, chunk)).has_ok());
+    const auto done = finishUpload(*alice, id, sha256(data));
+    ASSERT_TRUE(done.has_attachment()) << done.error().message();
+    EXPECT_EQ(done.attachment().filename(), ".._.._etc_notes.txt"); // never a path
+    EXPECT_EQ(done.attachment().mime_type(), "text/plain");
+    EXPECT_EQ(done.attachment().size(), data.size());
+
+    // Pending attachments are private to the uploader.
+    EXPECT_EQ(download(*bob, id, 0).error().code(), proto::ERROR_NOT_FOUND);
+
+    // Bob cannot send Alice's attachment; Alice can, with no text at all.
+    proto::Envelope steal;
+    steal.mutable_send_message()->set_channel_id(general);
+    steal.mutable_send_message()->set_content("mine now");
+    steal.mutable_send_message()->add_attachment_ids(id);
+    EXPECT_EQ(bob->call(steal)->error().code(), proto::ERROR_BAD_REQUEST);
+
+    proto::Envelope msg;
+    msg.mutable_send_message()->set_channel_id(general);
+    msg.mutable_send_message()->add_attachment_ids(id);
+    auto sent = alice->call(msg);
+    ASSERT_TRUE(sent && sent->has_chat_message()) << sent->error().message();
+    ASSERT_EQ(sent->chat_message().attachments_size(), 1);
+
+    auto created = bob->waitEvent([](const proto::Event& e) { return e.has_message_create(); });
+    ASSERT_TRUE(created);
+    ASSERT_EQ(created->message_create().attachments_size(), 1);
+    EXPECT_EQ(created->message_create().attachments(0).id(), id);
+
+    // An attachment can only be claimed once.
+    EXPECT_EQ(alice->call(msg)->error().code(), proto::ERROR_BAD_REQUEST);
+
+    // Bob downloads it back byte for byte.
+    std::string got;
+    while (got.size() < data.size()) {
+        const auto c = download(*bob, id, got.size());
+        ASSERT_TRUE(c.has_file_chunk()) << c.error().message();
+        ASSERT_EQ(c.file_chunk().offset(), got.size());
+        ASSERT_FALSE(c.file_chunk().data().empty());
+        got += c.file_chunk().data();
+    }
+    EXPECT_EQ(got, data);
+
+    // History carries attachment metadata.
+    proto::Envelope hist;
+    hist.mutable_get_messages()->set_channel_id(general);
+    auto page = bob->call(hist);
+    ASSERT_TRUE(page && page->message_page().messages_size() == 1);
+    EXPECT_EQ(page->message_page().messages(0).attachments(0).filename(), ".._.._etc_notes.txt");
+
+    // Deleting the message deletes the file.
+    proto::Envelope del;
+    del.mutable_delete_message()->set_message_id(sent->chat_message().id());
+    ASSERT_TRUE(alice->call(del)->has_ok());
+    EXPECT_EQ(download(*bob, id, 0).error().code(), proto::ERROR_NOT_FOUND);
+}
+
+TEST_F(Fixture, AttachmentUploadsAreValidated)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    const auto sid = createServer(*alice, "Limits");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+    auto state = sync(*alice);
+    const auto general = channelNamed(state, "general", proto::CHANNEL_TYPE_TEXT);
+    const auto voice = channelNamed(state, "General", proto::CHANNEL_TYPE_VOICE);
+
+    EXPECT_EQ(beginUpload(*alice, general, "big.bin", 51ull * 1024 * 1024).error().code(), proto::ERROR_TOO_LARGE);
+    EXPECT_EQ(beginUpload(*alice, general, "empty", 0).error().code(), proto::ERROR_BAD_REQUEST);
+    EXPECT_EQ(beginUpload(*alice, general, "..", 4).error().code(), proto::ERROR_BAD_REQUEST);
+    if (voice) {
+        EXPECT_EQ(beginUpload(*alice, voice, "a.txt", 4).error().code(), proto::ERROR_BAD_REQUEST);
+    }
+
+    // Out-of-order chunks, overruns and bad checksums cancel the upload.
+    auto t = beginUpload(*alice, general, "a.txt", 4);
+    ASSERT_TRUE(t.has_upload_ticket());
+    EXPECT_EQ(uploadChunk(*alice, t.upload_ticket().attachment_id(), 2, "ab").error().code(),
+        proto::ERROR_BAD_REQUEST);
+    EXPECT_EQ(uploadChunk(*alice, t.upload_ticket().attachment_id(), 0, "abcd").error().code(),
+        proto::ERROR_NOT_FOUND);
+
+    t = beginUpload(*alice, general, "b.txt", 4);
+    ASSERT_TRUE(uploadChunk(*alice, t.upload_ticket().attachment_id(), 0, "abcd").has_ok());
+    EXPECT_EQ(finishUpload(*alice, t.upload_ticket().attachment_id(), sha256("abce")).error().code(),
+        proto::ERROR_BAD_REQUEST);
+
+    // Another connection cannot feed someone else's upload.
+    t = beginUpload(*alice, general, "c.txt", 4);
+    EXPECT_EQ(uploadChunk(*bob, t.upload_ticket().attachment_id(), 0, "abcd").error().code(),
+        proto::ERROR_NOT_FOUND);
+
+    // Users without ATTACH_FILES are refused.
+    std::uint64_t bobId = 0;
+    for (const auto& u : state.users())
+        if (u.username() == "bob")
+            bobId = u.id();
+    proto::Envelope ov;
+    auto* o = ov.mutable_set_override()->mutable_override();
+    o->set_channel_id(general);
+    o->set_target_type(proto::PermissionOverride::TARGET_USER);
+    o->set_target_id(bobId);
+    o->set_deny(permissions::AttachFiles);
+    ASSERT_TRUE(alice->call(ov)->has_ok());
+    EXPECT_EQ(beginUpload(*bob, general, "d.txt", 4).error().code(), proto::ERROR_PERMISSION_DENIED);
+}
+
+TEST_F(Fixture, UnfinishedUploadsDieWithTheirConnection)
+{
+    auto alice = client("alice");
+    const auto sid = createServer(*alice, "Drop");
+    const auto general = channelNamed(sync(*alice), "general", proto::CHANNEL_TYPE_TEXT);
+    const auto t = beginUpload(*alice, general, "partial.bin", 8);
+    ASSERT_TRUE(t.has_upload_ticket());
+    ASSERT_TRUE(uploadChunk(*alice, t.upload_ticket().attachment_id(), 0, "1234").has_ok());
+    alice->abort();
+
+    auto again = client("alice");
+    EXPECT_EQ(uploadChunk(*again, t.upload_ticket().attachment_id(), 4, "5678").error().code(),
+        proto::ERROR_NOT_FOUND);
+    EXPECT_EQ(download(*again, t.upload_ticket().attachment_id(), 0).error().code(), proto::ERROR_NOT_FOUND);
+    (void)sid;
 }

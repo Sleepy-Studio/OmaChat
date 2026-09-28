@@ -11,6 +11,7 @@ add_library(omachat_server_core STATIC
     src/core/MessageHandlers.cpp
     src/core/VoiceHandlers.cpp
     src/core/ModerationHandlers.cpp
+    src/core/AttachmentHandlers.cpp
     src/transport/Certificates.cpp
     src/voice/MediaRelay.cpp
 )

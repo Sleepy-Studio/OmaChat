@@ -78,6 +78,7 @@ public:
     std::vector<InviteRecord> invitesForServer(Id serverId);
 
     // ---- messages
+    // Also claims m.attachments (by id) for the message, atomically.
     bool insertMessage(const MessageRecord& m);
     std::optional<MessageRecord> message(Id id);
     bool updateMessage(Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions);
@@ -86,6 +87,16 @@ public:
     // limit + 1 rows internally to report has_more.
     std::vector<MessageRecord> messagePage(Id channelId, Id beforeId, int limit, bool* hasMore);
     std::vector<MessageRecord> searchMessages(Id channelId, const QString& query, int limit);
+
+    // ---- attachments (metadata only; bytes live under files.path)
+    bool insertAttachment(const AttachmentRecord& a);
+    std::optional<AttachmentRecord> attachment(Id id);
+    std::vector<AttachmentRecord> attachmentsFor(Id messageId);
+    int pendingAttachmentCount(Id uploaderId);
+    // Deletes pending attachments created before `cutoffMs`; returns their ids.
+    std::vector<Id> purgePendingAttachments(std::int64_t cutoffMs);
+    bool deleteAttachment(Id id);
+    std::vector<Id> allAttachmentIds();
 
     bool setReaction(Id messageId, Id userId, const QString& emoji, bool add);
     std::vector<ReactionSummary> reactions(Id messageId, Id viewerId);

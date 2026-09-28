@@ -88,6 +88,18 @@ struct InviteRecord {
     std::uint32_t uses = 0;
 };
 
+struct AttachmentRecord {
+    Id id = 0;
+    Id channelId = 0;
+    Id uploaderId = 0;
+    Id messageId = 0; // 0 while pending (uploaded, not yet sent)
+    QString filename;
+    QString mimeType;
+    std::uint64_t size = 0;
+    QByteArray sha256;
+    std::int64_t createdAt = 0;
+};
+
 struct MessageRecord {
     Id id = 0;
     Id channelId = 0;
@@ -97,6 +109,7 @@ struct MessageRecord {
     std::int64_t editedAt = 0;
     bool isAction = false;
     std::vector<Id> mentions;
+    std::vector<AttachmentRecord> attachments;
 };
 
 struct ReactionSummary {

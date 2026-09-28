@@ -65,7 +65,8 @@ void IpcClient::request(const QString& method, const QJsonObject& params, Callba
         if (p.callback)
             p.callback(r);
     });
-    timer->start(timeoutMs);
+    if (timeoutMs > 0)
+        timer->start(timeoutMs);
     m_pending.insert(id, Pending{std::move(callback), timer});
     m_socket.write(encode(makeRequest(id, method, params)));
 }

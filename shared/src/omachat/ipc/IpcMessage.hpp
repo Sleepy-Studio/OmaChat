@@ -60,6 +60,7 @@ inline const QString ServerUnavailable = QStringLiteral("ServerUnavailable");
 inline const QString MediaDeviceUnavailable = QStringLiteral("MediaDeviceUnavailable");
 inline const QString StorageError = QStringLiteral("StorageError");
 inline const QString Timeout = QStringLiteral("Timeout");
+inline const QString TooLarge = QStringLiteral("TooLarge");
 inline const QString Internal = QStringLiteral("Internal");
 } // namespace errors
 

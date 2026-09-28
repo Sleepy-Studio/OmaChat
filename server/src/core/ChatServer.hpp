@@ -11,6 +11,8 @@
 #include "transport/Certificates.hpp"
 #include "voice/MediaRelay.hpp"
 
+#include <QCryptographicHash>
+#include <QFile>
 #include <QHash>
 #include <QHostAddress>
 #include <QObject>
@@ -53,6 +55,24 @@ private:
         TokenBucket presence{5, 0.2};
         TokenBucket invites{5, 0.1};
         TokenBucket history{30, 5};
+        TokenBucket uploads{10, 1}; // BeginUpload only; chunks use `transfer`
+        TokenBucket transfer{64, 40}; // upload and download chunks
+    };
+
+    // An upload in progress. Lives only in memory and dies with the
+    // connection that started it.
+    struct Upload {
+        Id id = 0;
+        quint64 connId = 0;
+        Id userId = 0;
+        Id channelId = 0;
+        QString filename;
+        QString mimeType;
+        std::uint64_t size = 0;
+        std::uint64_t received = 0;
+        std::unique_ptr<QFile> file;
+        std::unique_ptr<QCryptographicHash> hash;
+        std::int64_t lastActivity = 0;
     };
 
     struct AccessGrant {
@@ -132,6 +152,20 @@ private:
     void handleSetPresence(Session& s, std::uint64_t rid, const proto::SetPresenceRequest& m);
     std::vector<Id> extractMentions(Id channelId, const QString& content) const;
 
+    // ---- handlers: attachments (AttachmentHandlers.cpp)
+    void handleBeginUpload(Session& s, std::uint64_t rid, const proto::BeginUploadRequest& m);
+    void handleUploadChunk(Session& s, std::uint64_t rid, const proto::UploadChunkRequest& m);
+    void handleFinishUpload(Session& s, std::uint64_t rid, const proto::FinishUploadRequest& m);
+    void handleCancelUpload(Session& s, std::uint64_t rid, const proto::CancelUploadRequest& m);
+    void handleDownload(Session& s, std::uint64_t rid, const proto::DownloadRequest& m);
+    Upload* uploadFor(Session& s, std::uint64_t rid, Id attachmentId);
+    void abortUpload(Id uploadId);
+    void abortUploadsOf(quint64 connId);
+    void removeAttachmentFiles(const std::vector<Id>& ids);
+    void collectAttachmentGarbage();
+    QString attachmentPath(Id id) const;
+    std::uint64_t maxUploadBytes() const;
+
     // ---- handlers: voice (VoiceHandlers.cpp)
     void handleJoinVoice(Session& s, std::uint64_t rid, const proto::JoinVoiceRequest& m);
     void handleLeaveVoice(Session& s, std::uint64_t rid);
@@ -176,6 +210,7 @@ private:
     std::map<Id, VoiceRec> m_voice;
     std::map<Id, QTimer*> m_offlineTimers;
     QHash<QString, int> m_connectionsPerIp;
+    std::map<Id, Upload> m_uploads;
 
     // Brute-force protection, keyed by peer address and by username.
     std::map<QString, TokenBucket> m_authByIp;

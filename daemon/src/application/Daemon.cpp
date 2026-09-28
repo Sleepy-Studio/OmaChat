@@ -94,6 +94,9 @@ bool Daemon::start(QString* error)
         }
     });
     connect(m_conn.get(), &ServerConnection::modelEvent, this, &Daemon::onModelEvent);
+    m_transfers = std::make_unique<FileTransfers>(*m_conn, this);
+    connect(m_transfers.get(), &FileTransfers::progress, this,
+        [this](const QJsonObject& data) { m_ipc.broadcast(QStringLiteral("transfer.progress"), data); });
     connect(m_conn.get(), &ServerConnection::synchronized, this, [this] {
         m_mutedChannels = m_store.mutedChannels(m_conn->account().id);
         for (const auto& [uid, gain] : m_store.userVolumes(m_conn->account().id))
@@ -213,9 +216,11 @@ QJsonObject Daemon::statusJson() const
         status.insert(QStringLiteral("account"),
             QJsonObject{{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port}, {"username", a.username}});
         status.insert(QStringLiteral("instance"), m_conn->instanceName());
+        status.insert(QStringLiteral("max_upload_bytes"), static_cast<double>(m_conn->maxUploadBytes()));
     } else {
         status.insert(QStringLiteral("account"), QJsonValue::Null);
         status.insert(QStringLiteral("instance"), QJsonValue::Null);
+        status.insert(QStringLiteral("max_upload_bytes"), 0);
     }
 
     const ClientState* model = m_conn ? &m_conn->model() : nullptr;

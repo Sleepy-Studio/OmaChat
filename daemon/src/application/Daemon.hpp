@@ -2,6 +2,7 @@
 
 #include "audio/AudioBackend.hpp"
 #include "ipc/IpcServer.hpp"
+#include "networking/FileTransfers.hpp"
 #include "networking/ServerConnection.hpp"
 #include "notifications/Notifier.hpp"
 #include "omachat/config/ClientConfig.hpp"
@@ -60,6 +61,13 @@ private:
     Id serverParam(const QJsonObject& params, const Responder& r, const char* key = "server");
     Id userParam(const QJsonObject& params, const Responder& r, const char* key = "user");
 
+    // attachments
+    void uploadAll(Id channelId, QStringList files, std::vector<proto::Attachment> done,
+        std::function<void(bool ok, const QString& code, const QString& message,
+            const std::vector<proto::Attachment>& attachments)>
+            finish);
+    QString downloadDestination(Id attachmentId, const QString& filename, const QString& to, QString* error) const;
+
     // voice
     void joinVoice(Id channelId, const Responder* r);
     void leaveVoice(const Responder* r);
@@ -82,6 +90,7 @@ private:
     LocalStore m_store;
     std::unique_ptr<ICredentialStore> m_credentials;
     std::unique_ptr<ServerConnection> m_conn;
+    std::unique_ptr<FileTransfers> m_transfers;
     std::unique_ptr<audio::AudioBackend> m_audio;
     std::unique_ptr<voice::VoiceEngine> m_voice;
     IpcServer m_ipc;

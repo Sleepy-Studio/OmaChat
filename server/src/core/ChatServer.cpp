@@ -37,6 +37,7 @@ ChatServer::ChatServer(ServerConfig config, QObject* parent)
             it = it->expiresAt < t ? m_accessTokens.erase(it) : std::next(it);
         }
         m_store.purgeExpiredSessions(t);
+        collectAttachmentGarbage();
         // Buckets refill fully in under a minute; dropping idle ones is safe.
         m_authByIp.clear();
         m_authByName.clear();
@@ -60,6 +61,19 @@ bool ChatServer::start(const TlsIdentity& identity, QString* error)
     QDir().mkpath(dbInfo.absolutePath());
     if (!m_store.open(m_config.databasePath, error))
         return false;
+
+    // Only tighten permissions on a directory we create; an operator-made
+    // files directory keeps whatever mode they chose.
+    if (!QFileInfo::exists(m_config.filesPath)) {
+        if (!QDir().mkpath(m_config.filesPath)) {
+            if (error)
+                *error = QStringLiteral("cannot create files directory %1").arg(m_config.filesPath);
+            return false;
+        }
+        QFile::setPermissions(m_config.filesPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                | QFileDevice::ExeOwner);
+    }
+    collectAttachmentGarbage();
 
     auto snap = m_store.loadSnapshot();
     m_state.load(m_store.allUsers(), std::move(snap.servers), std::move(snap.channels), std::move(snap.overrides));
@@ -151,6 +165,7 @@ void ChatServer::onClosed(quint64 connId)
     std::unique_ptr<Session> s = std::move(it->second);
     m_sessions.erase(it);
 
+    abortUploadsOf(connId);
     const QString ip = s->peer.toString();
     if (--m_connectionsPerIp[ip] <= 0)
         m_connectionsPerIp.remove(ip);
@@ -273,6 +288,21 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
         break;
     case P::kSetPresence:
         handleSetPresence(s, rid, env.set_presence());
+        break;
+    case P::kBeginUpload:
+        handleBeginUpload(s, rid, env.begin_upload());
+        break;
+    case P::kUploadChunk:
+        handleUploadChunk(s, rid, env.upload_chunk());
+        break;
+    case P::kFinishUpload:
+        handleFinishUpload(s, rid, env.finish_upload());
+        break;
+    case P::kCancelUpload:
+        handleCancelUpload(s, rid, env.cancel_upload());
+        break;
+    case P::kDownload:
+        handleDownload(s, rid, env.download());
         break;
     case P::kJoinVoice:
         handleJoinVoice(s, rid, env.join_voice());
@@ -476,6 +506,14 @@ proto::ChatMessage ChatServer::toProto(const MessageRecord& m, Id viewer)
     p.set_is_action(m.isAction);
     for (Id mention : m.mentions)
         p.add_mention_ids(mention);
+    for (const auto& a : m.attachments) {
+        auto* pa = p.add_attachments();
+        pa->set_id(a.id);
+        pa->set_filename(a.filename.toStdString());
+        pa->set_mime_type(a.mimeType.toStdString());
+        pa->set_size(a.size);
+        pa->set_sha256(a.sha256.toStdString());
+    }
     if (viewer) {
         for (const auto& r : m_store.reactions(m.id, viewer)) {
             auto* pr = p.add_reactions();

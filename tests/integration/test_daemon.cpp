@@ -4,7 +4,10 @@
 
 #include "Harness.hpp"
 
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
+#include <QTemporaryDir>
 
 #include <gtest/gtest.h>
 
@@ -197,4 +200,68 @@ TEST_F(DaemonFixture, MuteAndDeafenPropagateToOtherMembers)
     EXPECT_TRUE(ev) << "deafen implies mute and is visible to others";
     auto un = alice->call(QStringLiteral("voice.unmute"));
     EXPECT_FALSE(un.result.value("deafened").toBool()) << "unmuting also undeafens";
+}
+
+TEST_F(DaemonFixture, AttachmentsTravelBetweenDaemons)
+{
+    setupPair();
+    QTemporaryDir files;
+    const qint64 size = 1300 * 1024; // three chunks
+    QByteArray data;
+    for (qint64 i = 0; i < size; ++i)
+        data.append(static_cast<char>((i * 31 + i / 7) & 0xff));
+    const QString source = files.filePath(QStringLiteral("capture.png"));
+    {
+        QFile f(source);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(data);
+    }
+
+    auto sent = alice->call(QStringLiteral("message.send"),
+        {{"channel", "general"}, {"content", "look"}, {"files", QJsonArray{source}}});
+    ASSERT_TRUE(sent.ok) << sent.errorMessage.toStdString();
+    const auto att = sent.result.value("attachments").toArray();
+    ASSERT_EQ(att.size(), 1);
+    EXPECT_EQ(att[0].toObject().value("filename").toString(), QStringLiteral("capture.png"));
+    EXPECT_EQ(att[0].toObject().value("size").toDouble(), static_cast<double>(size));
+    EXPECT_EQ(att[0].toObject().value("mime_type").toString(), QStringLiteral("image/png"));
+
+    auto ev = bob->waitEvent(QStringLiteral("message.created"));
+    ASSERT_TRUE(ev);
+    const QJsonObject a = ev->value("attachments").toArray().at(0).toObject();
+    ASSERT_FALSE(a.isEmpty());
+
+    // Explicit directory: the original name is kept and never overwritten.
+    QTemporaryDir out;
+    auto got = bob->call(QStringLiteral("attachment.download"),
+        {{"attachment", a.value("id")}, {"filename", a.value("filename")}, {"to", out.path()}});
+    ASSERT_TRUE(got.ok) << got.errorMessage.toStdString();
+    EXPECT_EQ(got.result.value("path").toString(), out.filePath(QStringLiteral("capture.png")));
+    auto again = bob->call(QStringLiteral("attachment.download"),
+        {{"attachment", a.value("id")}, {"filename", a.value("filename")}, {"to", out.path()}});
+    ASSERT_TRUE(again.ok);
+    EXPECT_EQ(again.result.value("path").toString(), out.filePath(QStringLiteral("capture (1).png")));
+    QFile f(got.result.value("path").toString());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), data);
+    EXPECT_FALSE(QFileInfo::exists(got.result.value("path").toString() + QStringLiteral(".part")));
+
+    // The cache is reused once the file is there.
+    QTemporaryDir cache;
+    qputenv("XDG_CACHE_HOME", cache.path().toLocal8Bit());
+    const QJsonObject cacheParams{
+        {"attachment", a.value("id")}, {"filename", "../escape.png"}, {"to", "cache"}, {"size", a.value("size")}};
+    auto first = bob->call(QStringLiteral("attachment.download"), cacheParams);
+    ASSERT_TRUE(first.ok) << first.errorMessage.toStdString();
+    EXPECT_TRUE(first.result.value("path").toString().startsWith(cache.path()));
+    EXPECT_FALSE(first.result.value("path").toString().contains(QStringLiteral("/../")));
+    EXPECT_FALSE(first.result.value("cached").toBool());
+    auto second = bob->call(QStringLiteral("attachment.download"), cacheParams);
+    EXPECT_TRUE(second.result.value("cached").toBool());
+    qunsetenv("XDG_CACHE_HOME");
+
+    // Local limits are reported before any bytes move.
+    auto missing = alice->call(QStringLiteral("message.send"),
+        {{"channel", "general"}, {"files", QJsonArray{files.filePath(QStringLiteral("nope"))}}});
+    EXPECT_EQ(missing.errorCode, QStringLiteral("NotFound"));
 }

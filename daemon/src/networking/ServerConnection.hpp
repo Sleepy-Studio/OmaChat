@@ -82,6 +82,8 @@ public:
 
     QHostAddress serverAddress() const { return m_serverAddress; }
     quint16 mediaPort() const { return m_mediaPort; }
+    // 0 when the server does not accept attachments.
+    std::uint64_t maxUploadBytes() const { return m_maxUploadBytes; }
 
     ClientState& model() { return m_model; }
     const ClientState& model() const { return m_model; }
@@ -137,6 +139,7 @@ private:
     QString m_instanceName;
     QHostAddress m_serverAddress;
     quint16 m_mediaPort = 0;
+    std::uint64_t m_maxUploadBytes = 0;
 
     QString m_accessToken;
     quint64 m_sessionId = 0;

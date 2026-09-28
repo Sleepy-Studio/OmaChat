@@ -40,9 +40,11 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("media.chacha20poly1305");
     r->add_capabilities("search.fts");
     r->add_capabilities("resume");
+    r->add_capabilities("attachments");
     r->set_instance_name(m_config.instanceName.toStdString());
     r->set_registration_open(m_config.registrationOpen);
     r->set_media_udp_port(mediaPort());
+    r->set_max_upload_bytes(maxUploadBytes());
     s.phase = Session::Phase::AwaitAuth;
     reply(s, rid, std::move(env));
 }

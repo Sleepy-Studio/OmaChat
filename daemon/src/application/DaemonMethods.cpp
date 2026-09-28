@@ -4,11 +4,15 @@
 #include "application/Daemon.hpp"
 
 #include "omachat/core/Log.hpp"
+#include "omachat/core/Paths.hpp"
 #include "omachat/core/Permissions.hpp"
 #include "omachat/core/Validation.hpp"
 #include "omachat/core/Version.hpp"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
+#include <QStandardPaths>
 #include <QUrl>
 
 namespace omachat::daemon {
@@ -99,6 +103,72 @@ Id Daemon::userParam(const QJsonObject& params, const Responder& r, const char* 
     if (!id)
         r.error(e::NotFound, QStringLiteral("no such user: %1").arg(ref));
     return id;
+}
+
+void Daemon::uploadAll(Id channelId, QStringList files, std::vector<proto::Attachment> done,
+    std::function<void(bool, const QString&, const QString&, const std::vector<proto::Attachment>&)> finish)
+{
+    if (files.isEmpty()) {
+        finish(true, {}, {}, done);
+        return;
+    }
+    const QString next = files.takeFirst();
+    m_transfers->upload(channelId, next,
+        [this, channelId, files, done, finish = std::move(finish)](const FileTransfers::Result& res) mutable {
+            if (!res.ok) {
+                // Withdraw what already went up so it does not linger as pending.
+                for (const auto& a : done) {
+                    proto::Envelope env;
+                    env.mutable_cancel_upload()->set_attachment_id(a.id());
+                    m_conn->request(std::move(env), [](const proto::Envelope&) {});
+                }
+                finish(false, res.code, res.message, {});
+                return;
+            }
+            done.push_back(res.attachment);
+            uploadAll(channelId, files, std::move(done), std::move(finish));
+        });
+}
+
+QString Daemon::downloadDestination(Id attachmentId, const QString& filename, const QString& to, QString* error) const
+{
+    const QString name = validation::filename(filename).value_or(QStringLiteral("attachment-%1").arg(attachmentId));
+    auto fail = [error](const QString& why) {
+        *error = why;
+        return QString();
+    };
+    if (to == u"cache") {
+        // One directory per attachment keeps the original name without collisions.
+        const QString dir = paths::cacheDir() + QStringLiteral("/attachments/") + QString::number(attachmentId);
+        if (!paths::ensurePrivateDir(paths::cacheDir()) || !QDir().mkpath(dir))
+            return fail(QStringLiteral("cannot create %1").arg(dir));
+        return QDir(dir).filePath(name);
+    }
+    QString dir;
+    if (to.isEmpty() || to == u"downloads") {
+        dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+        if (dir.isEmpty())
+            dir = QDir::homePath();
+    } else {
+        const QFileInfo target(to);
+        if (!target.isAbsolute())
+            return fail(QStringLiteral("destination must be an absolute path"));
+        if (!target.isDir())
+            return target.absoluteFilePath(); // an explicit file path is used as given
+        dir = target.absoluteFilePath();
+    }
+    if (!QDir().mkpath(dir))
+        return fail(QStringLiteral("cannot create %1").arg(dir));
+    // Never overwrite: "report.pdf" becomes "report (1).pdf".
+    const QFileInfo base(QDir(dir).filePath(name));
+    QString candidate = base.absoluteFilePath();
+    for (int i = 1; QFileInfo::exists(candidate) || QFileInfo::exists(candidate + QStringLiteral(".part")); ++i) {
+        const QString suffix = base.completeSuffix();
+        candidate = QDir(dir).filePath(suffix.isEmpty()
+                ? QStringLiteral("%1 (%2)").arg(base.baseName()).arg(i)
+                : QStringLiteral("%1 (%2).%3").arg(base.baseName()).arg(i).arg(suffix));
+    }
+    return candidate;
 }
 
 void Daemon::dispatch(const QString& method, const QJsonObject& params, const Responder& r)
@@ -469,14 +539,40 @@ void Daemon::registerMethods()
         const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
         if (!cid)
             return;
-        proto::Envelope env;
-        auto* s = env.mutable_send_message();
-        s->set_channel_id(cid);
-        s->set_content(p.value(QStringLiteral("content")).toString().toStdString());
-        s->set_reply_to(idFromJson(p.value(QStringLiteral("reply_to"))));
-        s->set_is_action(p.value(QStringLiteral("action")).toBool(false));
-        forward(std::move(env), r,
-            [&model](const proto::Envelope& reply) { return model.messageJson(reply.chat_message()); });
+        QStringList files;
+        for (const auto& f : p.value(QStringLiteral("files")).toArray())
+            files << f.toString();
+        if (files.size() > 10) {
+            r.error(e::BadRequest, QStringLiteral("at most 10 files per message"));
+            return;
+        }
+        auto send = [this, &model, cid, p, r](const std::vector<proto::Attachment>& attachments) {
+            proto::Envelope env;
+            auto* s = env.mutable_send_message();
+            s->set_channel_id(cid);
+            s->set_content(p.value(QStringLiteral("content")).toString().toStdString());
+            s->set_reply_to(idFromJson(p.value(QStringLiteral("reply_to"))));
+            s->set_is_action(p.value(QStringLiteral("action")).toBool(false));
+            for (const auto& a : attachments)
+                s->add_attachment_ids(a.id());
+            forward(std::move(env), r,
+                [&model](const proto::Envelope& reply) { return model.messageJson(reply.chat_message()); });
+        };
+        if (files.isEmpty()) {
+            send({});
+            return;
+        }
+        if (!requireConnected(r))
+            return;
+        uploadAll(cid, files, {},
+            [r, send](bool ok, const QString& code, const QString& message,
+                const std::vector<proto::Attachment>& attachments) {
+                if (!ok) {
+                    r.error(code, message);
+                    return;
+                }
+                send(attachments);
+            });
     };
     m[QStringLiteral("message.edit")] = [this, &model](const QJsonObject& p, const Responder& r) {
         proto::Envelope env;
@@ -515,6 +611,45 @@ void Daemon::registerMethods()
         re->set_add(p.value(QStringLiteral("add")).toBool(true));
         forward(std::move(env), r);
     };
+    // -------------------------------------------------------- attachments
+    m[QStringLiteral("attachment.download")] = [this](const QJsonObject& p, const Responder& r) {
+        const Id aid = idFromJson(p.value(QStringLiteral("attachment")));
+        if (!aid) {
+            r.error(e::BadRequest, QStringLiteral("attachment id required"));
+            return;
+        }
+        QString error;
+        const QString dest = downloadDestination(aid, p.value(QStringLiteral("filename")).toString(),
+            p.value(QStringLiteral("to")).toString(QStringLiteral("downloads")), &error);
+        if (dest.isEmpty()) {
+            r.error(e::StorageError, error);
+            return;
+        }
+        // Cached copies are reused; attachments never change once sent.
+        const auto size = p.value(QStringLiteral("size")).toDouble(-1);
+        if (p.value(QStringLiteral("to")).toString() == u"cache" && size > 0 && QFileInfo(dest).size() == qint64(size)) {
+            r.ok({{"path", dest}, {"cached", true}});
+            return;
+        }
+        if (!requireConnected(r))
+            return;
+        m_transfers->download(aid, dest, [r](const FileTransfers::Result& res) {
+            if (res.ok)
+                r.ok({{"path", res.path}, {"cached", false}});
+            else
+                r.error(res.code, res.message);
+        });
+    };
+    m[QStringLiteral("transfer.list")] = [this](const QJsonObject&, const Responder& r) {
+        r.ok({{"transfers", m_transfers->activeJson()}});
+    };
+    m[QStringLiteral("transfer.cancel")] = [this](const QJsonObject& p, const Responder& r) {
+        if (m_transfers->cancel(p.value(QStringLiteral("id")).toString().toULongLong()))
+            r.ok();
+        else
+            r.error(e::NotFound, QStringLiteral("no such transfer"));
+    };
+
     m[QStringLiteral("typing")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
         if (!cid)

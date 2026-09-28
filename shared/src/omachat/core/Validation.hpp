@@ -38,6 +38,14 @@ std::optional<QString> topic(const QString& input);
 
 bool passwordAcceptable(const QString& password);
 
+// Attachment filename: path separators become '_', control characters are
+// dropped, 1..200 chars after trimming; "." and ".." are rejected.
+std::optional<QString> filename(const QString& input);
+
+// Lowercased "type/subtype" (parameters dropped). Anything malformed is
+// reported as application/octet-stream rather than rejected.
+QString mimeType(const QString& input);
+
 // Short reaction token: 1..32 chars, no whitespace or control chars.
 std::optional<QString> reaction(const QString& input);
 

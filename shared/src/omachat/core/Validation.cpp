@@ -1,5 +1,7 @@
 #include "omachat/core/Validation.hpp"
 
+#include <QRegularExpression>
+
 namespace omachat::validation {
 namespace {
 
@@ -106,6 +108,30 @@ std::optional<QString> reaction(const QString& input)
             return std::nullopt;
     }
     return s;
+}
+
+std::optional<QString> filename(const QString& input)
+{
+    QString out;
+    out.reserve(input.size());
+    for (QChar c : input) {
+        if (c == u'/' || c == u'\\')
+            out.append(u'_');
+        else if (c.category() != QChar::Other_Control && c.category() != QChar::Other_Format)
+            out.append(c);
+    }
+    out = out.trimmed();
+    if (out.isEmpty() || out.size() > 200 || out == u"." || out == u"..")
+        return std::nullopt;
+    return out;
+}
+
+QString mimeType(const QString& input)
+{
+    static const QRegularExpression re(
+        QStringLiteral(R"(^[a-z0-9][a-z0-9!#$&^_.+\-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+\-]{0,63}$)"));
+    const QString base = input.section(u';', 0, 0).trimmed().toLower();
+    return re.match(base).hasMatch() ? base : QStringLiteral("application/octet-stream");
 }
 
 } // namespace omachat::validation

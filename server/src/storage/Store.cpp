@@ -10,7 +10,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -115,6 +115,23 @@ const char* const kSchemaV1[] = {
        END)",
 };
 
+// v2: attachments. message_id is NULL while the upload is pending so the
+// foreign key can cascade deletes from messages and channels.
+const char* const kSchemaV2[] = {
+    R"(CREATE TABLE attachments(
+        id INTEGER PRIMARY KEY,
+        channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+        uploader_id INTEGER NOT NULL,
+        message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        sha256 BLOB NOT NULL,
+        created_at INTEGER NOT NULL))",
+    "CREATE INDEX attachments_by_message ON attachments(message_id)",
+    "CREATE INDEX attachments_pending ON attachments(uploader_id) WHERE message_id IS NULL",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -154,6 +171,24 @@ MessageRecord readMessage(const QSqlQuery& q)
     m.mentions = splitIds(q.value(7).toString());
     return m;
 }
+
+AttachmentRecord readAttachment(const QSqlQuery& q)
+{
+    AttachmentRecord a;
+    a.id = uid(q.value(0));
+    a.channelId = uid(q.value(1));
+    a.uploaderId = uid(q.value(2));
+    a.messageId = q.value(3).isNull() ? 0 : uid(q.value(3));
+    a.filename = q.value(4).toString();
+    a.mimeType = q.value(5).toString();
+    a.size = static_cast<std::uint64_t>(q.value(6).toLongLong());
+    a.sha256 = q.value(7).toByteArray();
+    a.createdAt = q.value(8).toLongLong();
+    return a;
+}
+
+constexpr const char* kAttachmentColumns
+    = "id, channel_id, uploader_id, message_id, filename, mime_type, size, sha256, created_at";
 
 constexpr const char* kMessageColumns = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions";
 
@@ -208,8 +243,8 @@ bool Store::migrate(QString* error)
         return true;
 
     m_db.transaction();
-    if (current < 1) {
-        for (const char* stmt : kSchemaV1) {
+    const auto apply = [&](const auto& statements) {
+        for (const char* stmt : statements) {
             QSqlQuery q(m_db);
             if (!q.exec(QString::fromUtf8(stmt))) {
                 if (error)
@@ -218,7 +253,12 @@ bool Store::migrate(QString* error)
                 return false;
             }
         }
-    }
+        return true;
+    };
+    if (current < 1 && !apply(kSchemaV1))
+        return false;
+    if (current < 2 && !apply(kSchemaV2))
+        return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
         if (error)
@@ -606,10 +646,30 @@ std::vector<InviteRecord> Store::invitesForServer(Id serverId)
 
 bool Store::insertMessage(const MessageRecord& m)
 {
-    return exec(QStringLiteral("INSERT INTO messages(id, channel_id, author_id, content, reply_to, edited_at, "
-                               "is_action, mentions) VALUES(?,?,?,?,?,?,?,?)"),
+    if (!begin())
+        return false;
+    bool ok = exec(QStringLiteral("INSERT INTO messages(id, channel_id, author_id, content, reply_to, edited_at, "
+                                  "is_action, mentions) VALUES(?,?,?,?,?,?,?,?)"),
         {sid(m.id), sid(m.channelId), sid(m.authorId), m.content, sid(m.replyTo), qint64(m.editedAt),
             m.isAction ? 1 : 0, joinIds(m.mentions)});
+    for (const auto& a : m.attachments) {
+        if (!ok)
+            break;
+        // Only a pending attachment of this author in this channel can be claimed.
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("UPDATE attachments SET message_id = ? WHERE id = ? AND uploader_id = ? AND "
+                                 "channel_id = ? AND message_id IS NULL"));
+        q.addBindValue(sid(m.id));
+        q.addBindValue(sid(a.id));
+        q.addBindValue(sid(m.authorId));
+        q.addBindValue(sid(m.channelId));
+        ok = q.exec() && q.numRowsAffected() == 1;
+    }
+    if (!ok) {
+        rollback();
+        return false;
+    }
+    return commit();
 }
 
 std::optional<MessageRecord> Store::message(Id id)
@@ -619,7 +679,9 @@ std::optional<MessageRecord> Store::message(Id id)
     q.addBindValue(sid(id));
     if (!q.exec() || !q.next())
         return std::nullopt;
-    return readMessage(q);
+    auto m = readMessage(q);
+    m.attachments = attachmentsFor(m.id);
+    return m;
 }
 
 bool Store::updateMessage(Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions)
@@ -655,6 +717,8 @@ std::vector<MessageRecord> Store::messagePage(Id channelId, Id beforeId, int lim
         *hasMore = static_cast<int>(out.size()) > limit;
     if (static_cast<int>(out.size()) > limit)
         out.resize(static_cast<size_t>(limit));
+    for (auto& m : out)
+        m.attachments = attachmentsFor(m.id);
     return out;
 }
 
@@ -679,7 +743,81 @@ std::vector<MessageRecord> Store::searchMessages(Id channelId, const QString& qu
     q.exec();
     while (q.next())
         out.push_back(readMessage(q));
+    for (auto& m : out)
+        m.attachments = attachmentsFor(m.id);
     return out;
+}
+
+// ---------------------------------------------------------- attachments
+
+bool Store::insertAttachment(const AttachmentRecord& a)
+{
+    return exec(QStringLiteral("INSERT INTO attachments(id, channel_id, uploader_id, message_id, filename, "
+                               "mime_type, size, sha256, created_at) VALUES(?,?,?,NULL,?,?,?,?,?)"),
+        {sid(a.id), sid(a.channelId), sid(a.uploaderId), a.filename, a.mimeType, static_cast<qint64>(a.size),
+            a.sha256, qint64(a.createdAt)});
+}
+
+std::optional<AttachmentRecord> Store::attachment(Id id)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT %1 FROM attachments WHERE id = ?").arg(QLatin1StringView(kAttachmentColumns)));
+    q.addBindValue(sid(id));
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return readAttachment(q);
+}
+
+std::vector<AttachmentRecord> Store::attachmentsFor(Id messageId)
+{
+    std::vector<AttachmentRecord> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT %1 FROM attachments WHERE message_id = ? ORDER BY id")
+            .arg(QLatin1StringView(kAttachmentColumns)));
+    q.addBindValue(sid(messageId));
+    q.exec();
+    while (q.next())
+        out.push_back(readAttachment(q));
+    return out;
+}
+
+int Store::pendingAttachmentCount(Id uploaderId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM attachments WHERE uploader_id = ? AND message_id IS NULL"));
+    q.addBindValue(sid(uploaderId));
+    if (!q.exec() || !q.next())
+        return 0;
+    return q.value(0).toInt();
+}
+
+std::vector<Id> Store::purgePendingAttachments(std::int64_t cutoffMs)
+{
+    std::vector<Id> ids;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id FROM attachments WHERE message_id IS NULL AND created_at < ?"));
+    q.addBindValue(qint64(cutoffMs));
+    q.exec();
+    while (q.next())
+        ids.push_back(uid(q.value(0)));
+    for (Id id : ids)
+        deleteAttachment(id);
+    return ids;
+}
+
+bool Store::deleteAttachment(Id id)
+{
+    return exec(QStringLiteral("DELETE FROM attachments WHERE id = ?"), {sid(id)});
+}
+
+std::vector<Id> Store::allAttachmentIds()
+{
+    std::vector<Id> ids;
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("SELECT id FROM attachments"));
+    while (q.next())
+        ids.push_back(uid(q.value(0)));
+    return ids;
 }
 
 bool Store::setReaction(Id messageId, Id userId, const QString& emoji, bool add)

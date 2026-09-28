@@ -11,6 +11,7 @@ add_library(omachat_daemon_core STATIC
     src/platform/CredentialStore.cpp
     src/networking/ClientState.cpp
     src/networking/ServerConnection.cpp
+    src/networking/FileTransfers.cpp
     src/ipc/IpcServer.cpp
     src/notifications/Notifier.cpp
     src/audio/AudioBackend.hpp

@@ -34,6 +34,8 @@ public:
 
     // Sends a request. The callback always fires exactly once: with the
     // daemon's reply, or with a synthetic error on timeout/disconnect.
+    // A timeout of 0 waits for as long as the daemon stays connected (used
+    // for file transfers, which report progress through events).
     void request(const QString& method, const QJsonObject& params, Callback callback, int timeoutMs = 20000);
 
 signals:

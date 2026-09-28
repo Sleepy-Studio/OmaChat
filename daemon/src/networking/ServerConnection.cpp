@@ -36,6 +36,8 @@ QString ipcErrorCode(proto::ErrorCode code)
         return e::Conflict;
     case proto::ERROR_RATE_LIMITED:
         return e::RateLimited;
+    case proto::ERROR_TOO_LARGE:
+        return e::TooLarge;
     default:
         return e::Internal;
     }
@@ -304,6 +306,7 @@ void ServerConnection::onEncrypted()
         const auto& hr = reply.hello_reply();
         m_instanceName = QString::fromStdString(hr.instance_name());
         m_mediaPort = static_cast<quint16>(hr.media_udp_port());
+        m_maxUploadBytes = hr.max_upload_bytes();
         beginAuth();
     });
 }

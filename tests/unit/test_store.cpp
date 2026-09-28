@@ -1,6 +1,8 @@
 #include "storage/LocalStore.hpp"
 #include "storage/Store.hpp"
 
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include <gtest/gtest.h>
@@ -13,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 1);
+    EXPECT_EQ(store.schemaVersion(), 2);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -26,6 +28,37 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     EXPECT_TRUE(store.rotateSession(7, QByteArray(32, 'n'), 2000));
     EXPECT_FALSE(store.sessionByDigest(QByteArray(32, 'k')).has_value()) << "old refresh token is dead";
     EXPECT_EQ(store.purgeExpiredSessions(5000), 1);
+}
+
+TEST(ServerStore, VersionOneDatabasesGainAttachments)
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("s.db"));
+    {
+        server::Store store;
+        QString error;
+        ASSERT_TRUE(store.open(path, &error));
+        ASSERT_TRUE(store.insertUser({1, QStringLiteral("a"), QStringLiteral("A"), {}, QStringLiteral("h"), 0}));
+    }
+    {
+        // Rewind to what a 0.1.0 server left on disk.
+        auto db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), QStringLiteral("rewind"));
+        db.setDatabaseName(path);
+        ASSERT_TRUE(db.open());
+        QSqlQuery q(db);
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE attachments")));
+        ASSERT_TRUE(q.exec(QStringLiteral("PRAGMA user_version=1")));
+        q.finish();
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(QStringLiteral("rewind"));
+
+    server::Store store;
+    QString error;
+    ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
+    EXPECT_EQ(store.schemaVersion(), 2);
+    EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
+    EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 }
 
 TEST(ServerStore, MessagesPagingEditDeleteSearch)
@@ -42,7 +75,7 @@ TEST(ServerStore, MessagesPagingEditDeleteSearch)
     ASSERT_TRUE(store.insertServer(srv, 0));
     ASSERT_TRUE(store.insertChannel({20, 10, QStringLiteral("general"), server::ChannelKind::Text, 0, 0, {}, {}}, 0));
     for (server::Id id = 1000; id < 1120; ++id)
-        ASSERT_TRUE(store.insertMessage({id, 20, 1, QStringLiteral("message %1").arg(id), 0, 0, false, {}}));
+        ASSERT_TRUE(store.insertMessage({id, 20, 1, QStringLiteral("message %1").arg(id), 0, 0, false, {}, {}}));
 
     bool more = false;
     auto page = store.messagePage(20, 0, 50, &more);

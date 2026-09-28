@@ -431,6 +431,13 @@ QJsonObject ClientState::voiceStateJson(const proto::VoiceState& v) const
         {"stream_id", static_cast<double>(v.stream_id())}};
 }
 
+QJsonObject ClientState::attachmentJson(const proto::Attachment& a)
+{
+    return {{"id", idString(a.id())}, {"filename", QString::fromStdString(a.filename())},
+        {"mime_type", QString::fromStdString(a.mime_type())}, {"size", static_cast<double>(a.size())},
+        {"sha256", QString::fromLatin1(QByteArray::fromStdString(a.sha256()).toHex())}};
+}
+
 QJsonObject ClientState::messageJson(const proto::ChatMessage& m) const
 {
     QJsonArray mentions;
@@ -443,10 +450,14 @@ QJsonObject ClientState::messageJson(const proto::ChatMessage& m) const
     for (const auto& r : m.reactions())
         reactions.append(QJsonObject{
             {"emoji", QString::fromStdString(r.emoji())}, {"count", static_cast<int>(r.count())}, {"me", r.me()}});
+    QJsonArray attachments;
+    for (const auto& a : m.attachments())
+        attachments.append(attachmentJson(a));
     return {{"id", idString(m.id())}, {"channel_id", idString(m.channel_id())}, {"author_id", idString(m.author_id())},
         {"timestamp", static_cast<double>(m.timestamp())}, {"content", QString::fromStdString(m.content())},
         {"reply_to", idString(m.reply_to())}, {"edited_at", static_cast<double>(m.edited_at())},
-        {"is_action", m.is_action()}, {"mentions", mentions}, {"mentions_me", mentionsMe}, {"reactions", reactions}};
+        {"is_action", m.is_action()}, {"mentions", mentions}, {"mentions_me", mentionsMe}, {"reactions", reactions},
+        {"attachments", attachments}};
 }
 
 QJsonObject ClientState::snapshotJson() const

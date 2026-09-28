@@ -67,6 +67,7 @@ public:
     QJsonObject memberJson(const proto::Member& m) const;
     QJsonObject voiceStateJson(const proto::VoiceState& v) const;
     QJsonObject messageJson(const proto::ChatMessage& m) const;
+    static QJsonObject attachmentJson(const proto::Attachment& a);
 
 private:
     bool m_valid = false;
