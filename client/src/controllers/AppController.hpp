@@ -42,6 +42,7 @@ class AppController : public QObject {
     Q_PROPERTY(QString accountHost READ accountHost NOTIFY statusChanged)
     Q_PROPERTY(int accountPort READ accountPort NOTIFY statusChanged)
     Q_PROPERTY(QString accountUser READ accountUser NOTIFY statusChanged)
+    Q_PROPERTY(QString accountId READ accountId NOTIFY statusChanged)
     Q_PROPERTY(QString instanceName READ instanceName NOTIFY statusChanged)
     Q_PROPERTY(bool authBusy READ authBusy NOTIFY authChanged)
     Q_PROPERTY(QString authError READ authError NOTIFY authChanged)
@@ -162,6 +163,7 @@ public:
     QString accountHost() const { return account().value(QStringLiteral("host")).toString(); }
     int accountPort() const { return account().value(QStringLiteral("port")).toInt(6473); }
     QString accountUser() const { return account().value(QStringLiteral("username")).toString(); }
+    QString accountId() const { return account().value(QStringLiteral("id")).toString(); }
     QString instanceName() const { return m_status.value(QStringLiteral("instance")).toString(); }
     bool authBusy() const { return m_authBusy; }
     QString authError() const { return m_authError; }
@@ -284,6 +286,7 @@ public:
     Q_INVOKABLE void reconnect();
     Q_INVOKABLE void logout();
     Q_INVOKABLE void switchAccount(const QString& accountId);
+    Q_INVOKABLE void removeAccount(const QString& accountId);
 
     Q_INVOKABLE void selectHome();
     Q_INVOKABLE void selectServer(const QString& id);

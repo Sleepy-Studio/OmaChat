@@ -205,11 +205,25 @@ Rectangle {
                 Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
                 Repeater {
                     model: parent.others
-                    delegate: FlatButton {
+                    delegate: RowLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        text: qsTr("Use %1@%2").arg(modelData.username).arg(modelData.host)
-                        onClicked: App.switchAccount(modelData.id)
+                        spacing: Theme.px(4)
+                        FlatButton {
+                            Layout.fillWidth: true
+                            text: qsTr("Use %1@%2").arg(modelData.username).arg(modelData.host)
+                            onClicked: App.switchAccount(modelData.id)
+                        }
+                        IconButton {
+                            iconName: "trash"
+                            danger: true
+                            tip: qsTr("Remove this saved account")
+                            onClicked: {
+                                removeConfirm.accountId = modelData.id
+                                removeConfirm.accountLabel = modelData.username + "@" + modelData.host
+                                removeConfirm.open()
+                            }
+                        }
                     }
                 }
                 FlatButton {
@@ -220,5 +234,17 @@ Rectangle {
                 }
             }
         }
+    }
+
+    ConfirmDialog {
+        id: removeConfirm
+        property string accountId
+        property string accountLabel
+        title: qsTr("Remove saved account?")
+        message: qsTr("%1 will be forgotten on this device. You can add it again with its password, "
+                      + "or by signing in with its linked provider.").arg(accountLabel)
+        confirmText: qsTr("Remove")
+        destructive: true
+        onConfirmed: App.removeAccount(accountId)
     }
 }

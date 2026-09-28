@@ -383,16 +383,40 @@ Dialog {
                                + "You can't unlink your last sign-in method without a password set.")
                 }
 
-                FlatButton {
-                    danger: true
-                    text: qsTr("Log out")
-                    onClicked: {
-                        dialog.close()
-                        App.logout()
+                RowLayout {
+                    spacing: Theme.px(8)
+                    FlatButton {
+                        danger: true
+                        text: qsTr("Log out")
+                        onClicked: {
+                            dialog.close()
+                            App.logout()
+                        }
+                    }
+                    FlatButton {
+                        danger: true
+                        text: qsTr("Remove this account")
+                        onClicked: {
+                            removeAccountConfirm.open()
+                        }
                     }
                 }
                 Item { Layout.fillHeight: true }
             }
+        }
+    }
+
+    ConfirmDialog {
+        id: removeAccountConfirm
+        title: qsTr("Remove this account?")
+        message: qsTr("%1@%2 will be forgotten on this device, including its saved sign-in. You can add it "
+                      + "again with its password, or by signing in with its linked provider.")
+                      .arg(App.accountUser).arg(App.accountHost)
+        confirmText: qsTr("Remove")
+        destructive: true
+        onConfirmed: {
+            dialog.close()
+            App.removeAccount(App.accountId)
         }
     }
 }

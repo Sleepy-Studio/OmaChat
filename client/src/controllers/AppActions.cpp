@@ -34,6 +34,12 @@ void AppController::switchAccount(const QString& accountId)
         tr("Cannot switch account"));
 }
 
+void AppController::removeAccount(const QString& accountId)
+{
+    call(
+        QStringLiteral("account.remove"), {{"account", accountId.toLongLong()}}, nullptr, tr("Could not remove account"));
+}
+
 void AppController::login(const QString& host, int port, const QString& username, const QString& password,
     bool registerAccount, const QString& displayName)
 {
