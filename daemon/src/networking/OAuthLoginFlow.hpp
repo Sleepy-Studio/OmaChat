@@ -32,6 +32,12 @@ public:
     enum class Mode { Login, Link };
     using Done = std::function<void(bool ok, const QString& code, const QString& message)>;
 
+    // The loopback redirect port every provider app must be registered
+    // with. Fixed rather than OS-assigned: Discord and GitHub validate
+    // redirect_uri with an exact string match, port included, so it has to
+    // be predictable ahead of time. See docs/self-hosting.md.
+    static constexpr quint16 kRedirectPort = 34579;
+
     // `conn` must outlive the attempt; the caller normally starts the
     // connection immediately before calling this.
     static void start(ServerConnection& conn, proto::OAuthProvider provider, Mode mode, Done done);

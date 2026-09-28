@@ -153,12 +153,25 @@ Relative paths are resolved against the config file's directory. Other keys:
 Add a `[oauth.discord]`, `[oauth.github]` and/or `[oauth.google]` section
 with `client_id` and `client_secret` from that provider's developer console.
 OmaChat only advertises providers you configure; leave a section out to keep
-it off. See `server.toml.example` for the exact keys and where each
-provider's OAuth app is registered. The redirect URI is a loopback address
-the client picks per attempt (`http://127.0.0.1:<port>/callback`), so
-register your app as an "installed app" / "loopback redirect" type and there
-is nothing else to set on the server side. Signing in this way creates an
-account automatically the first time, with no password set.
+it off. See `server.toml.example` for the exact keys.
+
+When registering the app on each provider's side, set its redirect/callback
+URI to exactly:
+
+```
+http://127.0.0.1:34579/callback
+```
+
+This is a fixed port on the *end user's own machine* (not your server) —
+the client runs a short-lived local listener there during sign-in and it
+never leaves 127.0.0.1. It has to be an exact, predictable value because
+Discord and GitHub validate the redirect URI with an exact string match,
+port included; only Google has documented support for any loopback port,
+but using the same fixed one everywhere keeps setup simple. Register the app
+as an "installed app" / "desktop app" / "public client" type where the
+provider distinguishes one (no client secret exposed to end users, PKCE
+required). Signing in this way creates an account automatically the first
+time, with no password set.
 
 ## 4. Firewall
 

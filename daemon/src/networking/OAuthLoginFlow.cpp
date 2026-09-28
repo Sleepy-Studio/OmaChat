@@ -99,8 +99,16 @@ void OAuthLoginFlow::beginBrowserFlow()
     }
 
     m_server = new QTcpServer(this);
-    if (!m_server->listen(QHostAddress::LocalHost)) {
-        finish(false, e::Internal, QStringLiteral("could not open a local port for the sign-in redirect"));
+    // A fixed port, not an OS-assigned ephemeral one: Discord and GitHub
+    // validate the redirect_uri with an exact string match (Google is the
+    // only one of the three with documented loopback-any-port support per
+    // RFC 8252), so whatever port we use has to be the one operators
+    // registered with each provider. See docs/self-hosting.md.
+    if (!m_server->listen(QHostAddress::LocalHost, kRedirectPort)) {
+        finish(false, e::Internal,
+            QStringLiteral("could not listen on 127.0.0.1:%1 for the sign-in redirect "
+                           "(something else may be using that port)")
+                .arg(kRedirectPort));
         return;
     }
     connect(m_server, &QTcpServer::newConnection, this, &OAuthLoginFlow::onLoopbackConnection);
