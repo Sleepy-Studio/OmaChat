@@ -116,10 +116,18 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
     repeat a few of the above on the installed build. (Done 2026-09-28 for
     0.2.0: `makepkg -si` installed clean, `check()` passed, real daemon
     served a real login through a real self-hosted server.)
-11. **Push the Docker image**: once `.github/workflows/docker.yml` runs on
-    `main`, check `ghcr.io/sleepy-studio/omachat-server` is public (GHCR
-    packages sometimes default to private under an org even when the repo
-    is public — a one-time visibility toggle in the package settings if so).
+11. **Make the GHCR image public** (confirmed needed 2026-09-28: the image
+    built and pushed fine, but `docker pull` unauthenticated got
+    `unauthorized` — GHCR packages under an org default to private
+    regardless of the repo's own visibility, and changing it needs your own
+    GitHub login, either flow works):
+    - Web: https://github.com/orgs/Sleepy-Studio/packages/container/omachat-server/settings
+      → Danger Zone → Change visibility → Public.
+    - CLI: `gh auth refresh -s read:packages,write:packages` (opens a
+      browser device-code prompt only you can approve), then
+      `gh api -X PATCH /orgs/Sleepy-Studio/packages/container/omachat-server -f visibility=public`.
+    - Verify: `docker logout ghcr.io && docker pull ghcr.io/sleepy-studio/omachat-server:latest`
+      should succeed with no login.
 12. **AUR**: one-time account/SSH-key setup only the repo owner can do, then
     a two-command push. The PKGBUILD itself needs no changes — see
     `docs/aur-publishing.md`.
