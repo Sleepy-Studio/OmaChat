@@ -45,6 +45,33 @@ assistants, bots or LLM features.
   `Tab` completes `@user`, `#channel` and `/commands` (all configurable)
 - Omarchy theme colors applied live; optional bar widget for Omarchy
 
+## Install
+
+**Client (Arch / Omarchy):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/OmaChat/main/scripts/install.sh | bash
+```
+
+Or once published to the AUR: `yay -S omachat` / `paru -S omachat` (see
+[docs/aur-publishing.md](docs/aur-publishing.md)). Both install the client,
+daemon, CLI and server in one package — see [Build](#build) below to build
+from source instead.
+
+**Self-hosted server, any OS with Docker:**
+
+```bash
+docker run -d --name omachat-server --restart unless-stopped \
+    -p 6473:6473/tcp -p 6474:6474/udp \
+    -v omachat-data:/var/lib/omachat \
+    -e OMACHAT_HOSTNAME=chat.example.org \
+    ghcr.io/sleepy-studio/omachat-server:latest
+```
+
+Generates its own config and a self-signed certificate on first run —
+`docker logs omachat-server` shows the fingerprint to give your users. Full
+guide, including a `docker-compose.yml`: [docs/self-hosting.md](docs/self-hosting.md).
+
 ## Components
 
 | Binary | Role |
@@ -61,7 +88,8 @@ next: [docs/status.md](docs/status.md).
 
 ## Build
 
-Arch Linux:
+For development, or to build for a distribution the install script doesn't
+cover yet. On Arch Linux:
 
 ```bash
 sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland \
@@ -200,16 +228,6 @@ push_to_talk = "F8"
 Data: `~/.local/share/omachat/omachat.db` (accounts, pinned certificates,
 per-user volume, muted channels). Sessions: your Secret Service keyring.
 Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
-
-## Server setup
-
-```bash
-omachat-server generate-cert --cert cert.pem --key key.pem --name chat.example.org
-cp packaging/server/server.toml.example server.toml   # edit paths
-omachat-server --config server.toml
-```
-
-Open TCP 6473 and UDP 6474. Full guide: [docs/self-hosting.md](docs/self-hosting.md).
 
 ## Development
 

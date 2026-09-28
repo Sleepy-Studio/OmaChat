@@ -1,0 +1,5 @@
+build
+build-asan
+.git
+docs/screenshots
+*.md

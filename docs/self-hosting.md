@@ -1,12 +1,46 @@
 # Self-hosting omachat-server
 
-The server is a single binary with an SQLite database. No reverse proxy,
-container or external service is required.
+The server is a single binary with an SQLite database. No reverse proxy or
+external service is required.
 
-## 1. Install
+## Docker (fastest)
 
-On Arch, build the package (`packaging/arch/PKGBUILD`) or install from a
-source build (`cmake --install build`). The package ships:
+```bash
+docker run -d --name omachat-server --restart unless-stopped \
+    -p 6473:6473/tcp -p 6474:6474/udp \
+    -v omachat-data:/var/lib/omachat \
+    -e OMACHAT_HOSTNAME=chat.example.org \
+    ghcr.io/sleepy-studio/omachat-server:latest
+docker logs omachat-server   # prints the self-signed certificate fingerprint
+```
+
+Or with the `docker-compose.yml` in the repo: `docker compose up -d`. On
+first run the container generates `/var/lib/omachat/server.toml` from
+`OMACHAT_*` environment variables and a self-signed certificate for
+`OMACHAT_HOSTNAME` — set that to whatever your clients will actually type
+as the server address. Both persist in the `omachat-data` volume, so
+restarting the container does not regenerate them; edit
+`server.toml` inside the volume directly for anything the environment
+variables don't cover (see the full key list in step 3 below), then
+restart the container.
+
+Environment variables: `OMACHAT_NAME`, `OMACHAT_HOSTNAME`, `OMACHAT_PORT`
+(6473), `OMACHAT_MEDIA_PORT` (6474), `OMACHAT_REGISTRATION_OPEN` (true),
+`OMACHAT_NODE_ID` (1), `OMACHAT_MAX_UPLOAD_MB` (50), `OMACHAT_LOG_LEVEL`
+(info). To use a real certificate instead of the generated self-signed one,
+mount it at `/var/lib/omachat/cert.pem` and `/var/lib/omachat/key.pem`
+before first start.
+
+Skip to [Firewall](#4-firewall) below — TLS and config are already done.
+
+## Native (systemd), the alternative to Docker
+
+### 1. Install
+
+On Arch, `packaging/arch/PKGBUILD` (or `scripts/install.sh`, or the AUR
+package once published — see the README) installs the server alongside the
+client. Building from source instead: `cmake --install build`. Either way
+you get:
 
 - `/usr/bin/omachat-server`
 - `/usr/lib/systemd/system/omachat-server.service` (runs as user `omachat`)
@@ -19,7 +53,7 @@ sudo install -d -o omachat -g omachat -m 750 /var/lib/omachat
 sudo install -Dm644 /usr/share/doc/omachat/server.toml.example /etc/omachat/server.toml
 ```
 
-## 2. TLS certificate
+### 2. TLS certificate
 
 Any of these work:
 
@@ -38,7 +72,7 @@ Any of these work:
   the server's fingerprint on first connection and asks them to trust it.
   The server log also prints it at startup (`tls identity loaded`).
 
-## 3. Configure `/etc/omachat/server.toml`
+### 3. Configure `/etc/omachat/server.toml`
 
 ```toml
 [server]
@@ -70,7 +104,7 @@ Open **TCP 6473** and **UDP 6474** (or your configured ports). Voice needs
 the UDP port reachable; clients behind NAT keep their mapping alive
 automatically.
 
-## 5. Run
+### 5. Run
 
 ```bash
 sudo systemctl enable --now omachat-server

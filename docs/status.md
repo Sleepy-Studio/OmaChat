@@ -5,7 +5,7 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
 
 ## Where things are
 
-- Remote: `github.com/Sleepy-Studio/OmaChat` (private), branch `main`.
+- Remote: `github.com/Sleepy-Studio/OmaChat` (**public** as of 2026-09-28), branch `main`.
 - Released **0.2.0** (tag `v0.2.0`). Protocol **1.2** (capabilities
   `search.server`, `dm.group`, `attachments.resume`, `video.h264`,
   `e2e.v1`; a 1.2 client still works with a 1.1 server). Server schema
@@ -16,6 +16,19 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
   this work.
 - The manual test pass below was done in the sandbox on 2026-09-28 and
   everything worked; voice between two machines is still untested.
+- A real `omachat-server` was also stood up on this machine (systemd,
+  self-signed cert, `/var/lib/omachat`) and a real client connected,
+  registered and sent a message through it — the first non-sandbox,
+  non-test-fixture proof the whole stack works.
+- Install is now one command for everyone: `scripts/install.sh` (curl|bash)
+  builds and installs the Arch package; a Docker image
+  (`ghcr.io/sleepy-studio/omachat-server`, built from the repo-root
+  `Dockerfile`) self-hosts a server with zero manual config — both verified
+  end to end (clean clone/build/install; container generates its cert and
+  config, a real client registered and sent a message through it). AUR
+  publishing needs a one-time manual step only the repo owner can do — see
+  `docs/aur-publishing.md`; the PKGBUILD itself is already verified working
+  against the real `v0.2.0` GitHub tag.
 
 ## Build, test, try it
 
@@ -100,7 +113,16 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
    untested; software path ~40 ms + ~50 ms playback buffer on one machine).
 10. **Arch package**: `OMACHAT_SRC=$PWD/../.. makepkg -si` in
     `packaging/arch` (now depends on `ffmpeg`), restart `omachat.service`,
-    repeat a few of the above on the installed build.
+    repeat a few of the above on the installed build. (Done 2026-09-28 for
+    0.2.0: `makepkg -si` installed clean, `check()` passed, real daemon
+    served a real login through a real self-hosted server.)
+11. **Push the Docker image**: once `.github/workflows/docker.yml` runs on
+    `main`, check `ghcr.io/sleepy-studio/omachat-server` is public (GHCR
+    packages sometimes default to private under an org even when the repo
+    is public — a one-time visibility toggle in the package settings if so).
+12. **AUR**: one-time account/SSH-key setup only the repo owner can do, then
+    a two-command push. The PKGBUILD itself needs no changes — see
+    `docs/aur-publishing.md`.
 
 ## Next
 

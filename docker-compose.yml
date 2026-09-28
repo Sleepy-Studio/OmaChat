@@ -1,0 +1,25 @@
+# One-command self-hosted server:  docker compose up -d
+#
+# Everything (database, generated TLS cert, uploaded files) lives in the
+# named volume, so `docker compose down` and `up` again keeps your data.
+# Set OMACHAT_HOSTNAME to whatever clients will actually type in as the
+# server address before you first bring this up — it goes into the
+# self-signed certificate.
+services:
+  omachat-server:
+    image: ghcr.io/sleepy-studio/omachat-server:latest
+    # Or build locally instead of pulling:
+    # build: .
+    restart: unless-stopped
+    ports:
+      - "6473:6473/tcp"
+      - "6474:6474/udp"
+    volumes:
+      - omachat-data:/var/lib/omachat
+    environment:
+      OMACHAT_NAME: "OmaChat"
+      OMACHAT_HOSTNAME: "localhost" # change to your real domain or IP
+      OMACHAT_REGISTRATION_OPEN: "true"
+
+volumes:
+  omachat-data:
