@@ -494,6 +494,7 @@ void Daemon::registerMethods()
         // placeholder is renamed after a successful sign-in.
         const QString placeholder = QStringLiteral("oauth-%1").arg(it.key());
         auto account = m_store.findAccount(host, static_cast<quint16>(port), placeholder);
+        const bool isNewAccount = !account.has_value();
         if (!account) {
             Account a{0, host, static_cast<quint16>(port), placeholder, {}, 0};
             a.id = m_store.addAccount(a);
@@ -507,8 +508,16 @@ void Daemon::registerMethods()
         const std::int64_t accountId = account->id;
         const proto::OAuthProvider provider = it.value();
         OAuthLoginFlow::start(*m_conn, provider, OAuthLoginFlow::Mode::Login,
-            [this, accountId, r](bool ok, const QString& code, const QString& message) {
+            [this, accountId, isNewAccount, r](bool ok, const QString& code, const QString& message) {
             if (!ok) {
+                // A placeholder account made just for this attempt is useless
+                // once it fails; leaving it around would keep retrying an
+                // unreachable/misconfigured host forever in the background,
+                // with no way back to the login screen while it's active.
+                if (isNewAccount) {
+                    const Responder none(nullptr, nullptr, 0);
+                    dispatch(QStringLiteral("account.remove"), {{"account", QString::number(accountId)}}, none);
+                }
                 r.error(code, message);
                 return;
             }

@@ -59,10 +59,29 @@ Rectangle {
                 onClicked: App.reconnect()
             }
             FlatButton {
-                visible: App.state === "disconnected"
+                // A never-lands connection attempt (e.g. a bad host typed
+                // for a new account, or a dead server) must never trap you
+                // here with no way out.
+                visible: App.accounts.length > 1
                 text: qsTr("Switch account")
-                onClicked: App.logout()
+                onClicked: accountSwitchMenu.popup()
             }
+        }
+    }
+
+    MenuPopup {
+        id: accountSwitchMenu
+        Instantiator {
+            model: App.accounts
+            delegate: MenuAction {
+                required property var modelData
+                text: modelData.username + "@" + modelData.host
+                      + (modelData.state !== "connected" ? " — " + modelData.state.replace("_", " ") : "")
+                enabled: !modelData.active
+                onTriggered: App.switchAccount(modelData.id)
+            }
+            onObjectAdded: (index, object) => accountSwitchMenu.insertAction(index, object)
+            onObjectRemoved: (index, object) => accountSwitchMenu.removeAction(object)
         }
     }
 }
