@@ -53,8 +53,8 @@ assistants, bots or LLM features.
 curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/OmaChat/main/scripts/install.sh | bash
 ```
 
-Or once published to the AUR: `yay -S omachat` / `paru -S omachat` (see
-[docs/aur-publishing.md](docs/aur-publishing.md)). Both install the client,
+Or from the AUR: `yay -S omachat` / `paru -S omachat`
+(<https://aur.archlinux.org/packages/omachat>). Both install the client,
 daemon, CLI and server in one package — see [Build](#build) below to build
 from source instead.
 

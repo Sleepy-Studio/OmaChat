@@ -1,5 +1,10 @@
 # Publishing to the AUR
 
+**Status: published.** https://aur.archlinux.org/packages/omachat has been
+live since 2026-09-28 (`omachat 0.2.0`). The rest of this file is the
+runbook for pushing future updates — skip to "Every future release" unless
+you're setting up on a new machine.
+
 `packaging/arch/PKGBUILD` is already AUR-ready as-is: with no environment
 variables set it fetches the tagged release from GitHub
 (`source=("git+${url}.git#tag=v${pkgver}")`) and builds and tests it exactly

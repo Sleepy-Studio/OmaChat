@@ -128,9 +128,9 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
       `gh api -X PATCH /orgs/Sleepy-Studio/packages/container/omachat-server -f visibility=public`.
     - Verify: `docker logout ghcr.io && docker pull ghcr.io/sleepy-studio/omachat-server:latest`
       should succeed with no login.
-12. **AUR**: one-time account/SSH-key setup only the repo owner can do, then
-    a two-command push. The PKGBUILD itself needs no changes — see
-    `docs/aur-publishing.md`.
+12. ~~**AUR**~~ — done 2026-09-28: https://aur.archlinux.org/packages/omachat
+    is live (`omachat 0.2.0`). Future releases: see "Every future release"
+    in `docs/aur-publishing.md`.
 
 ## Next
 
