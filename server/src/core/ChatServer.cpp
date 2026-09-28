@@ -222,6 +222,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
         case P::kResume:
             handleResume(s, rid, env.resume());
             return;
+        case P::kOauthLogin:
+            handleOAuthLogin(s, rid, env.oauth_login());
+            return;
         default:
             replyError(s, rid, proto::ERROR_NOT_AUTHENTICATED, QStringLiteral("authenticate first"));
             return;
@@ -234,6 +237,15 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
         break;
     case P::kLogout:
         handleLogout(s, rid);
+        break;
+    case P::kOauthLink:
+        handleOAuthLink(s, rid, env.oauth_link());
+        break;
+    case P::kOauthUnlink:
+        handleOAuthUnlink(s, rid, env.oauth_unlink());
+        break;
+    case P::kListOauthIdentities:
+        handleListOAuthIdentities(s, rid);
         break;
     case P::kCreateServer:
         handleCreateServer(s, rid, env.create_server());

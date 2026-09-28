@@ -45,6 +45,9 @@ class AppController : public QObject {
     Q_PROPERTY(QString instanceName READ instanceName NOTIFY statusChanged)
     Q_PROPERTY(bool authBusy READ authBusy NOTIFY authChanged)
     Q_PROPERTY(QString authError READ authError NOTIFY authChanged)
+    // Provider sign-in methods linked to the current account (Settings > Account).
+    Q_PROPERTY(QVariantList oauthIdentities READ oauthIdentities NOTIFY oauthIdentitiesChanged)
+    Q_PROPERTY(bool oauthLinkBusy READ oauthLinkBusy NOTIFY oauthIdentitiesChanged)
 
     // self
     Q_PROPERTY(QString selfId READ selfId NOTIFY statusChanged)
@@ -162,6 +165,8 @@ public:
     QString instanceName() const { return m_status.value(QStringLiteral("instance")).toString(); }
     bool authBusy() const { return m_authBusy; }
     QString authError() const { return m_authError; }
+    QVariantList oauthIdentities() const { return m_oauthIdentities; }
+    bool oauthLinkBusy() const { return m_oauthLinkBusy; }
     QString selfId() const { return m_self.value(QStringLiteral("id")).toString(); }
     QString selfName() const { return m_self.value(QStringLiteral("display_name")).toString(); }
     QString selfUsername() const { return m_self.value(QStringLiteral("username")).toString(); }
@@ -267,6 +272,14 @@ public:
     Q_INVOKABLE void retryDaemon();
     Q_INVOKABLE void login(const QString& host, int port, const QString& username, const QString& password,
         bool registerAccount, const QString& displayName);
+    // provider is "discord", "github" or "google". Opens the system browser;
+    // the daemon runs the whole authorization-code exchange and reports back
+    // through the usual status/authError properties.
+    Q_INVOKABLE void loginWithOAuth(const QString& host, int port, const QString& provider);
+    // Attaches/detaches a provider from the already-signed-in account.
+    Q_INVOKABLE void refreshOAuthIdentities();
+    Q_INVOKABLE void linkOAuthProvider(const QString& provider);
+    Q_INVOKABLE void unlinkOAuthProvider(const QString& provider);
     Q_INVOKABLE void trustCertificate();
     Q_INVOKABLE void reconnect();
     Q_INVOKABLE void logout();
@@ -372,6 +385,7 @@ signals:
     void daemonChanged();
     void statusChanged();
     void authChanged();
+    void oauthIdentitiesChanged();
     void voiceChanged();
     void selectionChanged();
     void replyChanged();
@@ -452,6 +466,8 @@ private:
     QString m_replyPreview;
     bool m_authBusy = false;
     QString m_authError;
+    QVariantList m_oauthIdentities;
+    bool m_oauthLinkBusy = false;
     QString m_notice;
     bool m_noticeError = false;
     QTimer m_noticeTimer;

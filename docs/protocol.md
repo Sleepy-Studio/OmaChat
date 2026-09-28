@@ -35,9 +35,24 @@ protocol ([media.md](media.md)), and the local IPC protocol.
 | `Refresh{refresh_token}` | `AuthResult` with a **rotated** refresh token (old one dies) |
 | `Resume{access_token, session_id, last_sequence}` | `ResumeResult{replayed_events}` then the missed events; `ERROR_RESUME_FAILED` = authenticated but you must `Sync`; `ERROR_AUTHENTICATION` = use your refresh token |
 | `Logout` | deletes the server session |
+| `OAuthLogin{provider, code, code_verifier, redirect_uri}` | `AuthResult`; logs in (or registers, on first use) an account tied to that provider identity |
+| `OAuthLink{provider, code, code_verifier, redirect_uri}` (authenticated) | `Ok`; attaches that provider identity to the caller's account. `ERROR_CONFLICT` if it is already linked elsewhere |
+| `OAuthUnlink{provider}` (authenticated) | `Ok`; `ERROR_BAD_REQUEST` if it would leave the account with no password and no other linked provider |
+| `ListOAuthIdentities{}` (authenticated) | `OAuthIdentityList` |
 
 `AuthResult` = user, access token (in-memory on the server, 15 min),
 refresh token (stored as SHA-256 on the server, 30 days), session id.
+
+`HelloReply.oauth_providers` lists the providers (Discord/GitHub/Google) the
+server has credentials configured for, each with the `client_id` and
+`authorize_url` a client needs to send the user to the provider — never a
+client secret, which stays server-side only. `OAuthLogin` is a standard PKCE
+(RFC 7636) authorization-code exchange: the client generates the
+verifier/challenge and redirect URI (a loopback address on the end user's own
+machine), the server exchanges the code with the provider directly. A first
+sign-in with a given provider identity creates an account (username derived
+from the provider profile, no password set); later sign-ins with the same
+identity log into that same account.
 
 ### Events
 
@@ -168,7 +183,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | Area | Methods |
 |---|---|
 | daemon | `daemon.status`, `daemon.version`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe` |
-| accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.logout`, `account.remove`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
+| accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.oauthLogin {host, port, provider: discord\|github\|google}`, `account.oauthLink {provider}` (attaches a provider to the signed-in account), `account.oauthUnlink {provider}`, `account.oauthIdentities` → `{identities: [{provider, username, linked_at}]}`, `account.logout`, `account.remove`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
 | servers | `server.list`, `server.create`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
 | channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
 | messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search {channel \| server, query}`, `message.react`, `typing`, `presence.set` |

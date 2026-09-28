@@ -202,6 +202,15 @@ bool LocalStore::setTrustedFingerprint(std::int64_t id, const QString& fingerpri
     return q.exec() && q.numRowsAffected() == 1;
 }
 
+bool LocalStore::setUsername(std::int64_t id, const QString& username)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("UPDATE accounts SET username = ? WHERE id = ?"));
+    q.addBindValue(username);
+    q.addBindValue(qint64(id));
+    return q.exec() && q.numRowsAffected() == 1;
+}
+
 bool LocalStore::touchAccount(std::int64_t id)
 {
     QSqlQuery q(m_db);

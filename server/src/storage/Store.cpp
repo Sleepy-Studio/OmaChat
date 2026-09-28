@@ -10,7 +10,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -141,6 +141,21 @@ const char* const kSchemaV3[] = {
         public_key BLOB NOT NULL,
         created_at INTEGER NOT NULL,
         PRIMARY KEY(user_id, public_key)))",
+};
+
+// v4: OAuth login (Discord/GitHub/Google). A provider identity maps to
+// exactly one local user; password_hash may now be empty for accounts that
+// were created via OAuth and never set one.
+const char* const kSchemaV4[] = {
+    R"(CREATE TABLE oauth_identities(
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        provider_user_id TEXT NOT NULL,
+        provider_username TEXT NOT NULL DEFAULT '',
+        linked_at INTEGER NOT NULL,
+        UNIQUE(provider, provider_user_id)))",
+    "CREATE INDEX oauth_identities_by_user ON oauth_identities(user_id)",
 };
 
 qint64 sid(Id id)
@@ -274,6 +289,8 @@ bool Store::migrate(QString* error)
         return false;
     if (current < 3 && !apply(kSchemaV3))
         return false;
+    if (current < 4 && !apply(kSchemaV4))
+        return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
         if (error)
@@ -348,6 +365,59 @@ std::vector<UserRecord> Store::allUsers()
 bool Store::updateUserPasswordHash(Id userId, const QString& hash)
 {
     return exec(QStringLiteral("UPDATE users SET password_hash = ? WHERE id = ?"), {hash, sid(userId)});
+}
+
+// ------------------------------------------------------------ oauth
+
+bool Store::insertOAuthIdentity(const OAuthIdentityRecord& identity)
+{
+    return exec(QStringLiteral("INSERT INTO oauth_identities(id, user_id, provider, provider_user_id, "
+                               "provider_username, linked_at) VALUES(?,?,?,?,?,?)"),
+        {sid(identity.id), sid(identity.userId), identity.provider, identity.providerUserId,
+            identity.providerUsername, qint64(identity.linkedAt)});
+}
+
+std::optional<OAuthIdentityRecord> Store::oauthIdentity(const QString& provider, const QString& providerUserId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, user_id, provider, provider_user_id, provider_username, linked_at "
+                             "FROM oauth_identities WHERE provider = ? AND provider_user_id = ?"));
+    q.addBindValue(provider);
+    q.addBindValue(providerUserId);
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return OAuthIdentityRecord{uid(q.value(0)), uid(q.value(1)), q.value(2).toString(), q.value(3).toString(),
+        q.value(4).toString(), q.value(5).toLongLong()};
+}
+
+std::vector<OAuthIdentityRecord> Store::oauthIdentitiesForUser(Id userId)
+{
+    std::vector<OAuthIdentityRecord> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, user_id, provider, provider_user_id, provider_username, linked_at "
+                             "FROM oauth_identities WHERE user_id = ?"));
+    q.addBindValue(sid(userId));
+    if (!q.exec())
+        return out;
+    while (q.next()) {
+        out.push_back(OAuthIdentityRecord{uid(q.value(0)), uid(q.value(1)), q.value(2).toString(),
+            q.value(3).toString(), q.value(4).toString(), q.value(5).toLongLong()});
+    }
+    return out;
+}
+
+bool Store::deleteOAuthIdentity(Id userId, const QString& provider)
+{
+    return exec(QStringLiteral("DELETE FROM oauth_identities WHERE user_id = ? AND provider = ?"),
+        {sid(userId), provider});
+}
+
+bool Store::hasPassword(Id userId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT password_hash FROM users WHERE id = ?"));
+    q.addBindValue(sid(userId));
+    return q.exec() && q.next() && !q.value(0).toString().isEmpty();
 }
 
 // ------------------------------------------------------------- sessions

@@ -138,6 +138,18 @@ Relative paths are resolved against the config file's directory. Other keys:
 `media.bind`, `media.voice_bitrate`, `auth.access_token_minutes`,
 `auth.refresh_token_days`, `limits.max_connections_per_ip`, `log.level`.
 
+### Optional: sign in with Discord, GitHub or Google
+
+Add a `[oauth.discord]`, `[oauth.github]` and/or `[oauth.google]` section
+with `client_id` and `client_secret` from that provider's developer console.
+OmaChat only advertises providers you configure; leave a section out to keep
+it off. See `server.toml.example` for the exact keys and where each
+provider's OAuth app is registered. The redirect URI is a loopback address
+the client picks per attempt (`http://127.0.0.1:<port>/callback`), so
+register your app as an "installed app" / "loopback redirect" type and there
+is nothing else to set on the server side. Signing in this way creates an
+account automatically the first time, with no password set.
+
 ## 4. Firewall
 
 Open **TCP 6473** and **UDP 6474** (or your configured ports). Voice needs

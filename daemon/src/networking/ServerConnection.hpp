@@ -24,11 +24,26 @@ QString ipcErrorCode(proto::ErrorCode code);
 
 // Explicit credentials for a login or registration attempt.
 struct AuthCredentials {
-    enum class Kind { None, Login, Register } kind = Kind::None;
+    enum class Kind { None, Login, Register, OAuth } kind = Kind::None;
     QString username;
     QString password;
     QString displayName;
+    // OAuth only: the authorization code from the provider's redirect and
+    // the PKCE verifier/redirect_uri that must match what was sent to the
+    // provider's authorize endpoint.
+    proto::OAuthProvider oauthProvider = proto::OAUTH_PROVIDER_UNSPECIFIED;
+    QString oauthCode;
+    QString oauthCodeVerifier;
+    QString oauthRedirectUri;
     std::function<void(bool ok, const QString& code, const QString& message)> done;
+};
+
+// One OAuth login provider the server has advertised in its HelloReply.
+struct OAuthProviderInfo {
+    proto::OAuthProvider provider = proto::OAUTH_PROVIDER_UNSPECIFIED;
+    QString clientId;
+    QString authorizeUrl;
+    QString scope;
 };
 
 // The daemon's single control connection to an OmaChat server: TLS, version
@@ -80,6 +95,11 @@ public:
     QString errorMessage() const { return m_errorMessage; }
     QString certificateFingerprint() const { return m_certFingerprint; }
     QString instanceName() const { return m_instanceName; }
+    // The username the server assigned/returned on the most recent
+    // successful authentication; only meaningful right after an OAuth login
+    // creates or resolves an account under a username the daemon didn't
+    // choose itself.
+    QString lastAuthUsername() const { return m_lastAuthUsername; }
     const Account& account() const { return m_account; }
     bool hasAccount() const { return m_account.id != 0; }
     int reconnectInMs() const;
@@ -90,6 +110,7 @@ public:
     std::uint64_t maxUploadBytes() const { return m_maxUploadBytes; }
     // What the server announced in HelloReply ("search.server", …).
     const QStringList& capabilities() const { return m_capabilities; }
+    const std::vector<OAuthProviderInfo>& oauthProviders() const { return m_oauthProviders; }
     // Changes whenever the socket is torn down: a reply error that arrives
     // after it changed means "connection lost", not "the server refused".
     quint64 linkGeneration() const { return m_generation; }
@@ -146,10 +167,12 @@ private:
     QString m_errorMessage;
     QString m_certFingerprint;
     QString m_instanceName;
+    QString m_lastAuthUsername;
     QHostAddress m_serverAddress;
     quint16 m_mediaPort = 0;
     std::uint64_t m_maxUploadBytes = 0;
     QStringList m_capabilities;
+    std::vector<OAuthProviderInfo> m_oauthProviders;
 
     QString m_accessToken;
     quint64 m_sessionId = 0;

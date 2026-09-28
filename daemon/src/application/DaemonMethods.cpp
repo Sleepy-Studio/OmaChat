@@ -2,6 +2,7 @@
 // omachatd contract documented in docs/protocol.md#local-ipc.
 
 #include "application/Daemon.hpp"
+#include "networking/OAuthLoginFlow.hpp"
 
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Paths.hpp"
@@ -472,6 +473,99 @@ void Daemon::registerMethods()
     };
     m[QStringLiteral("account.login")] = authMethod(false);
     m[QStringLiteral("account.register")] = authMethod(true);
+    static const QHash<QString, proto::OAuthProvider> kOAuthProviders{
+        {QStringLiteral("discord"), proto::OAUTH_PROVIDER_DISCORD},
+        {QStringLiteral("github"), proto::OAUTH_PROVIDER_GITHUB},
+        {QStringLiteral("google"), proto::OAUTH_PROVIDER_GOOGLE},
+    };
+    m[QStringLiteral("account.oauthLogin")] = [this](const QJsonObject& p, const Responder& r) {
+        const auto it = kOAuthProviders.find(p.value(QStringLiteral("provider")).toString().toLower());
+        if (it == kOAuthProviders.end()) {
+            r.error(e::BadRequest, QStringLiteral("unknown sign-in provider"));
+            return;
+        }
+        const QString host = p.value(QStringLiteral("host")).toString().trimmed();
+        const int port = p.value(QStringLiteral("port")).toInt(kDefaultControlPort);
+        if (host.isEmpty() || port <= 0 || port > 65535) {
+            r.error(e::BadRequest, QStringLiteral("host and port are required"));
+            return;
+        }
+        // The real username is only known once the server responds; this
+        // placeholder is renamed after a successful sign-in.
+        const QString placeholder = QStringLiteral("oauth-%1").arg(it.key());
+        auto account = m_store.findAccount(host, static_cast<quint16>(port), placeholder);
+        if (!account) {
+            Account a{0, host, static_cast<quint16>(port), placeholder, {}, 0};
+            a.id = m_store.addAccount(a);
+            if (!a.id) {
+                r.error(e::StorageError, QStringLiteral("could not save account"));
+                return;
+            }
+            account = a;
+        }
+        startAccount(*account);
+        const std::int64_t accountId = account->id;
+        const proto::OAuthProvider provider = it.value();
+        OAuthLoginFlow::start(*m_conn, provider, OAuthLoginFlow::Mode::Login,
+            [this, accountId, r](bool ok, const QString& code, const QString& message) {
+            if (!ok) {
+                r.error(code, message);
+                return;
+            }
+            const QString realUsername = m_conn->lastAuthUsername();
+            if (!realUsername.isEmpty()) {
+                m_store.setUsername(accountId, realUsername);
+                if (auto a = m_store.account(accountId))
+                    m_conn->updateAccount(*a);
+            }
+            const auto a = m_store.account(accountId);
+            r.ok({{"account", accountJson(a.value_or(Account{}))}});
+        });
+    };
+    m[QStringLiteral("account.oauthLink")] = [this](const QJsonObject& p, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        const auto it = kOAuthProviders.find(p.value(QStringLiteral("provider")).toString().toLower());
+        if (it == kOAuthProviders.end()) {
+            r.error(e::BadRequest, QStringLiteral("unknown sign-in provider"));
+            return;
+        }
+        OAuthLoginFlow::start(*m_conn, it.value(), OAuthLoginFlow::Mode::Link,
+            [r](bool ok, const QString& code, const QString& message) {
+                if (ok)
+                    r.ok();
+                else
+                    r.error(code, message);
+            });
+    };
+    m[QStringLiteral("account.oauthUnlink")] = [this](const QJsonObject& p, const Responder& r) {
+        const auto it = kOAuthProviders.find(p.value(QStringLiteral("provider")).toString().toLower());
+        if (it == kOAuthProviders.end()) {
+            r.error(e::BadRequest, QStringLiteral("unknown sign-in provider"));
+            return;
+        }
+        proto::Envelope env;
+        env.mutable_oauth_unlink()->set_provider(it.value());
+        forward(std::move(env), r);
+    };
+    m[QStringLiteral("account.oauthIdentities")] = [this](const QJsonObject&, const Responder& r) {
+        proto::Envelope env;
+        env.mutable_list_oauth_identities();
+        forward(std::move(env), r, [](const proto::Envelope& reply) {
+            static const QHash<int, QString> kNames{
+                {proto::OAUTH_PROVIDER_DISCORD, QStringLiteral("discord")},
+                {proto::OAUTH_PROVIDER_GITHUB, QStringLiteral("github")},
+                {proto::OAUTH_PROVIDER_GOOGLE, QStringLiteral("google")},
+            };
+            QJsonArray list;
+            for (const auto& identity : reply.oauth_identity_list().identities()) {
+                list.append(QJsonObject{{"provider", kNames.value(identity.provider())},
+                    {"username", QString::fromStdString(identity.provider_username())},
+                    {"linked_at", static_cast<double>(identity.linked_at())}});
+            }
+            return QJsonObject{{"identities", list}};
+        });
+    };
     m[QStringLiteral("account.logout")] = [this](const QJsonObject&, const Responder& r) {
         leaveVoice(nullptr);
         m_conn->logout([r](bool, const QString&, const QString&) { r.ok(); });

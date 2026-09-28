@@ -1,0 +1,148 @@
+#include "auth/OAuthProviders.hpp"
+
+#include "omachat/core/Log.hpp"
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QUrl>
+#include <QUrlQuery>
+
+namespace omachat::server::auth {
+namespace {
+
+const OAuthProviderMeta kProviders[] = {
+    {
+        proto::OAUTH_PROVIDER_DISCORD,
+        QStringLiteral("discord"),
+        QStringLiteral("https://discord.com/oauth2/authorize"),
+        QStringLiteral("https://discord.com/api/oauth2/token"),
+        QStringLiteral("https://discord.com/api/users/@me"),
+        QStringLiteral("identify"),
+    },
+    {
+        proto::OAUTH_PROVIDER_GITHUB,
+        QStringLiteral("github"),
+        QStringLiteral("https://github.com/login/oauth/authorize"),
+        QStringLiteral("https://github.com/login/oauth/access_token"),
+        QStringLiteral("https://api.github.com/user"),
+        QStringLiteral("read:user"),
+    },
+    {
+        proto::OAUTH_PROVIDER_GOOGLE,
+        QStringLiteral("google"),
+        QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth"),
+        QStringLiteral("https://oauth2.googleapis.com/token"),
+        QStringLiteral("https://openidconnect.googleapis.com/v1/userinfo"),
+        QStringLiteral("openid profile"),
+    },
+};
+
+// Reads a provider profile response into the (id, username) pair OmaChat
+// cares about; the three providers disagree on field names and on whether
+// the id is a JSON number or a string.
+std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJsonObject& obj)
+{
+    OAuthProfile p;
+    switch (provider) {
+    case proto::OAUTH_PROVIDER_DISCORD:
+        p.id = obj.value(QStringLiteral("id")).toString();
+        p.username = obj.value(QStringLiteral("username")).toString();
+        break;
+    case proto::OAUTH_PROVIDER_GITHUB:
+        // GitHub's `id` is a JSON number.
+        p.id = QString::number(obj.value(QStringLiteral("id")).toDouble());
+        p.username = obj.value(QStringLiteral("login")).toString();
+        break;
+    case proto::OAUTH_PROVIDER_GOOGLE:
+        p.id = obj.value(QStringLiteral("sub")).toString();
+        p.username = obj.value(QStringLiteral("name")).toString();
+        if (p.username.isEmpty())
+            p.username = obj.value(QStringLiteral("email")).toString().section(u'@', 0, 0);
+        break;
+    default:
+        return std::nullopt;
+    }
+    if (p.id.isEmpty())
+        return std::nullopt;
+    return p;
+}
+
+} // namespace
+
+const OAuthProviderMeta* metaFor(proto::OAuthProvider provider)
+{
+    for (const auto& m : kProviders) {
+        if (m.provider == provider)
+            return &m;
+    }
+    return nullptr;
+}
+
+const OAuthProviderMeta* metaByName(const QString& name)
+{
+    for (const auto& m : kProviders) {
+        if (m.name.compare(name, Qt::CaseInsensitive) == 0)
+            return &m;
+    }
+    return nullptr;
+}
+
+void exchangeAndFetchProfile(QNetworkAccessManager& net, const OAuthProviderMeta& meta,
+    const OAuthProviderSettings& settings, const QString& code, const QString& codeVerifier,
+    const QString& redirectUri, std::function<void(std::optional<OAuthProfile>, QString error)> done)
+{
+    QUrlQuery body;
+    body.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
+    body.addQueryItem(QStringLiteral("code"), code);
+    body.addQueryItem(QStringLiteral("redirect_uri"), redirectUri);
+    body.addQueryItem(QStringLiteral("client_id"), settings.clientId);
+    body.addQueryItem(QStringLiteral("client_secret"), settings.clientSecret);
+    body.addQueryItem(QStringLiteral("code_verifier"), codeVerifier);
+
+    QNetworkRequest req{QUrl(meta.tokenUrl)};
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
+    req.setRawHeader("Accept", "application/json");
+
+    auto* tokenReply = net.post(req, body.query(QUrl::FullyEncoded).toUtf8());
+    QObject::connect(tokenReply, &QNetworkReply::finished, tokenReply, [&net, &meta, tokenReply, done] {
+        tokenReply->deleteLater();
+        if (tokenReply->error() != QNetworkReply::NoError) {
+            OMA_WARN("oauth", "token exchange failed", {"provider", meta.name}, {"error", tokenReply->errorString()});
+            done(std::nullopt, QStringLiteral("could not reach %1").arg(meta.name));
+            return;
+        }
+        const auto doc = QJsonDocument::fromJson(tokenReply->readAll());
+        const QString accessToken = doc.object().value(QStringLiteral("access_token")).toString();
+        if (accessToken.isEmpty()) {
+            done(std::nullopt, QStringLiteral("%1 did not return an access token").arg(meta.name));
+            return;
+        }
+
+        QNetworkRequest profileReq{QUrl(meta.profileUrl)};
+        profileReq.setRawHeader("Authorization", "Bearer " + accessToken.toUtf8());
+        // GitHub's API requires a User-Agent on every request.
+        profileReq.setRawHeader("User-Agent", "OmaChat-Server");
+        auto* profileReply = net.get(profileReq);
+        QObject::connect(profileReply, &QNetworkReply::finished, profileReply, [&meta, profileReply, done] {
+            profileReply->deleteLater();
+            if (profileReply->error() != QNetworkReply::NoError) {
+                OMA_WARN(
+                    "oauth", "profile fetch failed", {"provider", meta.name}, {"error", profileReply->errorString()});
+                done(std::nullopt, QStringLiteral("could not read your %1 profile").arg(meta.name));
+                return;
+            }
+            const auto obj = QJsonDocument::fromJson(profileReply->readAll()).object();
+            const auto profile = parseProfile(meta.provider, obj);
+            if (!profile) {
+                done(std::nullopt, QStringLiteral("%1 profile response was not understood").arg(meta.name));
+                return;
+            }
+            done(profile, QString());
+        });
+    });
+}
+
+} // namespace omachat::server::auth

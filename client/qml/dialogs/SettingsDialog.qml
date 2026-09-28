@@ -10,7 +10,10 @@ Dialog {
     width: Math.min(Theme.px(640), (parent ? parent.width : 800) - Theme.px(40))
     height: Math.min(Theme.px(560), (parent ? parent.height : 600) - Theme.px(40))
 
-    onAboutToShow: App.refreshAudio()
+    onAboutToShow: {
+        App.refreshAudio()
+        App.refreshOAuthIdentities()
+    }
 
     component Row2: RowLayout {
         property alias label: lbl.text
@@ -333,6 +336,53 @@ Dialog {
                     color: Theme.textFaint
                     font.pixelSize: Theme.px(11)
                 }
+
+                Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
+
+                Text {
+                    text: qsTr("Sign-in methods")
+                    color: Theme.text
+                    font.pixelSize: Theme.px(13)
+                    font.bold: true
+                }
+
+                Repeater {
+                    model: [
+                        {key: "discord", label: qsTr("Discord")},
+                        {key: "github", label: qsTr("GitHub")},
+                        {key: "google", label: qsTr("Google")},
+                    ]
+                    delegate: RowLayout {
+                        required property var modelData
+                        readonly property var identity: App.oauthIdentities.find(i => i.provider === modelData.key)
+                        Layout.fillWidth: true
+                        spacing: Theme.px(8)
+                        Text {
+                            Layout.fillWidth: true
+                            color: Theme.text
+                            font.pixelSize: Theme.px(13)
+                            text: identity ? qsTr("%1 — linked as %2").arg(modelData.label).arg(identity.username)
+                                           : modelData.label
+                        }
+                        FlatButton {
+                            enabled: !App.oauthLinkBusy
+                            danger: !!identity
+                            text: identity ? qsTr("Unlink")
+                                           : (App.oauthLinkBusy ? qsTr("Waiting on browser…") : qsTr("Link"))
+                            onClicked: identity ? App.unlinkOAuthProvider(modelData.key)
+                                                 : App.linkOAuthProvider(modelData.key)
+                        }
+                    }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.px(11)
+                    text: qsTr("Linking opens your browser to sign in with that provider, then confirms it here. "
+                               + "You can't unlink your last sign-in method without a password set.")
+                }
+
                 FlatButton {
                     danger: true
                     text: qsTr("Log out")

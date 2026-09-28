@@ -1,4 +1,5 @@
 #include "auth/Credentials.hpp"
+#include "auth/OAuthProviders.hpp"
 #include "core/ChatServer.hpp"
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
@@ -50,6 +51,21 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->set_registration_open(m_config.registrationOpen);
     r->set_media_udp_port(mediaPort());
     r->set_max_upload_bytes(maxUploadBytes());
+    const auto addProvider = [&](proto::OAuthProvider provider, const OAuthProviderSettings& settings) {
+        if (!settings.enabled)
+            return;
+        const auto* meta = auth::metaFor(provider);
+        if (!meta)
+            return;
+        auto* p = r->add_oauth_providers();
+        p->set_provider(provider);
+        p->set_client_id(settings.clientId.toStdString());
+        p->set_authorize_url(meta->authorizeUrl.toStdString());
+        p->set_scope(meta->scope.toStdString());
+    };
+    addProvider(proto::OAUTH_PROVIDER_DISCORD, m_config.oauthDiscord);
+    addProvider(proto::OAUTH_PROVIDER_GITHUB, m_config.oauthGithub);
+    addProvider(proto::OAUTH_PROVIDER_GOOGLE, m_config.oauthGoogle);
     s.phase = Session::Phase::AwaitAuth;
     reply(s, rid, std::move(env));
 }

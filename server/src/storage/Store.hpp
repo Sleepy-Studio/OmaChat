@@ -39,6 +39,13 @@ public:
     std::vector<UserRecord> allUsers();
     bool updateUserPasswordHash(Id userId, const QString& hash);
 
+    // ---- OAuth identities
+    bool insertOAuthIdentity(const OAuthIdentityRecord& identity);
+    std::optional<OAuthIdentityRecord> oauthIdentity(const QString& provider, const QString& providerUserId);
+    std::vector<OAuthIdentityRecord> oauthIdentitiesForUser(Id userId);
+    bool deleteOAuthIdentity(Id userId, const QString& provider);
+    bool hasPassword(Id userId);
+
     // ---- sessions
     bool insertSession(const SessionRecord& s);
     std::optional<SessionRecord> sessionByDigest(const QByteArray& digest);

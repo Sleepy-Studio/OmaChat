@@ -3,10 +3,12 @@
 add_library(omachat_server_core STATIC
     src/config/ServerConfig.cpp
     src/auth/Credentials.cpp
+    src/auth/OAuthProviders.cpp
     src/storage/Store.cpp
     src/core/State.cpp
     src/core/ChatServer.cpp
     src/core/AuthHandlers.cpp
+    src/core/OAuthHandlers.cpp
     src/core/ServerHandlers.cpp
     src/core/MessageHandlers.cpp
     src/core/VoiceHandlers.cpp

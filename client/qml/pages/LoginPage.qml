@@ -134,6 +134,45 @@ Rectangle {
             }
 
             RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.px(8)
+                Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
+                Text { text: qsTr("or"); color: Theme.textMuted; font.pixelSize: Theme.px(11) }
+                Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
+            }
+
+            // The server may not have every provider enabled; if not, it
+            // replies with a clear error shown above like any other one.
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Theme.px(8)
+
+                function go(provider) {
+                    const port = parseInt(portField.text)
+                    App.loginWithOAuth(hostField.text, isNaN(port) ? 6473 : port, provider)
+                }
+
+                FlatButton {
+                    Layout.fillWidth: true
+                    enabled: !App.authBusy
+                    text: qsTr("Continue with Discord")
+                    onClicked: parent.go("discord")
+                }
+                FlatButton {
+                    Layout.fillWidth: true
+                    enabled: !App.authBusy
+                    text: qsTr("Continue with GitHub")
+                    onClicked: parent.go("github")
+                }
+                FlatButton {
+                    Layout.fillWidth: true
+                    enabled: !App.authBusy
+                    text: qsTr("Continue with Google")
+                    onClicked: parent.go("google")
+                }
+            }
+
+            RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 Text {
                     text: page.registering ? qsTr("Already have an account?") : qsTr("New to this server?")

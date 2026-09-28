@@ -168,6 +168,23 @@ message Hello {
   repeated string capabilities = 4;
 }
 
+enum OAuthProvider {
+  OAUTH_PROVIDER_UNSPECIFIED = 0;
+  OAUTH_PROVIDER_DISCORD = 1;
+  OAUTH_PROVIDER_GITHUB = 2;
+  OAUTH_PROVIDER_GOOGLE = 3;
+}
+
+// Advertised in HelloReply for each provider the server has credentials
+// configured for, so clients never have to hardcode authorize endpoints
+// or client ids.
+message OAuthProviderConfig {
+  OAuthProvider provider = 1;
+  string client_id = 2;
+  string authorize_url = 3;
+  string scope = 4;
+}
+
 message HelloReply {
   uint32 protocol_major = 1;
   uint32 protocol_minor = 2;
@@ -177,6 +194,7 @@ message HelloReply {
   bool registration_open = 6;
   uint32 media_udp_port = 7;
   uint64 max_upload_bytes = 8;   // 0 = attachments unsupported
+  repeated OAuthProviderConfig oauth_providers = 9;
 }
 
 // ---------------------------------------------------------- authentication
@@ -200,6 +218,48 @@ message ResumeRequest {
   string access_token = 1;
   uint64 session_id = 2;
   uint64 last_sequence = 3;
+}
+
+// PKCE authorization-code login. The client (via a loopback redirect on the
+// user's own machine) is the only party that ever sees `code`; the server
+// exchanges it directly with the provider's token endpoint using its own
+// client secret. If no account is linked to the provider identity yet, one
+// is created from the provider profile (username derived from it, no
+// password set).
+message OAuthLoginRequest {
+  OAuthProvider provider = 1;
+  string code = 2;
+  string code_verifier = 3;
+  string redirect_uri = 4;
+}
+
+// Same PKCE exchange as OAuthLoginRequest, but for an already-authenticated
+// session: attaches the resulting provider identity to the caller's account
+// instead of logging in as whoever it belongs to. ERROR_CONFLICT if that
+// identity is already linked to a different account.
+message OAuthLinkRequest {
+  OAuthProvider provider = 1;
+  string code = 2;
+  string code_verifier = 3;
+  string redirect_uri = 4;
+}
+
+// ERROR_BAD_REQUEST if this would leave the account with no way to sign in
+// (no password set and no other linked provider).
+message OAuthUnlinkRequest {
+  OAuthProvider provider = 1;
+}
+
+message ListOAuthIdentitiesRequest {}
+
+message OAuthIdentity {
+  OAuthProvider provider = 1;
+  string provider_username = 2;
+  int64 linked_at = 3;      // unix ms
+}
+
+message OAuthIdentityList {
+  repeated OAuthIdentity identities = 1;
 }
 
 message LogoutRequest {}
@@ -519,6 +579,11 @@ message Envelope {
     AuthResult auth_result = 17;
     ResumeResult resume_result = 18;
     Ok ok = 19;
+    OAuthLoginRequest oauth_login = 130;
+    OAuthLinkRequest oauth_link = 131;
+    OAuthUnlinkRequest oauth_unlink = 132;
+    ListOAuthIdentitiesRequest list_oauth_identities = 133;
+    OAuthIdentityList oauth_identity_list = 134;
 
     // sync
     SyncRequest sync = 20;

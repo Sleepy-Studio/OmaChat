@@ -62,6 +62,65 @@ void AppController::login(const QString& host, int port, const QString& username
         });
 }
 
+void AppController::loginWithOAuth(const QString& host, int port, const QString& provider)
+{
+    if (host.trimmed().isEmpty()) {
+        m_authError = tr("Server is required.");
+        emit authChanged();
+        return;
+    }
+    m_authBusy = true;
+    m_authError.clear();
+    m_addingAccount = false;
+    emit authChanged();
+    // This opens the user's browser and can take a while; the daemon reports
+    // back once the whole flow (or a timeout) finishes.
+    m_link.request(QStringLiteral("account.oauthLogin"), {{"host", host.trimmed()}, {"port", port}, {"provider", provider}},
+        [this](const ipc::Reply& r) {
+            m_authBusy = false;
+            m_authError = r.ok || r.errorCode == u"CertificateError" ? QString() : r.errorMessage;
+            emit authChanged();
+        });
+}
+
+void AppController::refreshOAuthIdentities()
+{
+    m_link.request(QStringLiteral("account.oauthIdentities"), {}, [this](const ipc::Reply& r) {
+        if (!r.ok)
+            return;
+        QVariantList list;
+        for (const auto& v : r.result.value(QStringLiteral("identities")).toArray())
+            list.append(v.toObject().toVariantMap());
+        m_oauthIdentities = list;
+        emit oauthIdentitiesChanged();
+    });
+}
+
+void AppController::linkOAuthProvider(const QString& provider)
+{
+    if (m_oauthLinkBusy)
+        return;
+    m_oauthLinkBusy = true;
+    emit oauthIdentitiesChanged();
+    // Opens the user's browser; the daemon reports back once the flow (or a
+    // timeout) finishes.
+    m_link.request(QStringLiteral("account.oauthLink"), {{"provider", provider}}, [this](const ipc::Reply& r) {
+        m_oauthLinkBusy = false;
+        if (r.ok)
+            refreshOAuthIdentities();
+        else
+            showNotice(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage, true);
+        emit oauthIdentitiesChanged();
+    });
+}
+
+void AppController::unlinkOAuthProvider(const QString& provider)
+{
+    call(
+        QStringLiteral("account.oauthUnlink"), {{"provider", provider}},
+        [this](const QJsonObject&) { refreshOAuthIdentities(); }, tr("Could not unlink"));
+}
+
 void AppController::trustCertificate()
 {
     call(QStringLiteral("certificate.trust"), {{"fingerprint", certificateFingerprint()}},

@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QHash>
 #include <QHostAddress>
+#include <QNetworkAccessManager>
 #include <QObject>
 #include <QSslServer>
 #include <QTimer>
@@ -131,6 +132,13 @@ private:
     void completeAuth(Session& s, std::uint64_t rid, Id userId, Id sessionId, const QString& refreshToken);
     void attachUser(Session& s, Id userId, Id sessionId, const QString& accessToken);
 
+    // ---- handlers: OAuth login (OAuthHandlers.cpp)
+    void handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OAuthLoginRequest& m);
+    void handleOAuthLink(Session& s, std::uint64_t rid, const proto::OAuthLinkRequest& m);
+    void handleOAuthUnlink(Session& s, std::uint64_t rid, const proto::OAuthUnlinkRequest& m);
+    void handleListOAuthIdentities(Session& s, std::uint64_t rid);
+    QString uniqueUsernameFrom(const QString& suggestion);
+
     // ---- handlers: servers & channels (ServerHandlers.cpp)
     void handleSync(Session& s, std::uint64_t rid);
     void handleCreateServer(Session& s, std::uint64_t rid, const proto::CreateServerRequest& m);
@@ -216,6 +224,7 @@ private:
     SnowflakeGenerator m_ids;
     MediaRelay m_relay;
     QSslServer m_listener;
+    QNetworkAccessManager m_net; // outbound OAuth token/profile requests only
 
     quint64 m_nextConnId = 1;
     std::unordered_map<quint64, std::unique_ptr<Session>> m_sessions;

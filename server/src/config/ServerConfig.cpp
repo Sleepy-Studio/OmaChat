@@ -67,6 +67,15 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
         t["limits"]["max_connections_per_ip"], out.maxConnectionsPerIp, 1, 10000, "limits.max_connections_per_ip");
     out.logLevel = str(t["log"]["level"], out.logLevel);
 
+    auto oauth = [&](OAuthProviderSettings& p, const char* section) {
+        p.clientId = str(t["oauth"][section]["client_id"], p.clientId);
+        p.clientSecret = str(t["oauth"][section]["client_secret"], p.clientSecret);
+        p.enabled = t["oauth"][section]["enabled"].value_or(!p.clientId.isEmpty() && !p.clientSecret.isEmpty());
+    };
+    oauth(out.oauthDiscord, "discord");
+    oauth(out.oauthGithub, "github");
+    oauth(out.oauthGoogle, "google");
+
     if (!port || !node || !mport || !bitrate || !upload || !access || !refresh || !perIp)
         return false;
     if (dbType != u"sqlite") {

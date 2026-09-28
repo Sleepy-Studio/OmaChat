@@ -31,6 +31,28 @@ max_upload_mb = 50
 access_token_minutes = 15
 refresh_token_days = 30
 
+# OAuth login/registration. Leave a provider's section out (or its client_id
+# / client_secret empty) to keep it disabled; the client only ever sees
+# providers the server advertises. `enabled` defaults to true once both an
+# id and a secret are set, so it rarely needs to be written explicitly.
+#
+# The redirect URI you register with each provider is a loopback address
+# chosen by the client at login time (http://127.0.0.1:<ephemeral-port>/callback),
+# so there is nothing to configure here for it — just enable "loopback"
+# / "installed app" style redirects on the provider side if it asks.
+#
+# [oauth.discord]
+# client_id = "your-discord-application-id"
+# client_secret = "your-discord-application-secret"
+#
+# [oauth.github]
+# client_id = "your-github-oauth-app-client-id"
+# client_secret = "your-github-oauth-app-client-secret"
+#
+# [oauth.google]
+# client_id = "your-google-oauth-client-id.apps.googleusercontent.com"
+# client_secret = "your-google-oauth-client-secret"
+
 [limits]
 max_connections_per_ip = 16
 

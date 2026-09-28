@@ -37,6 +37,7 @@ public:
     std::int64_t addAccount(const Account& a); // returns id, 0 on failure
     bool removeAccount(std::int64_t id);
     bool setTrustedFingerprint(std::int64_t id, const QString& fingerprint);
+    bool setUsername(std::int64_t id, const QString& username);
     bool touchAccount(std::int64_t id);
 
     // Local gain per remote user (0.0 - 2.0), keyed by account + user id.

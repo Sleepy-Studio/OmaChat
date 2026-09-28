@@ -6,6 +6,17 @@
 
 namespace omachat::server {
 
+// One OAuth login provider's app credentials. Registration is done by the
+// operator on the provider's developer console; the redirect URI is a
+// loopback address on the end user's own machine (http://127.0.0.1:<port>/…),
+// chosen by the client at login time, so it does not need to be configured
+// here.
+struct OAuthProviderSettings {
+    bool enabled = false;
+    QString clientId;
+    QString clientSecret;
+};
+
 struct ServerConfig {
     QString instanceName = QStringLiteral("OmaChat");
     QString bind = QStringLiteral("0.0.0.0");
@@ -30,6 +41,10 @@ struct ServerConfig {
     int maxConnectionsPerIp = 16;
 
     QString logLevel = QStringLiteral("info");
+
+    OAuthProviderSettings oauthDiscord;
+    OAuthProviderSettings oauthGithub;
+    OAuthProviderSettings oauthGoogle;
 
     // Loads TOML. Unknown keys are ignored; invalid values produce an error.
     static bool load(const QString& path, ServerConfig& out, QString* error);

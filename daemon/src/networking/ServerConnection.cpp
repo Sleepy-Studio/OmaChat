@@ -310,6 +310,11 @@ void ServerConnection::onEncrypted()
         m_capabilities.clear();
         for (const auto& c : hr.capabilities())
             m_capabilities << QString::fromStdString(c);
+        m_oauthProviders.clear();
+        for (const auto& p : hr.oauth_providers()) {
+            m_oauthProviders.push_back(OAuthProviderInfo{p.provider(), QString::fromStdString(p.client_id()),
+                QString::fromStdString(p.authorize_url()), QString::fromStdString(p.scope())});
+        }
         beginAuth();
     });
 }
@@ -403,6 +408,12 @@ void ServerConnection::sendCredentials()
         r->set_username(creds.username.toStdString());
         r->set_password(creds.password.toStdString());
         r->set_display_name(creds.displayName.toStdString());
+    } else if (creds.kind == Credentials::Kind::OAuth) {
+        auto* o = env.mutable_oauth_login();
+        o->set_provider(creds.oauthProvider);
+        o->set_code(creds.oauthCode.toStdString());
+        o->set_code_verifier(creds.oauthCodeVerifier.toStdString());
+        o->set_redirect_uri(creds.oauthRedirectUri.toStdString());
     } else {
         auto* l = env.mutable_login();
         l->set_username(creds.username.toStdString());
@@ -438,6 +449,7 @@ void ServerConnection::handleAuthReply(const proto::Envelope& reply)
         return;
     }
     const auto& r = reply.auth_result();
+    m_lastAuthUsername = QString::fromStdString(r.user().username());
     m_accessToken = QString::fromStdString(r.access_token());
     m_sessionId = r.session_id();
     m_accessExpiresAt = r.access_expires_at();

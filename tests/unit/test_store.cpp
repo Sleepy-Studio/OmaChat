@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 3);
+    EXPECT_EQ(store.schemaVersion(), 4);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -48,6 +48,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         QSqlQuery q(db);
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE attachments")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE device_keys")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE oauth_identities")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN encrypted")));
         ASSERT_TRUE(q.exec(QStringLiteral("PRAGMA user_version=1")));
         q.finish();
@@ -58,7 +59,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 3);
+    EXPECT_EQ(store.schemaVersion(), 4);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 
@@ -81,6 +82,55 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     EXPECT_TRUE(store.removeDeviceKey(1, QByteArray(32, 'k')));
     ASSERT_EQ(store.deviceKeys({1}).size(), 1u);
     EXPECT_EQ(store.deviceKeys({1})[0].publicKey, QByteArray(32, 'j'));
+}
+
+TEST(ServerStore, OAuthIdentitiesLinkToExactlyOneUser)
+{
+    QTemporaryDir dir;
+    server::Store store;
+    QString error;
+    ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error));
+    ASSERT_TRUE(store.insertUser({1, QStringLiteral("alice"), QStringLiteral("Alice"), {}, {}, 0}));
+    ASSERT_TRUE(store.insertUser({2, QStringLiteral("bob"), QStringLiteral("Bob"), {}, {}, 0}));
+
+    EXPECT_FALSE(store.oauthIdentity(QStringLiteral("discord"), QStringLiteral("999")).has_value());
+    ASSERT_TRUE(store.insertOAuthIdentity({1, 1, QStringLiteral("discord"), QStringLiteral("999"),
+        QStringLiteral("alice#0001"), 1000}));
+    const auto identity = store.oauthIdentity(QStringLiteral("discord"), QStringLiteral("999"));
+    ASSERT_TRUE(identity.has_value());
+    EXPECT_EQ(identity->userId, 1u);
+
+    // The same provider identity can never link to a second local user.
+    EXPECT_FALSE(store.insertOAuthIdentity(
+        {2, 2, QStringLiteral("discord"), QStringLiteral("999"), QStringLiteral("bob"), 2000}));
+    // A different provider (or a different provider user id) is unrelated.
+    EXPECT_FALSE(store.oauthIdentity(QStringLiteral("github"), QStringLiteral("999")).has_value());
+}
+
+TEST(ServerStore, OAuthIdentitiesForUserAndPasswordCheck)
+{
+    QTemporaryDir dir;
+    server::Store store;
+    QString error;
+    ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error));
+    ASSERT_TRUE(store.insertUser({1, QStringLiteral("alice"), QStringLiteral("Alice"), {}, {}, 0}));
+    ASSERT_TRUE(store.insertUser(
+        {2, QStringLiteral("bob"), QStringLiteral("Bob"), {}, QStringLiteral("$argon2id$x"), 0}));
+
+    EXPECT_FALSE(store.hasPassword(1)) << "OAuth-created accounts start with no password";
+    EXPECT_TRUE(store.hasPassword(2));
+
+    EXPECT_TRUE(store.oauthIdentitiesForUser(1).empty());
+    ASSERT_TRUE(store.insertOAuthIdentity(
+        {1, 1, QStringLiteral("discord"), QStringLiteral("d1"), QStringLiteral("alice#1"), 1000}));
+    ASSERT_TRUE(store.insertOAuthIdentity(
+        {2, 1, QStringLiteral("github"), QStringLiteral("g1"), QStringLiteral("alice-gh"), 2000}));
+    EXPECT_EQ(store.oauthIdentitiesForUser(1).size(), 2u);
+
+    ASSERT_TRUE(store.deleteOAuthIdentity(1, QStringLiteral("github")));
+    EXPECT_EQ(store.oauthIdentitiesForUser(1).size(), 1u);
+    ASSERT_TRUE(store.deleteOAuthIdentity(1, QStringLiteral("discord")));
+    EXPECT_TRUE(store.oauthIdentitiesForUser(1).empty()) << "the server layer, not Store, blocks removing the last one";
 }
 
 TEST(ServerStore, MessagesPagingEditDeleteSearch)

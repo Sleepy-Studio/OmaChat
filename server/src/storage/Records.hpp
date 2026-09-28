@@ -21,6 +21,19 @@ struct UserRecord {
     std::int64_t createdAt = 0;
 };
 
+// A provider identity linked to a local account, keyed by (provider,
+// providerUserId) so a provider-side account can only ever map to one local
+// user. `provider` matches proto::OAuthProvider's name, lowercased
+// (e.g. "discord").
+struct OAuthIdentityRecord {
+    Id id = 0;
+    Id userId = 0;
+    QString provider;
+    QString providerUserId;
+    QString providerUsername;
+    std::int64_t linkedAt = 0;
+};
+
 struct SessionRecord {
     Id id = 0;
     Id userId = 0;
