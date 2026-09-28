@@ -46,7 +46,8 @@ assistants, bots or LLM features.
 
 See [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/protocol.md),
 [docs/media.md](docs/media.md), [docs/security.md](docs/security.md) and
-[docs/self-hosting.md](docs/self-hosting.md).
+[docs/self-hosting.md](docs/self-hosting.md). Current progress and what's
+next: [docs/status.md](docs/status.md).
 
 ## Build
 
