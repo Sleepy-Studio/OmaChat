@@ -214,7 +214,7 @@ does not cancel them.
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "connected": true,
   "state": "connected",
   "error": null,

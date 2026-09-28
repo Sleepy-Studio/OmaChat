@@ -6,7 +6,7 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
 ## Where things are
 
 - Remote: `github.com/Sleepy-Studio/OmaChat` (private), branch `main`.
-- Version string is still 0.1.0. Protocol **1.2** (capabilities
+- Released **0.2.0** (tag `v0.2.0`). Protocol **1.2** (capabilities
   `search.server`, `dm.group`, `attachments.resume`, `video.h264`,
   `e2e.v1`; a 1.2 client still works with a 1.1 server). Server schema
   **v3**, daemon local schema **v2**; both migrate forward on start.
@@ -14,7 +14,8 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
   package's `check()`. Zero compiler warnings in `build/`. `clang-format`
   is clean except `client/src/application/DaemonLink.hpp`, which predates
   this work.
-- Everything since 0.1 is **uncommitted** in the working tree.
+- The manual test pass below was done in the sandbox on 2026-09-28 and
+  everything worked; voice between two machines is still untested.
 
 ## Build, test, try it
 
@@ -107,7 +108,7 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
   and screen sharing (would need group media keys).
 - Stereo screen-share sound, and only the shared window's sound; DMA-BUF
   capture and VAAPI encoding.
-- `pkgver` bump and a tag when cutting a release.
+- Test voice and screen sharing between two machines on a real network.
 
 ## Decisions to keep
 

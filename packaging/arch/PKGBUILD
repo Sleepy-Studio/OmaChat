@@ -7,7 +7,7 @@
 # removed independently with `omarchy plugin add|remove` (see README).
 
 pkgname=omachat
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Native voice, text and screen chat for Omarchy and Linux (client, daemon, CLI and self-hostable server)"
 arch=('x86_64' 'aarch64')

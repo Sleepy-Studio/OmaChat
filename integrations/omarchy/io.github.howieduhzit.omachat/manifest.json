@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.howieduhzit.omachat",
   "name": "OmaChat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "HowieDuhzit",
   "license": "MIT",
   "description": "OmaChat in the Omarchy bar: voice channel, speakers, mute and deafen, and a shortcut into the app.",

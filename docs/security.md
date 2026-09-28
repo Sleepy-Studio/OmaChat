@@ -148,7 +148,7 @@ Limits, stated plainly:
 - Messages from before encryption existed stay as they were (plaintext).
 - Search cannot find encrypted messages (the server cannot index them).
 
-## Not in scope for 0.1
+## Not in scope for 0.2
 
 - End-to-end encryption of server channels, voice and screen sharing (see
   above): the server can read server channels and, because it re-seals media

@@ -224,7 +224,7 @@ Open TCP 6473 and UDP 6474. Full guide: [docs/self-hosting.md](docs/self-hosting
   (`QT_QPA_PLATFORM=offscreen`) for docs and UI checks.
 - Style: `clang-format` (`.clang-format`), warnings are kept at zero.
 
-## Status: 0.1 (early)
+## Status: 0.2 (early)
 
 Working and tested (see `ctest`): accounts, sessions and resume, TLS with
 explicit certificate trust, servers, invites, categories, text and voice
