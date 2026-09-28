@@ -12,13 +12,12 @@ services:
     image: ghcr.io/sleepy-studio/omachat-server:${OMACHAT_IMAGE_TAG:-latest}
     restart: unless-stopped
 
+    # Use the same host:container form as Coolify's own Compose examples.
+    # These are direct host ports; the generated HTTP domain does not carry
+    # OmaChat's TLS control connection or UDP media.
     ports:
-      - target: ${OMACHAT_PORT:-6473}
-        published: "${OMACHAT_PORT:-6473}"
-        protocol: tcp
-      - target: ${OMACHAT_MEDIA_PORT:-6474}
-        published: "${OMACHAT_MEDIA_PORT:-6474}"
-        protocol: udp
+      - "${OMACHAT_PORT:-6473}:${OMACHAT_PORT:-6473}/tcp"
+      - "${OMACHAT_MEDIA_PORT:-6474}:${OMACHAT_MEDIA_PORT:-6474}/udp"
 
     # Coolify discovers this Compose-owned persistent volume. It contains the
     # SQLite database, attachments, generated config and TLS identity.

@@ -52,7 +52,12 @@ handing it to clients. A generated Coolify web URL is not an OmaChat endpoint:
 clients connect to the hostname on TCP port 6473 (or your chosen port), while
 media uses UDP port 6474 (or your chosen port). The Coolify HTTP proxy route
 associated with the generated domain is unused and cannot terminate OmaChat's
-TLS or carry its UDP traffic.
+TLS or carry its UDP traffic. Do not append `:6473` to Coolify's **Domains for
+omachat-server** field: a port there selects an internal HTTP proxy target,
+not the public client port. Coolify may warn that it is an unrecognized
+internal port; that warning does not describe the Compose `ports:` mappings.
+In the OmaChat client, enter only the hostname in **Server** and `6473` in
+**Port**.
 
 Review the environment defaults for server name, TCP and UDP ports,
 registration, node ID, upload limit, and log level. Open the selected TCP and
