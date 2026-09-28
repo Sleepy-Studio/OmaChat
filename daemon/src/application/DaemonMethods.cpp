@@ -510,11 +510,15 @@ void Daemon::registerMethods()
         OAuthLoginFlow::start(*m_conn, provider, OAuthLoginFlow::Mode::Login,
             [this, accountId, isNewAccount, r](bool ok, const QString& code, const QString& message) {
             if (!ok) {
-                // A placeholder account made just for this attempt is useless
-                // once it fails; leaving it around would keep retrying an
-                // unreachable/misconfigured host forever in the background,
-                // with no way back to the login screen while it's active.
-                if (isNewAccount) {
+                // An untrusted certificate is not a dead end: the account
+                // stays put, exactly like a normal login would, so the
+                // client's certificate-trust flow can resume it. Anything
+                // else means a placeholder account made just for this
+                // attempt is useless; leaving it around would keep retrying
+                // an unreachable/misconfigured host forever in the
+                // background, with no way back to the login screen while
+                // it's active.
+                if (isNewAccount && code != e::CertificateError) {
                     const Responder none(nullptr, nullptr, 0);
                     dispatch(QStringLiteral("account.remove"), {{"account", QString::number(accountId)}}, none);
                 }

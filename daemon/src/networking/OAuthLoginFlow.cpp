@@ -76,7 +76,11 @@ void OAuthLoginFlow::awaitLoginPrompt()
             return;
         m_timeout.stop();
         disconnect(&m_conn, &ServerConnection::stateChanged, this, nullptr);
-        finish(false, e::ServerUnavailable, m_conn.errorMessage());
+        // An untrusted certificate is not a dead end: the same account can
+        // be resumed once the caller trusts it, exactly like a normal login
+        // would. Anything else here is unrecoverable for this attempt.
+        const QString code = m_conn.errorCode().isEmpty() ? e::ServerUnavailable : m_conn.errorCode();
+        finish(false, code, m_conn.errorMessage());
     });
 }
 
