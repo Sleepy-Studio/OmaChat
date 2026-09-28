@@ -98,6 +98,7 @@ message ChatMessage {
   repeated Attachment attachments = 9;
   repeated Reaction reactions = 10;
   bool is_action = 11;       // "/me" message
+  bytes encrypted = 12;      // E2EPayload (direct/group conversations); content is empty
 }
 
 message VoiceState {
@@ -108,6 +109,7 @@ message VoiceState {
   bool server_mute = 5;
   bool server_deaf = 6;
   uint32 stream_id = 7;      // media stream id for speaking indicators
+  bool streaming = 8;        // sharing their screen (1.2, "video.h264")
 }
 
 message Invite {
@@ -260,6 +262,16 @@ message UpdateChannelRequest {
 message DeleteChannelRequest { uint64 channel_id = 1; }
 message OpenDmRequest { uint64 user_id = 1; }
 
+// Group conversations (1.2, capability "dm.group"): 3-10 people who each
+// share a server with whoever adds them. Any participant may add people or
+// rename it (UpdateChannelRequest.name); the last one to leave deletes it.
+message CreateGroupDmRequest {
+  repeated uint64 user_ids = 1;  // others; the caller is added implicitly
+  string name = 2;               // optional
+}
+message AddGroupDmRecipientRequest { uint64 channel_id = 1; uint64 user_id = 2; }
+message LeaveGroupDmRequest { uint64 channel_id = 1; }
+
 // ---------------------------------------------------------------- messages
 
 message SendMessageRequest {
@@ -268,10 +280,55 @@ message SendMessageRequest {
   uint64 reply_to = 3;
   bool is_action = 4;
   repeated uint64 attachment_ids = 5;
+  bytes encrypted = 6;            // 1.2 "e2e.v1": direct/group conversations only, content empty
 }
 message EditMessageRequest {
   uint64 message_id = 1;
   string content = 2;
+  bytes encrypted = 3;
+}
+
+// ----------------------------------------------------- end-to-end encryption
+//
+// 1.2, capability "e2e.v1". Every device holds an X25519 key pair; only the
+// public half is published. A message body is sealed with a random content
+// key (XChaCha20-Poly1305, associated data = "omachat-e2e-v1" | channel id |
+// author id, both 8 bytes big-endian), and that key is boxed (crypto_box) from
+// the sender's device key to every participant device. The server stores and
+// relays the payload without being able to read it. See docs/security.md.
+
+message DeviceKey {
+  uint64 user_id = 1;
+  bytes public_key = 2;           // 32 bytes
+  int64 created_at = 3;
+}
+message PublishDeviceKeyRequest { bytes public_key = 1; }
+message RevokeDeviceKeyRequest { bytes public_key = 1; }
+message GetDeviceKeysRequest { repeated uint64 user_ids = 1; }
+message DeviceKeyList { repeated DeviceKey keys = 1; }
+
+message E2EKeyWrap {
+  bytes recipient_key = 1;        // device public key
+  bytes nonce = 2;                // 24 bytes
+  bytes box = 3;                  // crypto_box_easy(content key)
+}
+message E2EFile {
+  uint64 attachment_id = 1;
+  string filename = 2;            // the real name; the server only sees "file.enc"
+  string mime_type = 3;
+  uint64 size = 4;                // plaintext bytes
+  bytes key = 5;                  // crypto_secretstream_xchacha20poly1305 key; header leads the file
+}
+message E2EBody {
+  string content = 1;
+  repeated E2EFile files = 2;
+}
+message E2EPayload {
+  uint32 version = 1;             // 1
+  bytes sender_key = 2;           // the sending device's public key
+  bytes nonce = 3;                // 24 bytes
+  bytes ciphertext = 4;           // E2EBody
+  repeated E2EKeyWrap wraps = 5;
 }
 message DeleteMessageRequest { uint64 message_id = 1; }
 message GetMessagesRequest {
@@ -285,9 +342,10 @@ message MessagePage {
   bool has_more = 3;
 }
 message SearchMessagesRequest {
-  uint64 channel_id = 1;
+  uint64 channel_id = 1;     // 0 with server_id set = every readable channel of that server
   string query = 2;
   uint32 limit = 3;
+  uint64 server_id = 4;      // 1.2, capability "search.server"
 }
 message ReactionRequest {
   uint64 message_id = 1;
@@ -299,10 +357,11 @@ message ReactionRequest {
 //
 // Files travel over the control connection in chunks of at most
 // UploadTicket.chunk_size bytes, so no second port is needed. An upload
-// belongs to the connection that began it and is discarded if that
-// connection closes before FinishUpload. A finished attachment stays
-// pending until a SendMessage in the same channel references it; pending
-// attachments are purged after an hour.
+// belongs to the connection that began it. If that connection closes before
+// FinishUpload, the upload waits (10 minutes idle at most) for the same user
+// to ResumeUpload it from another connection (1.2, "attachments.resume").
+// A finished attachment stays pending until a SendMessage in the same
+// channel references it; pending attachments are purged after an hour.
 
 message BeginUploadRequest {
   uint64 channel_id = 1;
@@ -313,7 +372,9 @@ message BeginUploadRequest {
 message UploadTicket {
   uint64 attachment_id = 1;
   uint32 chunk_size = 2;          // maximum bytes per UploadChunk
+  uint64 received = 3;            // bytes already stored (ResumeUpload); send from here
 }
+message ResumeUploadRequest { uint64 attachment_id = 1; }
 message UploadChunkRequest {
   uint64 attachment_id = 1;
   uint64 offset = 2;              // must equal the bytes received so far
@@ -351,6 +412,12 @@ message SetVoiceStateRequest {
   bool self_mute = 1;
   bool self_deaf = 2;
 }
+// Screen sharing (1.2, capability "video.h264"). A streamer sends H.264 as
+// video packets on its voice media stream; the relay forwards them only to
+// members of the same voice channel who asked to watch. See docs/media.md.
+message SetStreamingRequest { bool streaming = 1; }
+message WatchStreamRequest { uint64 user_id = 1; bool watch = 2; }
+
 message VoiceSession {
   uint64 channel_id = 1;
   uint32 stream_id = 2;          // this client's media stream id
@@ -402,6 +469,7 @@ message RoleDeleteEvent { uint64 server_id = 1; uint64 role_id = 2; }
 message PresenceEvent { uint64 user_id = 1; UserStatus status = 2; }
 message ReactionEvent { uint64 channel_id = 1; uint64 message_id = 2; string emoji = 3; uint64 user_id = 4; bool add = 5; }
 message PermissionsChangedEvent { uint64 server_id = 1; }
+message DeviceKeysChangedEvent { uint64 user_id = 1; }
 
 message Event {
   uint64 sequence = 1;   // 0 for ephemeral events (typing) that are not replayed
@@ -426,6 +494,7 @@ message Event {
     ServerDeleteEvent server_delete = 27;
     User user_update = 28;
     PermissionsChangedEvent permissions_changed = 29;
+    DeviceKeysChangedEvent device_keys_changed = 30;
   }
 }
 
@@ -470,6 +539,9 @@ message Envelope {
     OpenDmRequest open_dm = 41;
     ListInvitesRequest list_invites = 42;
     InviteList invite_list = 43;
+    CreateGroupDmRequest create_group_dm = 44;
+    AddGroupDmRecipientRequest add_group_dm_recipient = 45;
+    LeaveGroupDmRequest leave_group_dm = 46;
 
     // messages
     SendMessageRequest send_message = 50;
@@ -492,12 +564,15 @@ message Envelope {
     CancelUploadRequest cancel_upload = 65;
     DownloadRequest download = 66;
     FileChunk file_chunk = 67;
+    ResumeUploadRequest resume_upload = 68;
 
     // voice
     JoinVoiceRequest join_voice = 70;
     LeaveVoiceRequest leave_voice = 71;
     SetVoiceStateRequest set_voice_state = 72;
     VoiceSession voice_session = 73;
+    SetStreamingRequest set_streaming = 74;
+    WatchStreamRequest watch_stream = 75;
 
     // moderation / roles
     KickRequest kick = 80;
@@ -515,5 +590,11 @@ message Envelope {
 
     // server push
     Event event = 100;
+
+    // end-to-end encryption
+    PublishDeviceKeyRequest publish_device_key = 120;
+    RevokeDeviceKeyRequest revoke_device_key = 121;
+    GetDeviceKeysRequest get_device_keys = 122;
+    DeviceKeyList device_key_list = 123;
   }
 }

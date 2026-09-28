@@ -10,6 +10,11 @@ Rectangle {
     color: Theme.surface
 
     signal createChannel(string parentId)
+    signal openServerSettings()
+    signal openChannelPermissions(string channelId, string name)
+    signal newGroup()
+    signal addToGroup(string channelId)
+    signal renameGroup(string channelId, string name)
 
     function focusList() {
         list.forceActiveFocus()
@@ -46,6 +51,12 @@ Rectangle {
                     iconName: "users"
                     tip: qsTr("Invite people")
                     onClicked: App.createInvite()
+                }
+                IconButton {
+                    visible: App.homeSelected && App.capabilities.indexOf("dm.group") >= 0
+                    iconName: "plus"
+                    tip: qsTr("New group conversation")
+                    onClicked: sidebar.newGroup()
                 }
                 IconButton {
                     visible: !App.homeSelected
@@ -113,7 +124,7 @@ Rectangle {
                 wrapMode: Text.Wrap
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(12)
-                text: App.homeSelected ? qsTr("No conversations yet. Right-click a member to message them.")
+                text: App.homeSelected ? qsTr("No conversations yet. Right-click a member to message them, or start a group with +.")
                                        : qsTr("No channels you can see.")
             }
         }
@@ -169,6 +180,7 @@ Rectangle {
             readonly property var m: parent ? parent.model : null
             readonly property bool isVoice: m && m.rowType === "voice"
             readonly property bool isDm: m && m.rowType === "dm"
+            readonly property bool isGroup: m && m.rowType === "group_dm"
             readonly property bool emphasized: m && (m.unread || m.selected)
             implicitHeight: isDm ? Theme.px(40) : Theme.px(30)
             anchors.left: parent ? parent.left : undefined
@@ -214,7 +226,7 @@ Rectangle {
                 }
                 Icon {
                     visible: !row.isDm
-                    name: row.isVoice ? "speaker" : (m && m.locked ? "lock" : "hash")
+                    name: row.isGroup ? "users" : row.isVoice ? "speaker" : (m && m.locked ? "lock" : "hash")
                     size: Theme.px(16)
                     color: row.emphasized ? Theme.text : Theme.textFaint
                 }
@@ -249,7 +261,9 @@ Rectangle {
                 onClicked: mouse => {
                     if (mouse.button === Qt.RightButton) {
                         channelMenu.channelId = m.itemId
+                        channelMenu.channelName = m.name
                         channelMenu.isVoice = row.isVoice
+                        channelMenu.isGroup = row.isGroup
                         channelMenu.userId = m.userId
                         channelMenu.popup()
                     } else {
@@ -287,20 +301,46 @@ Rectangle {
                     color: m && m.speaking ? Theme.text : Theme.textMuted
                     font.pixelSize: Theme.px(13)
                 }
+                Rectangle {
+                    visible: m ? m.streaming : false
+                    implicitWidth: liveLabel.implicitWidth + Theme.px(8)
+                    implicitHeight: Theme.px(15)
+                    radius: Theme.px(3)
+                    color: Theme.danger
+                    Text {
+                        id: liveLabel
+                        anchors.centerIn: parent
+                        text: qsTr("LIVE")
+                        color: Theme.accentText
+                        font.pixelSize: Theme.px(9)
+                        font.bold: true
+                    }
+                }
                 Icon { visible: m ? m.userMuted && !m.userDeafened : false; name: "mic-off"; size: Theme.px(13); color: Theme.danger }
                 Icon { visible: m ? m.userDeafened : false; name: "headphones-off"; size: Theme.px(13); color: Theme.danger }
             }
             MouseArea {
                 anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                cursorShape: m && m.streaming && m.userId !== App.selfId ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onClicked: mouse => {
+                    if (mouse.button === Qt.LeftButton) {
+                        // Watching needs you in the same voice channel.
+                        if (m.streaming && m.userId !== App.selfId && App.voiceChannelId === m.itemId)
+                            App.watchStream(m.userId)
+                        return
+                    }
                     volumePopup.userId = m.userId
                     volumePopup.userName = m.name
                     volumePopup.popup()
                 }
             }
+            ToolTip.visible: m && m.streaming && m.userId !== App.selfId && hoverWatch.hovered
+            ToolTip.delay: 500
+            ToolTip.text: App.voiceChannelId === (m ? m.itemId : "") ? qsTr("Click to watch") : qsTr("Join this channel to watch")
+            HoverHandler { id: hoverWatch }
             Accessible.role: Accessible.ListItem
-            Accessible.name: (m ? m.name : "") + (m && m.speaking ? qsTr(", speaking") : "")
+            Accessible.name: (m ? m.name : "") + (m && m.streaming ? qsTr(", sharing their screen") : "") + (m && m.speaking ? qsTr(", speaking") : "")
                              + (m && m.userMuted ? qsTr(", muted") : "") + (m && m.userDeafened ? qsTr(", deafened") : "")
         }
     }
@@ -310,6 +350,7 @@ Rectangle {
         id: serverMenu
         MenuAction { text: qsTr("Create invite link"); enabled: App.canCreateInvites; onTriggered: App.createInvite() }
         MenuAction { text: qsTr("Create channel"); enabled: App.canManageChannels; onTriggered: sidebar.createChannel("") }
+        MenuAction { text: qsTr("Roles and members"); enabled: App.canManageRoles; onTriggered: sidebar.openServerSettings() }
         MenuAction {
             text: App.isServerOwner ? qsTr("Delete server") : qsTr("Leave server")
             danger: true
@@ -330,7 +371,9 @@ Rectangle {
     MenuPopup {
         id: channelMenu
         property string channelId
+        property string channelName
         property bool isVoice
+        property bool isGroup
         property string userId
         MenuAction {
             text: channelMenu.isVoice ? qsTr("Join voice") : qsTr("Open")
@@ -342,6 +385,27 @@ Rectangle {
             onTriggered: App.setChannelMuted(channelMenu.channelId, !App.channelMuted(channelMenu.channelId))
         }
         MenuAction {
+            text: qsTr("Add people")
+            enabled: channelMenu.isGroup
+            onTriggered: sidebar.addToGroup(channelMenu.channelId)
+        }
+        MenuAction {
+            text: qsTr("Rename conversation")
+            enabled: channelMenu.isGroup
+            onTriggered: sidebar.renameGroup(channelMenu.channelId, channelMenu.channelName)
+        }
+        MenuAction {
+            text: qsTr("Leave conversation")
+            danger: true
+            enabled: channelMenu.isGroup
+            onTriggered: { leaveGroupConfirm.channelId = channelMenu.channelId; leaveGroupConfirm.open() }
+        }
+        MenuAction {
+            text: qsTr("Permissions")
+            enabled: App.canManageRoles && channelMenu.userId.length === 0
+            onTriggered: sidebar.openChannelPermissions(channelMenu.channelId, channelMenu.channelName)
+        }
+        MenuAction {
             text: qsTr("Copy channel ID")
             onTriggered: App.copyText(channelMenu.channelId)
         }
@@ -351,6 +415,16 @@ Rectangle {
             enabled: App.canManageChannels && channelMenu.userId.length === 0
             onTriggered: { channelConfirm.channelId = channelMenu.channelId; channelConfirm.open() }
         }
+    }
+
+    ConfirmDialog {
+        id: leaveGroupConfirm
+        property string channelId
+        title: qsTr("Leave the conversation?")
+        message: qsTr("You will stop receiving its messages unless someone adds you back.")
+        confirmText: qsTr("Leave")
+        destructive: true
+        onConfirmed: App.leaveGroup(channelId)
     }
 
     ConfirmDialog {

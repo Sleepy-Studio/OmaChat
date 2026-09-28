@@ -18,10 +18,12 @@ protocol ([media.md](media.md)), and the local IPC protocol.
 1. Client sends `Hello{protocol_major, protocol_minor, client_version, capabilities}`.
 2. Server replies `HelloReply{…, instance_name, registration_open, media_udp_port}`
    or `ERROR_PROTOCOL_MISMATCH` (different major) and closes.
-   Current version: **1.1**. Minor versions negotiate through capability
+   Current version: **1.2**. Minor versions negotiate through capability
    strings (`resume`, `voice.opus`, `media.chacha20poly1305`, `search.fts`,
-   `attachments`). `HelloReply.max_upload_bytes` is 0 when a server takes no
-   attachments.
+   `attachments`; since 1.2 `search.server`, `dm.group`,
+   `attachments.resume`, `video.h264`, `e2e.v1`). `HelloReply.max_upload_bytes` is 0
+   when a server takes no attachments. Clients check a capability before
+   using the feature, so a 1.2 client works with a 1.1 server.
 3. Unauthenticated connections have 30 s to finish authenticating.
 
 ### Authentication and sessions
@@ -58,7 +60,21 @@ because JavaScript numbers cannot hold 64-bit integers.
 
 `GetMessages{channel_id, before_message_id, limit}` → newest-first page,
 default 50, max 100, with `has_more`. `SearchMessages` uses SQLite FTS5;
-user input is quoted so it can never use FTS query syntax.
+user input is quoted so it can never use FTS query syntax. With
+`channel_id = 0` and `server_id` set it searches every channel of that
+server the caller may read (`VIEW_CHANNEL` + `READ_HISTORY`); results are
+newest first across channels, at most 50.
+
+### Group conversations (`dm.group`)
+
+`CreateGroupDm{user_ids, name?}` → `Channel` (type `GROUP_DM`, 3–10 people
+including the caller, each sharing a server with the caller).
+`AddGroupDmRecipient{channel_id, user_id}` → `Channel`: any participant
+may add someone they share a server with; existing members get
+`channel_update`, the new one `channel_create` (and the full history).
+`UpdateChannel{name}` renames it (any participant; no topics).
+`LeaveGroupDm{channel_id}` → `Ok`: the leaver gets `channel_delete`, the
+others `channel_update`; the last one out deletes the conversation.
 
 ### Attachments
 
@@ -74,10 +90,35 @@ Files ride the control connection in chunks, so no extra port is needed.
 4. `SendMessage{…, attachment_ids}` (≤ 10) claims pending attachments of the
    same author and channel. The text may then be empty.
 
-`CancelUpload` drops an upload in progress or a pending attachment. An
-upload in progress dies with its connection. `Download{attachment_id,
-offset, length}` → `FileChunk{offset, data, total_size}` for anyone who may
-read the message's channel history.
+`CancelUpload` drops an upload in progress or a pending attachment (from
+any of the uploader's connections). When a connection closes mid-upload
+the upload waits, for at most 10 minutes of inactivity, for
+`ResumeUpload{attachment_id}` from the same user on another connection
+(`attachments.resume`): the reply is an `UploadTicket` whose `received`
+says where to continue. `Download{attachment_id, offset, length}` →
+`FileChunk{offset, data, total_size}` for anyone who may read the
+message's channel history.
+
+### End-to-end encryption (`e2e.v1`)
+
+`PublishDeviceKey{public_key}` (32-byte X25519, ≤ 10 per user),
+`RevokeDeviceKey{public_key}`, `GetDeviceKeys{user_ids ≤ 50}` →
+`DeviceKeyList` (only yourself and people you share a server or
+conversation with). A change is pushed as `device_keys_changed{user_id}`
+to everyone who can see that user. In direct and group conversations
+`SendMessage`/`EditMessage` carry `encrypted` (an `E2EPayload`, ≤ 64 KiB)
+and an empty `content`; the server stores and relays it untouched and
+refuses it in server channels. `E2EPayload`, `E2EBody` and `E2EFile` are
+defined in `network.proto`; the scheme is in [security.md](security.md).
+
+### Screen sharing (`video.h264`)
+
+In a voice channel, `SetStreaming{streaming}` (needs `STREAM`) marks you as
+sharing (`VoiceState.streaming`) and lets the relay forward your video
+packets. `WatchStream{user_id, watch}` subscribes you to a sharer in the
+same voice channel; the relay then asks the sharer for a keyframe. Video
+never reaches anyone who did not ask to watch. Packet format:
+[media.md](media.md#screen-sharing).
 
 ### Rate limits (per connection unless noted)
 
@@ -127,18 +168,25 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | Area | Methods |
 |---|---|
 | daemon | `daemon.status`, `daemon.version`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe` |
-| accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.logout`, `account.remove`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
+| accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.logout`, `account.remove`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
 | servers | `server.list`, `server.create`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
-| channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open` |
-| messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search`, `message.react`, `typing`, `presence.set` |
+| channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
+| messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search {channel \| server, query}`, `message.react`, `typing`, `presence.set` |
 | attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?}` → `{path, cached}`, `transfer.list`, `transfer.cancel {id}` |
 | voice | `voice.join`, `voice.leave`, `voice.mute`, `voice.unmute`, `voice.toggle_mute`, `voice.deafen`, `voice.undeafen`, `voice.toggle_deafen`, `voice.mode`, `voice.stats`, `ptt.begin`, `ptt.end` |
+| encryption | `e2e.status` → `{enabled, ready, device}`, `e2e.safety {user}` → `{number, devices, verified}`, `e2e.verify {user, verified?}` |
+| screen sharing | `stream.start` (answers after the desktop picker; no timeout), `stream.stop`, `stream.watch {user}` → `{path}`, `stream.unwatch {user}`, `stream.stats`, `video.settings`, `video.set` |
 | audio | `audio.devices`, `audio.settings`, `audio.set`, `audio.user_volume` |
-| moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update`, `role.delete`, `role.assign`, `override.set`, `override.list` |
+| moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update` (fields left out are kept), `role.delete`, `role.assign`, `override.set {channel, role \| user, allow, deny, remove?}`, `override.list` |
 | ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.reload` |
 
 Push-to-talk held by a client is released automatically if that client
 disconnects.
+
+Messages of encrypted conversations arrive decrypted, with `"e2e": "ok"`
+(`"unverified"`: the sending device is not one we know for the author;
+`"undecryptable"`: not addressed to this device). Their attachments show
+the real file name, type and size, and `attachment.download` decrypts them.
 
 ### Events
 
@@ -148,7 +196,14 @@ disconnects.
 `server.updated/removed`, `user.updated`, `presence`, `role.updated/deleted`,
 `voice.state`, `voice.speaking`, `voice.self`, `voice.ptt`, `voice.error`,
 `audio.devices`, `ui.navigate`, `transfer.progress` (`{id, direction,
-name, transferred, total}` plus `complete` or `error` at the end).
+name, transferred, total, waiting, account}` plus `complete` or `error` at
+the end; `waiting` while the connection is down), `account.activity`
+(`{account, unread, mentions}` for a background account), `e2e.keys_changed`
+(`{user_id, name, self}`: a contact's devices changed), `stream.ended`
+(`{user_id?}`: a watched share, or your own, stopped).
+
+With several accounts, everything above describes the **active** account;
+`account.switch` changes it and is followed by `state.reset`.
 
 `message.send` with `files` (absolute paths, read by the daemon) and
 `attachment.download` answer when the transfer ends; clients should call
@@ -165,14 +220,19 @@ does not cancel them.
   "error": null,
   "reconnect_in_ms": 0,
   "account": {"id": "1", "host": "chat.example.org", "port": 6473, "username": "howie"},
+  "accounts": [{"id": "1", "host": "chat.example.org", "port": 6473, "username": "howie",
+                "state": "connected", "active": true, "instance": "OmaChat", "unread": 0, "mentions": 0}],
   "instance": "OmaChat",
   "max_upload_bytes": 52428800,
+  "capabilities": ["resume", "search.server", "dm.group", "attachments", "video.h264", "…"],
   "user": {"id": "2301…", "username": "howie", "display_name": "Howie", "status": "online"},
   "server": {"id": "2301…", "name": "Sleepy Studio"},
   "voice": {"joined": true, "pending": false, "channel_id": "2301…", "channel": "Development",
             "muted": false, "deafened": false, "mode": "vad", "ptt": false, "transmitting": false,
-            "registered": true, "count": 2,
-            "participants": [{"user_id": "…", "name": "Alice", "speaking": true, "muted": false, "deafened": false}]},
+            "registered": true, "count": 2, "streaming": false,
+            "watching": [{"user_id": "…", "path": "/run/user/1000/omachat/video/….frame"}],
+            "participants": [{"user_id": "…", "name": "Alice", "speaking": true, "muted": false,
+                              "deafened": false, "streaming": true}]},
   "audio": {"backend": "pipewire", "input": "default", "output": "default", "error": ""},
   "clients": 2
 }

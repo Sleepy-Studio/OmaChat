@@ -4,6 +4,8 @@
 
 #include <QRegularExpression>
 
+#include <set>
+
 namespace omachat::server {
 
 using namespace omachat::permissions;
@@ -11,6 +13,9 @@ using namespace omachat::permissions;
 namespace {
 
 constexpr int kMaxAttachmentsPerMessage = 10;
+// Sealed body plus one key wrap per participant device (10 people x 10 devices).
+constexpr std::size_t kMaxEncryptedBytes = 64 * 1024;
+constexpr int kMaxDeviceKeysPerUser = 10;
 
 bool isMessageChannel(const ChannelRecord& c)
 {
@@ -34,6 +39,92 @@ std::vector<Id> ChatServer::extractMentions(Id channelId, const QString& content
             out.push_back(u->id);
     }
     return out;
+}
+
+bool ChatServer::validEncrypted(
+    const ChannelRecord& c, const std::string& content, const std::string& payload, Session& s, std::uint64_t rid)
+{
+    // Server channels stay readable by the server (search, moderation,
+    // history for newcomers); only conversations are end-to-end.
+    if (c.kind != ChannelKind::Dm && c.kind != ChannelKind::GroupDm) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("only conversations are end-to-end encrypted"));
+        return false;
+    }
+    if (!content.empty() || payload.size() > kMaxEncryptedBytes) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("malformed encrypted message"));
+        return false;
+    }
+    return true;
+}
+
+// ----------------------------------------------------------- device keys
+
+void ChatServer::handlePublishDeviceKey(Session& s, std::uint64_t rid, const proto::PublishDeviceKeyRequest& m)
+{
+    if (!limit(s, rid, s.deviceKeys))
+        return;
+    if (m.public_key().size() != 32) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("device keys are 32 bytes"));
+        return;
+    }
+    const QByteArray key = QByteArray::fromStdString(m.public_key());
+    const auto existing = m_store.deviceKeys({s.userId});
+    const bool known = std::ranges::any_of(existing, [&](const DeviceKeyRecord& k) { return k.publicKey == key; });
+    if (!known && static_cast<int>(existing.size()) >= kMaxDeviceKeysPerUser) {
+        replyError(s, rid, proto::ERROR_CONFLICT,
+            QStringLiteral("%1 devices already have keys; remove an old account from one").arg(kMaxDeviceKeysPerUser));
+        return;
+    }
+    if (!known) {
+        if (!m_store.addDeviceKey({s.userId, key, now()})) {
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not store the device key"));
+            return;
+        }
+        publishDeviceKeysChanged(s.userId);
+    }
+    replyOk(s, rid);
+}
+
+void ChatServer::handleRevokeDeviceKey(Session& s, std::uint64_t rid, const proto::RevokeDeviceKeyRequest& m)
+{
+    if (m_store.removeDeviceKey(s.userId, QByteArray::fromStdString(m.public_key())))
+        publishDeviceKeysChanged(s.userId);
+    replyOk(s, rid);
+}
+
+void ChatServer::handleGetDeviceKeys(Session& s, std::uint64_t rid, const proto::GetDeviceKeysRequest& m)
+{
+    if (!limit(s, rid, s.history))
+        return;
+    if (m.user_ids_size() > 50) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("at most 50 users per request"));
+        return;
+    }
+    // Only people you could message: yourself and those you share a server or conversation with.
+    const std::set<Id> audience = m_state.audienceOf(s.userId);
+    std::vector<Id> users;
+    for (Id uid : m.user_ids()) {
+        if ((uid == s.userId || audience.contains(uid)) && std::ranges::find(users, uid) == users.end())
+            users.push_back(uid);
+    }
+    proto::Envelope env;
+    auto* list = env.mutable_device_key_list();
+    for (const auto& k : m_store.deviceKeys(users)) {
+        auto* p = list->add_keys();
+        p->set_user_id(k.userId);
+        p->set_public_key(k.publicKey.toStdString());
+        p->set_created_at(k.createdAt);
+    }
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::publishDeviceKeysChanged(Id userId)
+{
+    proto::Event e;
+    e.mutable_device_keys_changed()->set_user_id(userId);
+    std::set<Id> audience = m_state.audienceOf(userId);
+    audience.insert(userId); // their other devices
+    publish(e, std::vector<Id>(audience.begin(), audience.end()));
 }
 
 void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::SendMessageRequest& m)
@@ -72,9 +163,12 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot attach files here"));
         return;
     }
+    const bool encrypted = !m.encrypted().empty();
+    if (encrypted && !validEncrypted(*c, m.content(), m.encrypted(), s, rid))
+        return;
     // A message may be only attachments; otherwise it needs text.
     auto content = validation::messageContent(QString::fromStdString(m.content()));
-    if (!content && !attachments.empty() && QString::fromStdString(m.content()).trimmed().isEmpty())
+    if (!content && (encrypted || !attachments.empty()) && QString::fromStdString(m.content()).trimmed().isEmpty())
         content = QString();
     if (!content) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST,
@@ -94,6 +188,7 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
     }
     msg.mentions = extractMentions(c->id, msg.content);
     msg.attachments = std::move(attachments);
+    msg.encrypted = QByteArray::fromStdString(m.encrypted());
     if (!m_store.insertMessage(msg)) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not store message"));
         return;
@@ -120,8 +215,12 @@ void ChatServer::handleEditMessage(Session& s, std::uint64_t rid, const proto::E
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you can only edit your own messages"));
         return;
     }
+    const bool encrypted = !m.encrypted().empty();
+    const ChannelRecord* c = m_state.channel(msg->channelId);
+    if (encrypted && (!c || !validEncrypted(*c, m.content(), m.encrypted(), s, rid)))
+        return;
     auto content = validation::messageContent(QString::fromStdString(m.content()));
-    if (!content && !msg->attachments.empty() && QString::fromStdString(m.content()).trimmed().isEmpty())
+    if (!content && (encrypted || !msg->attachments.empty()) && QString::fromStdString(m.content()).trimmed().isEmpty())
         content = QString();
     if (!content) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST,
@@ -131,7 +230,8 @@ void ChatServer::handleEditMessage(Session& s, std::uint64_t rid, const proto::E
     msg->content = *content;
     msg->editedAt = now();
     msg->mentions = extractMentions(msg->channelId, msg->content);
-    if (!m_store.updateMessage(msg->id, msg->content, msg->editedAt, msg->mentions)) {
+    msg->encrypted = QByteArray::fromStdString(m.encrypted());
+    if (!m_store.updateMessage(msg->id, msg->content, msg->editedAt, msg->mentions, msg->encrypted)) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not update message"));
         return;
     }
@@ -199,10 +299,24 @@ void ChatServer::handleSearch(Session& s, std::uint64_t rid, const proto::Search
 {
     if (!limit(s, rid, s.history))
         return;
-    const ChannelRecord* c = m_state.channel(m.channel_id());
-    if (!c || !m_state.can(c->id, s.userId, ViewChannel | ReadHistory)) {
-        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("channel not found"));
-        return;
+    std::vector<Id> channels;
+    if (m.channel_id() == 0 && m.server_id() != 0) {
+        if (!m_state.member(m.server_id(), s.userId)) {
+            replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("server not found"));
+            return;
+        }
+        for (const auto& [id, c] : m_state.channels()) {
+            if (c.serverId == m.server_id() && c.kind != ChannelKind::Category
+                && m_state.can(id, s.userId, ViewChannel | ReadHistory))
+                channels.push_back(id);
+        }
+    } else {
+        const ChannelRecord* c = m_state.channel(m.channel_id());
+        if (!c || !m_state.can(c->id, s.userId, ViewChannel | ReadHistory)) {
+            replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("channel not found"));
+            return;
+        }
+        channels.push_back(c->id);
     }
     const QString query = QString::fromStdString(m.query()).trimmed();
     if (query.isEmpty() || query.size() > 200) {
@@ -212,8 +326,8 @@ void ChatServer::handleSearch(Session& s, std::uint64_t rid, const proto::Search
     const int lim = m.limit() == 0 ? 25 : static_cast<int>(std::min<std::uint32_t>(m.limit(), 50));
     proto::Envelope env;
     auto* p = env.mutable_message_page();
-    p->set_channel_id(c->id);
-    for (const auto& msg : m_store.searchMessages(c->id, query, lim))
+    p->set_channel_id(m.channel_id());
+    for (const auto& msg : m_store.searchMessages(channels, query, lim))
         *p->add_messages() = toProto(msg, s.userId);
     reply(s, rid, std::move(env));
 }

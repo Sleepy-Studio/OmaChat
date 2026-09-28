@@ -38,6 +38,8 @@ ApplicationWindow {
     readonly property string page: {
         if (App.daemonState !== "connected")
             return "daemon"
+        if (App.addingAccount)
+            return "login"
         if (App.state === "error" && App.errorCode === "CertificateError")
             return "certificate"
         if (App.ready)

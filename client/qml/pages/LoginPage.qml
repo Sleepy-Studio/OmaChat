@@ -21,7 +21,7 @@ Rectangle {
     }
 
     Component.onCompleted: {
-        if (App.accountHost.length > 0) {
+        if (App.accountHost.length > 0 && !App.addingAccount) {
             hostField.text = App.accountHost
             portField.text = App.accountPort
             userField.text = App.accountUser
@@ -154,6 +154,30 @@ Rectangle {
                     }
                     Accessible.role: Accessible.Link
                     Accessible.name: text
+                }
+            }
+
+            // Other saved accounts: go back instead of logging in here.
+            ColumnLayout {
+                readonly property var others: App.accounts.filter(a => !a.active)
+                visible: App.addingAccount || others.length > 0
+                Layout.fillWidth: true
+                spacing: Theme.px(6)
+                Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
+                Repeater {
+                    model: parent.others
+                    delegate: FlatButton {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: qsTr("Use %1@%2").arg(modelData.username).arg(modelData.host)
+                        onClicked: App.switchAccount(modelData.id)
+                    }
+                }
+                FlatButton {
+                    visible: App.addingAccount
+                    Layout.fillWidth: true
+                    text: qsTr("Cancel")
+                    onClicked: App.addingAccount = false
                 }
             }
         }

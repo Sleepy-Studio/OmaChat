@@ -107,6 +107,25 @@ ChatServer::Upload* ChatServer::uploadFor(Session& s, std::uint64_t rid, Id atta
     return &it->second;
 }
 
+void ChatServer::handleResumeUpload(Session& s, std::uint64_t rid, const proto::ResumeUploadRequest& m)
+{
+    auto it = m_uploads.find(m.attachment_id());
+    // Only its uploader may pick an upload up again, from any connection.
+    if (it == m_uploads.end() || it->second.userId != s.userId) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("no such upload"));
+        return;
+    }
+    Upload& u = it->second;
+    u.connId = s.connId;
+    u.lastActivity = now();
+    proto::Envelope env;
+    auto* t = env.mutable_upload_ticket();
+    t->set_attachment_id(u.id);
+    t->set_chunk_size(kChunkBytes);
+    t->set_received(u.received);
+    reply(s, rid, std::move(env));
+}
+
 void ChatServer::handleUploadChunk(Session& s, std::uint64_t rid, const proto::UploadChunkRequest& m)
 {
     if (!limit(s, rid, s.transfer))
@@ -188,11 +207,14 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
 
 void ChatServer::handleCancelUpload(Session& s, std::uint64_t rid, const proto::CancelUploadRequest& m)
 {
-    if (m_uploads.contains(m.attachment_id())) {
-        if (uploadFor(s, rid, m.attachment_id())) {
-            abortUpload(m.attachment_id());
-            replyOk(s, rid);
+    if (auto it = m_uploads.find(m.attachment_id()); it != m_uploads.end()) {
+        // Its uploader may cancel it from any connection (e.g. after a reconnect).
+        if (it->second.userId != s.userId) {
+            replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("no such upload"));
+            return;
         }
+        abortUpload(m.attachment_id());
+        replyOk(s, rid);
         return;
     }
     // A finished but unsent attachment can be withdrawn by its uploader.
@@ -251,15 +273,13 @@ void ChatServer::abortUpload(Id uploadId)
     m_uploads.erase(it);
 }
 
-void ChatServer::abortUploadsOf(quint64 connId)
+void ChatServer::detachUploadsOf(quint64 connId)
 {
-    std::vector<Id> ids;
-    for (const auto& [id, u] : m_uploads) {
+    // Kept for ResumeUpload until the idle sweep removes them.
+    for (auto& [id, u] : m_uploads) {
         if (u.connId == connId)
-            ids.push_back(id);
+            u.connId = 0;
     }
-    for (Id id : ids)
-        abortUpload(id);
 }
 
 void ChatServer::removeAttachmentFiles(const std::vector<Id>& ids)

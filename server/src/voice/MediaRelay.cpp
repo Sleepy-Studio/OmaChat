@@ -24,8 +24,9 @@ bool MediaRelay::bind(const QHostAddress& address, quint16 port, QString* error)
         return false;
     }
     // Voice bursts from many clients arrive together; give the kernel room.
-    m_socket.setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption, 1 << 20);
-    m_socket.setSocketOption(QAbstractSocket::SendBufferSizeSocketOption, 1 << 20);
+    // Screen-share keyframes arrive and leave as bursts of hundreds of datagrams.
+    m_socket.setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption, 4 << 20);
+    m_socket.setSocketOption(QAbstractSocket::SendBufferSizeSocketOption, 4 << 20);
     return true;
 }
 
@@ -83,6 +84,18 @@ void MediaRelay::setVideoAllowed(std::uint32_t streamId, bool allowed)
     auto it = m_streams.find(streamId);
     if (it != m_streams.end())
         it->second.videoAllowed = allowed;
+}
+
+void MediaRelay::clearViewers(std::uint32_t sourceStream)
+{
+    if (auto it = m_streams.find(sourceStream); it != m_streams.end())
+        it->second.viewers.clear();
+}
+
+void MediaRelay::requestKeyframe(std::uint32_t sourceStream)
+{
+    if (auto it = m_streams.find(sourceStream); it != m_streams.end())
+        sendControl(it->second, ControlType::KeyframeRequest);
 }
 
 void MediaRelay::onReadyRead()

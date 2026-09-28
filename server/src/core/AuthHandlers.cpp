@@ -39,8 +39,13 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("voice.opus");
     r->add_capabilities("media.chacha20poly1305");
     r->add_capabilities("search.fts");
+    r->add_capabilities("search.server");
+    r->add_capabilities("dm.group");
     r->add_capabilities("resume");
     r->add_capabilities("attachments");
+    r->add_capabilities("attachments.resume");
+    r->add_capabilities("video.h264");
+    r->add_capabilities("e2e.v1");
     r->set_instance_name(m_config.instanceName.toStdString());
     r->set_registration_open(m_config.registrationOpen);
     r->set_media_udp_port(mediaPort());

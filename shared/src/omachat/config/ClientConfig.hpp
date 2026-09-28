@@ -36,6 +36,14 @@ struct ClientConfig {
         double outputVolume = 1.0; // 0..2
     } audio;
 
+    // Screen sharing (what you send; viewers get whatever the sender picked).
+    struct Video {
+        int fps = 30; // 5..60
+        int maxHeight = 1080; // 360..1440; width follows the aspect ratio
+        int bitrateKbps = 4000; // 500..20000
+        QString encoder = QStringLiteral("auto"); // auto | nvenc | amf | x264
+    } video;
+
     struct Notifications {
         bool messages = true;
         bool mentions = true;

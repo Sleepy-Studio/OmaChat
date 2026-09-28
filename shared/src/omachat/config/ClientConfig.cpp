@@ -113,6 +113,12 @@ ClientConfig ClientConfig::load(const QString& path, QString* error)
     cfg.audio.inputVolume = num(a["input_volume"], cfg.audio.inputVolume, 0.0, 2.0);
     cfg.audio.outputVolume = num(a["output_volume"], cfg.audio.outputVolume, 0.0, 2.0);
 
+    auto v = t["video"];
+    cfg.video.fps = num(v["fps"], cfg.video.fps, 5, 60);
+    cfg.video.maxHeight = num(v["max_height"], cfg.video.maxHeight, 360, 1440);
+    cfg.video.bitrateKbps = num(v["bitrate_kbps"], cfg.video.bitrateKbps, 500, 20000);
+    cfg.video.encoder = str(v["encoder"], cfg.video.encoder);
+
     auto n = t["notifications"];
     cfg.notifications.messages = flag(n["messages"], cfg.notifications.messages);
     cfg.notifications.mentions = flag(n["mentions"], cfg.notifications.mentions);
@@ -159,6 +165,9 @@ bool ClientConfig::save(const QString& path, QString* error) const
             {"input_volume", audio.inputVolume},
             {"output_volume", audio.outputVolume},
         });
+    root.insert("video",
+        toml::table{{"fps", video.fps}, {"max_height", video.maxHeight}, {"bitrate_kbps", video.bitrateKbps},
+            {"encoder", video.encoder.toStdString()}});
     root.insert("notifications",
         toml::table{{"messages", notifications.messages}, {"mentions", notifications.mentions},
             {"voice_join", notifications.voiceJoin}});

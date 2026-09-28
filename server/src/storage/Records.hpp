@@ -109,7 +109,14 @@ struct MessageRecord {
     std::int64_t editedAt = 0;
     bool isAction = false;
     std::vector<Id> mentions;
-    std::vector<AttachmentRecord> attachments;
+    std::vector<AttachmentRecord> attachments; // declared last: aggregate init keeps working
+    QByteArray encrypted; // end-to-end payload (DMs); content is empty then
+};
+
+struct DeviceKeyRecord {
+    Id userId = 0;
+    QByteArray publicKey; // X25519, 32 bytes
+    std::int64_t createdAt = 0;
 };
 
 struct ReactionSummary {

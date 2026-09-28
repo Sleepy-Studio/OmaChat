@@ -7,6 +7,7 @@
 #include "text/MarkdownRenderer.hpp"
 
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QQmlEngine>
@@ -64,6 +65,12 @@ class AppController : public QObject {
     Q_PROPERTY(bool transmitting READ transmitting NOTIFY voiceChanged)
     Q_PROPERTY(bool voiceConnected READ voiceConnected NOTIFY voiceChanged)
     Q_PROPERTY(QString audioError READ audioError NOTIFY voiceChanged)
+    // screen sharing (StreamActions in AppActions.cpp)
+    Q_PROPERTY(bool canShareScreen READ canShareScreen NOTIFY voiceChanged)
+    Q_PROPERTY(bool sharingScreen READ sharingScreen NOTIFY voiceChanged)
+    Q_PROPERTY(bool shareStarting READ shareStarting NOTIFY voiceChanged)
+    // [{userId, name, path}] for every stream being watched, newest last
+    Q_PROPERTY(QVariantList watchedStreams READ watchedStreams NOTIFY voiceChanged)
 
     // navigation
     Q_PROPERTY(QString selectedServerId READ selectedServerId NOTIFY selectionChanged)
@@ -80,6 +87,16 @@ class AppController : public QObject {
     Q_PROPERTY(bool canKick READ canKick NOTIFY selectionChanged)
     Q_PROPERTY(bool canBan READ canBan NOTIFY selectionChanged)
     Q_PROPERTY(bool isServerOwner READ isServerOwner NOTIFY selectionChanged)
+    Q_PROPERTY(bool canManageRoles READ canManageRoles NOTIFY selectionChanged)
+    // The selected conversation is end-to-end encrypted.
+    Q_PROPERTY(bool selectedEncrypted READ selectedEncrypted NOTIFY selectionChanged)
+
+    // roles of the selected server, highest first (RoleActions.cpp)
+    Q_PROPERTY(QVariantList serverRoles READ serverRoles NOTIFY rolesChanged)
+    Q_PROPERTY(QVariantList serverMembers READ serverMembers NOTIFY rolesChanged)
+    Q_PROPERTY(QVariantList channelOverrides READ channelOverrides NOTIFY overridesChanged)
+    Q_PROPERTY(QVariantList safetyNumbers READ safetyNumbers NOTIFY safetyChanged)
+    Q_PROPERTY(QVariantList permissionCatalog READ permissionCatalog CONSTANT)
 
     // composer
     Q_PROPERTY(QString replyToId READ replyToId NOTIFY replyChanged)
@@ -91,6 +108,13 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList uploads READ uploads NOTIFY attachmentsChanged)
     Q_PROPERTY(QVariantMap previews READ previews NOTIFY previewsChanged)
     Q_PROPERTY(bool attachmentsSupported READ attachmentsSupported NOTIFY statusChanged)
+    // Every saved account (status.accounts): id, host, username, state, active, unread, mentions.
+    Q_PROPERTY(QVariantList accounts READ accounts NOTIFY statusChanged)
+    Q_PROPERTY(int backgroundUnread READ backgroundUnread NOTIFY statusChanged)
+    // True while the login form is open for another account.
+    Q_PROPERTY(bool addingAccount READ addingAccount WRITE setAddingAccount NOTIFY authChanged)
+    // Features the connected server announced ("search.server", "dm.group", …).
+    Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY statusChanged)
 
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(bool noticeIsError READ noticeIsError NOTIFY noticeChanged)
@@ -111,6 +135,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList inputDevices READ inputDevices NOTIFY audioChanged)
     Q_PROPERTY(QVariantList outputDevices READ outputDevices NOTIFY audioChanged)
     Q_PROPERTY(QVariantMap audioSettings READ audioSettings NOTIFY audioChanged)
+    Q_PROPERTY(QVariantMap videoSettings READ videoSettings NOTIFY audioChanged)
     Q_PROPERTY(QVariantMap notificationSettings READ notificationSettings NOTIFY configChanged)
     Q_PROPERTY(QString version READ version CONSTANT)
 
@@ -153,6 +178,10 @@ public:
     bool pttActive() const { return voice().value(QStringLiteral("ptt")).toBool(); }
     bool transmitting() const { return m_speaking.contains(selfId()); }
     bool voiceConnected() const { return voice().value(QStringLiteral("registered")).toBool(); }
+    bool canShareScreen() const;
+    bool sharingScreen() const { return voice().value(QStringLiteral("streaming")).toBool(); }
+    bool shareStarting() const { return m_shareStarting; }
+    QVariantList watchedStreams() const;
     QString audioError() const
     {
         return m_status.value(QStringLiteral("audio")).toObject().value(QStringLiteral("error")).toString();
@@ -172,6 +201,13 @@ public:
     bool canKick() const;
     bool canBan() const;
     bool isServerOwner() const;
+    bool canManageRoles() const;
+    bool selectedEncrypted() const;
+    QVariantList serverRoles() const;
+    QVariantList serverMembers() const;
+    QVariantList channelOverrides() const { return m_channelOverrides; }
+    QVariantList safetyNumbers() const { return m_safetyNumbers; }
+    QVariantList permissionCatalog() const;
 
     QString replyToId() const { return m_replyTo; }
     QString replyToPreview() const { return m_replyPreview; }
@@ -180,6 +216,32 @@ public:
     QVariantList uploads() const;
     QVariantMap previews() const { return m_previews; }
     bool attachmentsSupported() const { return maxUploadBytes() > 0; }
+    QVariantList accounts() const { return m_status.value(QStringLiteral("accounts")).toArray().toVariantList(); }
+    int backgroundUnread() const
+    {
+        int n = 0;
+        for (const auto& a : m_status.value(QStringLiteral("accounts")).toArray())
+            n += a.toObject().value(QStringLiteral("active")).toBool()
+                ? 0
+                : a.toObject().value(QStringLiteral("mentions")).toInt();
+        return n;
+    }
+    bool addingAccount() const { return m_addingAccount; }
+    void setAddingAccount(bool adding)
+    {
+        if (adding == m_addingAccount)
+            return;
+        m_addingAccount = adding;
+        m_authError.clear();
+        emit authChanged();
+    }
+    QStringList capabilities() const
+    {
+        QStringList out;
+        for (const auto& v : m_status.value(QStringLiteral("capabilities")).toArray())
+            out << v.toString();
+        return out;
+    }
     QString notice() const { return m_notice; }
     bool noticeIsError() const { return m_noticeError; }
 
@@ -197,6 +259,7 @@ public:
     QVariantList inputDevices() const { return m_inputDevices; }
     QVariantList outputDevices() const { return m_outputDevices; }
     QVariantMap audioSettings() const { return m_audioSettings; }
+    QVariantMap videoSettings() const { return m_videoSettings; }
     QVariantMap notificationSettings() const;
     QString version() const;
 
@@ -207,6 +270,7 @@ public:
     Q_INVOKABLE void trustCertificate();
     Q_INVOKABLE void reconnect();
     Q_INVOKABLE void logout();
+    Q_INVOKABLE void switchAccount(const QString& accountId);
 
     Q_INVOKABLE void selectHome();
     Q_INVOKABLE void selectServer(const QString& id);
@@ -224,7 +288,8 @@ public:
     Q_INVOKABLE QVariantMap complete(const QString& textBeforeCursor) const;
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE void openLink(const QString& url);
-    Q_INVOKABLE void search(const QString& query);
+    // wholeServer searches every readable channel of the selected server.
+    Q_INVOKABLE void search(const QString& query, bool wholeServer = false);
     Q_INVOKABLE void clearSearch();
 
     Q_INVOKABLE void joinVoice(const QString& channelId);
@@ -234,6 +299,10 @@ public:
     Q_INVOKABLE void pushToTalk(bool pressed);
     Q_INVOKABLE void setInputMode(const QString& mode);
     Q_INVOKABLE void setUserVolume(const QString& userId, int percent);
+    Q_INVOKABLE void toggleScreenShare();
+    Q_INVOKABLE void watchStream(const QString& userId);
+    Q_INVOKABLE void unwatchStream(const QString& userId);
+    Q_INVOKABLE bool isStreaming(const QString& userId) const;
     Q_INVOKABLE int userVolume(const QString& userId) const;
 
     Q_INVOKABLE void createServer(const QString& name);
@@ -247,6 +316,16 @@ public:
     Q_INVOKABLE void setChannelMuted(const QString& id, bool muted);
     Q_INVOKABLE bool channelMuted(const QString& id) const { return m_mutedChannels.contains(id); }
     Q_INVOKABLE void openDm(const QString& userId);
+    // Group conversations (AppActions.cpp)
+    Q_INVOKABLE QVariantList knownUsers() const; // everyone you share a server with
+    Q_INVOKABLE QStringList channelRecipients(const QString& channelId) const;
+    // Safety numbers (E2E): {userId, name, number, devices, verified} per other participant.
+    Q_INVOKABLE void loadSafetyNumbers();
+    Q_INVOKABLE void setVerified(const QString& userId, bool verified);
+    Q_INVOKABLE void createGroup(const QStringList& userIds, const QString& name);
+    Q_INVOKABLE void addToGroup(const QString& channelId, const QStringList& userIds);
+    Q_INVOKABLE void renameGroup(const QString& channelId, const QString& name);
+    Q_INVOKABLE void leaveGroup(const QString& channelId);
     Q_INVOKABLE void kick(const QString& userId, const QString& reason);
     Q_INVOKABLE void ban(const QString& userId, const QString& reason);
     Q_INVOKABLE void setPresence(const QString& status);
@@ -256,18 +335,34 @@ public:
 
     Q_INVOKABLE void refreshAudio();
     Q_INVOKABLE void setAudio(const QString& key, const QVariant& value);
+    Q_INVOKABLE void setVideo(const QString& key, const QVariant& value);
     Q_INVOKABLE void setNotification(const QString& key, bool enabled);
     Q_INVOKABLE void setWindowFocused(bool focused);
     Q_INVOKABLE void dismissNotice();
 
     // ---- attachments (AttachmentActions.cpp)
     Q_INVOKABLE void addFiles(const QVariantList& urls);
+    // Attaches an image or copied files from the clipboard. Returns false when
+    // the clipboard holds neither, so the composer pastes text as usual.
+    Q_INVOKABLE bool pasteAttachment();
     Q_INVOKABLE void removePendingFile(int index);
     Q_INVOKABLE void requestPreview(const QString& attachmentId, const QString& filename, double size);
     Q_INVOKABLE void saveAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void openAttachment(const QString& attachmentId, const QString& filename, double size);
     Q_INVOKABLE void cancelTransfer(const QString& transferId);
     Q_INVOKABLE QString formatSize(double bytes) const;
+
+    // ---- roles and channel permissions (RoleActions.cpp)
+    Q_INVOKABLE void createRole(const QString& name);
+    Q_INVOKABLE void updateRole(
+        const QString& roleId, const QString& name, const QString& color, const QStringList& permissions);
+    Q_INVOKABLE void moveRole(const QString& roleId, int delta);
+    Q_INVOKABLE void deleteRole(const QString& roleId);
+    Q_INVOKABLE void setMemberRole(const QString& userId, const QString& roleId, bool add);
+    Q_INVOKABLE void loadOverrides(const QString& channelId);
+    // targetType is "role" or "user"; empty allow and deny remove the override.
+    Q_INVOKABLE void setOverride(const QString& channelId, const QString& targetType, const QString& targetId,
+        const QStringList& allow, const QStringList& deny);
 
     Q_INVOKABLE QString userName(const QString& userId) const;
     Q_INVOKABLE QString userColor(const QString& userId) const;
@@ -286,6 +381,9 @@ signals:
     void audioChanged();
     void attachmentsChanged();
     void previewsChanged();
+    void rolesChanged();
+    void safetyChanged();
+    void overridesChanged();
     // QML hooks
     void composerRestore(const QString& text);
     void focusComposer();
@@ -319,6 +417,8 @@ private:
         const QString& original, const QVariantList& files = {});
     double maxUploadBytes() const { return m_status.value(QStringLiteral("max_upload_bytes")).toDouble(); }
     void onTransferProgress(const QJsonObject& data);
+    static void prunePastedImages();
+    int selfRank() const; // highest role position held in the selected server
     void persistSelection();
 
     config::ClientConfig m_config;
@@ -331,6 +431,11 @@ private:
     QHash<QString, QJsonObject> m_channelsById;
     QHash<QString, QJsonObject> m_usersById;
     QHash<QString, QJsonObject> m_rolesById;
+    QVariantList m_channelOverrides;
+    QVariantList m_safetyNumbers;
+    bool m_addingAccount = false;
+    bool m_shareStarting = false;
+    QString m_overridesChannel;
     QHash<QString, QHash<QString, QJsonObject>> m_membersByServer;
     QHash<QString, QJsonObject> m_voiceByUser;
     QSet<QString> m_speaking;
@@ -366,6 +471,7 @@ private:
 
     QVariantList m_inputDevices;
     QVariantList m_outputDevices;
+    QVariantMap m_videoSettings;
     QVariantMap m_audioSettings;
 
     RowListModel m_servers;

@@ -3,6 +3,7 @@ find_package(Qt6Keychain REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 pkg_check_modules(RNNOISE IMPORTED_TARGET rnnoise)
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavutil libswscale)
 
 add_library(omachat_daemon_core STATIC
     src/application/Daemon.cpp
@@ -21,12 +22,18 @@ add_library(omachat_daemon_core STATIC
     src/voice/OpusCodec.cpp
     src/voice/MediaTransport.cpp
     src/voice/VoiceEngine.cpp
+    src/video/H264Codec.cpp
+    src/video/ScreenSource.cpp
+    src/video/PortalScreenSource.cpp
+    src/video/VideoManager.cpp
+    src/crypto/E2E.cpp
+    src/crypto/E2EManager.cpp
 )
 omachat_set_warnings(omachat_daemon_core)
 target_include_directories(omachat_daemon_core PUBLIC src)
 target_link_libraries(omachat_daemon_core
     PUBLIC omachat_shared Qt6::Core Qt6::Network Qt6::Sql Qt6::DBus
-           qt6keychain PkgConfig::PIPEWIRE PkgConfig::OPUS)
+           qt6keychain PkgConfig::PIPEWIRE PkgConfig::OPUS PkgConfig::FFMPEG)
 if(RNNOISE_FOUND)
     target_link_libraries(omachat_daemon_core PUBLIC PkgConfig::RNNOISE)
     target_compile_definitions(omachat_daemon_core PUBLIC OMACHAT_HAVE_RNNOISE=1)

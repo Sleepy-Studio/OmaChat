@@ -100,28 +100,21 @@ bool Daemon::start(QString* error)
         scheduleStatus();
     });
 
-    m_conn = std::make_unique<ServerConnection>(*m_credentials, this);
-    connect(m_conn.get(), &ServerConnection::stateChanged, this, [this] {
-        m_ipc.broadcast(QStringLiteral("connection"), statusJson());
-        scheduleStatus();
-        if (m_conn->state() == ServerConnection::State::Disconnected
-            || m_conn->state() == ServerConnection::State::LoginRequired) {
-            if (m_voice->active())
-                m_voice->stop();
-        }
+    m_video = std::make_unique<video::VideoManager>(*m_voice, this);
+    m_video->setSettings(videoSettings());
+    m_video->setFrameDirectory(paths::runtimeDir() + QStringLiteral("/video"));
+    if (m_options.syntheticScreen)
+        m_video->setSourceFactory([] { return std::make_unique<video::SyntheticScreenSource>(1280, 720, 30); });
+    connect(m_video.get(), &video::VideoManager::changed, this, &Daemon::scheduleStatus);
+    connect(m_video.get(), &video::VideoManager::sharingEnded, this, [this] {
+        OMA_INFO("video", "screen sharing ended from the desktop");
+        m_streamConfirmed = false;
+        if (m_voiceChannel && m_conn->state() == ServerConnection::State::Connected)
+            setStreaming(false, {});
+        m_ipc.broadcast(QStringLiteral("stream.ended"), {});
     });
-    connect(m_conn.get(), &ServerConnection::modelEvent, this, &Daemon::onModelEvent);
-    m_transfers = std::make_unique<FileTransfers>(*m_conn, this);
-    connect(m_transfers.get(), &FileTransfers::progress, this,
-        [this](const QJsonObject& data) { m_ipc.broadcast(QStringLiteral("transfer.progress"), data); });
-    connect(m_conn.get(), &ServerConnection::synchronized, this, [this] {
-        m_mutedChannels = m_store.mutedChannels(m_conn->account().id);
-        for (const auto& [uid, gain] : m_store.userVolumes(m_conn->account().id))
-            m_voice->setUserGain(uid, gain);
-        m_ipc.broadcast(QStringLiteral("state.reset"), {});
-        checkVoiceAfterSync();
-        scheduleStatus();
-    });
+
+    activate(0); // a placeholder link until an account exists
 
     m_ipc.setHandler(
         [this](const QString& method, const QJsonObject& params, const Responder& r) { dispatch(method, params, r); });
@@ -140,18 +133,166 @@ bool Daemon::start(QString* error)
     OMA_INFO("daemon", "listening", {"socket", m_options.socketPath}, {"audio", m_audio->name()},
         {"credentials", m_credentials->backendName()});
 
+    // Every saved account connects; the most recently used one is active.
     const auto accounts = m_store.accounts();
+    for (auto it = accounts.rbegin(); it != accounts.rend(); ++it)
+        startLink(linkFor(it->id), *it);
     if (!accounts.empty())
-        startAccount(accounts.front());
+        activate(accounts.front().id);
     return true;
+}
+
+Daemon::Link& Daemon::linkFor(std::int64_t accountId)
+{
+    if (auto it = m_links.find(accountId); it != m_links.end())
+        return it->second;
+    Link& link = m_links[accountId];
+    link.conn = std::make_unique<ServerConnection>(*m_credentials, this);
+    link.transfers = std::make_unique<FileTransfers>(*link.conn, this);
+    link.e2e = std::make_unique<E2EManager>(*link.conn, *m_credentials, m_store, this);
+    ServerConnection* conn = link.conn.get();
+    E2EManager* e2e = link.e2e.get();
+    conn->model().setDecryptor([e2e](const proto::ChatMessage& m) {
+        auto d = e2e->decrypt(m);
+        return ClientState::Decrypted{d.content, std::move(d.files), d.status};
+    });
+    connect(e2e, &E2EManager::keysChanged, this, [this, conn](quint64 userId) {
+        if (conn != m_conn)
+            return;
+        const proto::User* u = conn->model().user(userId);
+        m_ipc.broadcast(QStringLiteral("e2e.keys_changed"),
+            {{"user_id", idString(userId)}, {"name", u ? QString::fromStdString(u->display_name()) : QString()},
+                {"self", userId == conn->model().self().id()}});
+    });
+    connect(e2e, &E2EManager::readyChanged, this, [this, conn] {
+        if (conn != m_conn)
+            return;
+        m_ipc.broadcast(QStringLiteral("state.reset"), {}); // messages may now decrypt
+        scheduleStatus();
+    });
+    connect(conn, &ServerConnection::stateChanged, this, [this, conn] {
+        scheduleStatus();
+        if (conn != m_conn)
+            return;
+        m_ipc.broadcast(QStringLiteral("connection"), statusJson());
+        if (conn->state() == ServerConnection::State::Disconnected
+            || conn->state() == ServerConnection::State::LoginRequired) {
+            if (m_voice->active())
+                stopVoiceEngine();
+        }
+    });
+    connect(conn, &ServerConnection::modelEvent, this, [e2e, conn](const QString& name, const QJsonObject& data) {
+        if (name == u"e2e.device_keys_changed") {
+            e2e->onDeviceKeysChanged(idFromJson(data.value(QStringLiteral("user_id"))));
+        } else if (name == u"channel.created") {
+            if (const proto::Channel* c = conn->model().channel(idFromJson(data.value(QStringLiteral("id")))))
+                e2e->onChannel(*c);
+        }
+    });
+    connect(conn, &ServerConnection::modelEvent, this,
+        [this, accountId, conn](const QString& name, const QJsonObject& data) {
+            if (conn == m_conn)
+                onModelEvent(name, data);
+            else if (auto it = m_links.find(accountId); it != m_links.end())
+                onBackgroundEvent(it->second, name, data);
+        });
+    connect(link.transfers.get(), &FileTransfers::progress, this, [this, accountId](const QJsonObject& data) {
+        QJsonObject withAccount = data;
+        withAccount.insert(QStringLiteral("account"), QString::number(accountId));
+        m_ipc.broadcast(QStringLiteral("transfer.progress"), withAccount);
+    });
+    connect(conn, &ServerConnection::synchronized, this, [this, accountId, conn, e2e] {
+        e2e->onSynchronized();
+        if (conn != m_conn) {
+            if (auto it = m_links.find(accountId); it != m_links.end())
+                it->second.muted = m_store.mutedChannels(accountId);
+            scheduleStatus();
+            return;
+        }
+        m_mutedChannels = m_store.mutedChannels(conn->account().id);
+        for (const auto& [uid, gain] : m_store.userVolumes(conn->account().id))
+            m_voice->setUserGain(uid, gain);
+        m_ipc.broadcast(QStringLiteral("state.reset"), {});
+        checkVoiceAfterSync();
+        scheduleStatus();
+    });
+    return link;
+}
+
+void Daemon::activate(std::int64_t accountId)
+{
+    Link& link = linkFor(accountId);
+    if (m_conn == link.conn.get())
+        return;
+    if (m_conn && (m_voiceChannel || m_voice->active())) {
+        OMA_INFO("voice", "left voice: switched account");
+        leaveVoice(nullptr);
+    }
+    if (m_pttOwner) {
+        m_pttOwner = nullptr;
+        m_voice->setPushToTalk(false);
+    }
+    m_active = accountId;
+    m_conn = link.conn.get();
+    m_transfers = link.transfers.get();
+    m_e2e = link.e2e.get();
+    link.unread = 0;
+    link.mentions = 0;
+    m_focusedChannel = 0;
+    m_focusedServer = 0;
+    m_mutedChannels = accountId ? m_store.mutedChannels(accountId) : std::set<std::uint64_t>{};
+    if (accountId) {
+        m_store.touchAccount(accountId);
+        for (const auto& [uid, gain] : m_store.userVolumes(accountId))
+            m_voice->setUserGain(uid, gain);
+    }
+    OMA_INFO("daemon", "active account", {"account", accountId});
+    m_ipc.broadcast(QStringLiteral("state.reset"), {});
+    m_ipc.broadcast(QStringLiteral("connection"), statusJson());
+    scheduleStatus();
+}
+
+void Daemon::onBackgroundEvent(Link& link, const QString& name, const QJsonObject& data)
+{
+    if (name != u"message.created")
+        return;
+    const Id author = idFromJson(data.value(QStringLiteral("author_id")));
+    const Id channel = idFromJson(data.value(QStringLiteral("channel_id")));
+    if (author == link.conn->model().self().id() || link.muted.contains(channel))
+        return;
+    link.unread += 1;
+    const bool mentioned = data.value(QStringLiteral("mentions_me")).toBool();
+    const proto::Channel* c = link.conn->model().channel(channel);
+    const bool dm = c && (c->type() == proto::CHANNEL_TYPE_DM || c->type() == proto::CHANNEL_TYPE_GROUP_DM);
+    if (mentioned || dm)
+        link.mentions += 1;
+    maybeNotify(*link.conn, link.muted, data);
+    m_ipc.broadcast(QStringLiteral("account.activity"),
+        {{"account", QString::number(link.conn->account().id)}, {"unread", link.unread}, {"mentions", link.mentions}});
+    scheduleStatus();
+}
+
+QJsonArray Daemon::accountsJson() const
+{
+    QJsonArray out;
+    for (const auto& a : m_store.accounts()) {
+        auto it = m_links.find(a.id);
+        const ServerConnection* c = it == m_links.end() ? nullptr : it->second.conn.get();
+        out.append(QJsonObject{{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port},
+            {"username", a.username}, {"active", a.id == m_active},
+            {"state", c ? ServerConnection::stateName(c->state()) : QStringLiteral("disconnected")},
+            {"instance", c ? c->instanceName() : QString()}, {"unread", it == m_links.end() ? 0 : it->second.unread},
+            {"mentions", it == m_links.end() ? 0 : it->second.mentions}});
+    }
+    return out;
 }
 
 void Daemon::shutdown()
 {
     if (m_voice)
-        m_voice->stop();
-    if (m_conn)
-        m_conn->stop();
+        stopVoiceEngine();
+    for (auto& [id, link] : m_links)
+        link.conn->stop();
     m_ipc.close();
 }
 
@@ -181,11 +322,38 @@ voice::VoiceEngine::Settings Daemon::engineSettings() const
     return s;
 }
 
+video::H264Encoder::Settings Daemon::videoSettings() const
+{
+    video::H264Encoder::Settings s;
+    s.fps = m_config.video.fps;
+    s.maxHeight = m_config.video.maxHeight;
+    s.maxWidth = (m_config.video.maxHeight * 16 + 8) / 9; // wide enough for 16:9 at that height
+    s.bitrateKbps = m_config.video.bitrateKbps;
+    s.encoder = m_config.video.encoder;
+    return s;
+}
+
+void Daemon::setStreaming(bool streaming, std::function<void(bool, const QString&, const QString&)> done)
+{
+    proto::Envelope env;
+    env.mutable_set_streaming()->set_streaming(streaming);
+    m_conn->request(std::move(env), [done](const proto::Envelope& reply) {
+        if (!done)
+            return;
+        if (reply.has_error())
+            done(false, ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+        else
+            done(true, {}, {});
+    });
+}
+
 void Daemon::applyConfig()
 {
     const auto before = m_voice->settings();
     const auto after = engineSettings();
     m_voice->applySettings(after);
+    if (m_video)
+        m_video->setSettings(videoSettings()); // applies to the next share
     // Device changes need the streams reopened.
     if (m_voice->active() && (before.input != after.input || before.output != after.output) && m_voiceChannel) {
         const Id channel = m_voiceChannel;
@@ -202,12 +370,20 @@ bool Daemon::saveConfig(QString* error)
 
 void Daemon::startAccount(const Account& account, ServerConnection::Credentials creds)
 {
+    // (Re)starts that account's link and makes it the active one.
+    activate(account.id);
     if (m_voice->active())
-        m_voice->stop();
+        stopVoiceEngine();
     m_voiceChannel = 0;
     m_speaking.clear();
     m_store.touchAccount(account.id);
-    m_conn->start(account, std::move(creds));
+    startLink(m_links.at(account.id), account, std::move(creds));
+}
+
+void Daemon::startLink(Link& link, const Account& account, ServerConnection::Credentials creds)
+{
+    link.e2e->load(account.id);
+    link.conn->start(account, std::move(creds));
 }
 
 // ------------------------------------------------------------------ status
@@ -234,10 +410,12 @@ QJsonObject Daemon::statusJson() const
             QJsonObject{{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port}, {"username", a.username}});
         status.insert(QStringLiteral("instance"), m_conn->instanceName());
         status.insert(QStringLiteral("max_upload_bytes"), static_cast<double>(m_conn->maxUploadBytes()));
+        status.insert(QStringLiteral("capabilities"), QJsonArray::fromStringList(m_conn->capabilities()));
     } else {
         status.insert(QStringLiteral("account"), QJsonValue::Null);
         status.insert(QStringLiteral("instance"), QJsonValue::Null);
         status.insert(QStringLiteral("max_upload_bytes"), 0);
+        status.insert(QStringLiteral("capabilities"), QJsonArray());
     }
 
     const ClientState* model = m_conn ? &m_conn->model() : nullptr;
@@ -268,7 +446,7 @@ QJsonObject Daemon::statusJson() const
             participants.append(QJsonObject{{"user_id", idString(uid)},
                 {"name", u ? QString::fromStdString(u->display_name()) : idString(uid)},
                 {"speaking", m_speaking.contains(uid)}, {"muted", v && (v->self_mute() || v->server_mute())},
-                {"deafened", v && (v->self_deaf() || v->server_deaf())}});
+                {"deafened", v && (v->self_deaf() || v->server_deaf())}, {"streaming", v && v->streaming()}});
         }
     }
     QJsonObject voice{{"joined", voiceChannel != nullptr}, {"pending", m_voicePending},
@@ -277,12 +455,15 @@ QJsonObject Daemon::statusJson() const
         {"deafened", m_selfDeaf}, {"mode", config::toString(m_config.audio.mode)},
         {"ptt", m_voice && m_voice->pushToTalk()}, {"transmitting", m_voice && m_voice->transmitting()},
         {"registered", m_voice && m_voice->active() && m_voice->statsJson().value("registered").toBool()},
-        {"participants", participants}, {"count", participants.size()}};
+        {"participants", participants}, {"count", participants.size()}, {"streaming", m_video && m_video->sharing()},
+        {"watching", m_video ? m_video->watchingJson() : QJsonArray()}};
     status.insert(QStringLiteral("voice"), voice);
     status.insert(QStringLiteral("audio"),
         QJsonObject{{"backend", m_audio ? m_audio->name() : QString()}, {"input", m_config.audio.input},
             {"output", m_config.audio.output}, {"error", m_audioError}});
     status.insert(QStringLiteral("clients"), m_ipc.clientCount());
+    status.insert(QStringLiteral("accounts"), accountsJson());
+    status.insert(QStringLiteral("e2e"), m_e2e ? m_e2e->statusJson() : QJsonObject());
     return status;
 }
 
@@ -293,7 +474,7 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
     m_ipc.broadcast(name, data);
 
     if (name == u"message.created") {
-        maybeNotify(data);
+        maybeNotify(*m_conn, m_mutedChannels, data);
         return;
     }
     if (name == u"voice.state") {
@@ -305,11 +486,24 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
                 // The server removed us (kicked from channel, permission change).
                 OMA_INFO("voice", "removed from voice by server");
                 m_voiceChannel = 0;
-                m_voice->stop();
+                stopVoiceEngine();
             }
         } else if (channel != m_voiceChannel) {
             m_voice->removeSpeaker(user);
             m_speaking.erase(user);
+        }
+        // A stream we watch is gone once its sender stops or leaves.
+        if (user != self && m_video->watching(user)
+            && (channel != m_voiceChannel || !data.value(QStringLiteral("streaming")).toBool())) {
+            m_video->unwatch(user);
+            m_ipc.broadcast(QStringLiteral("stream.ended"), {{"user_id", idString(user)}});
+        }
+        // The server can end our share (permission change).
+        if (user == self && m_streamConfirmed && m_video->sharing()
+            && !data.value(QStringLiteral("streaming")).toBool()) {
+            m_streamConfirmed = false;
+            m_video->stopSharing();
+            m_ipc.broadcast(QStringLiteral("stream.ended"), {{"user_id", idString(user)}});
         }
         if (m_config.notifications.voiceJoin && user != self && channel && channel == m_voiceChannel
             && idFromJson(data.value(QStringLiteral("previous_channel_id"))) != channel) {
@@ -342,20 +536,21 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
         scheduleStatus();
 }
 
-void Daemon::maybeNotify(const QJsonObject& msg)
+void Daemon::maybeNotify(const ServerConnection& conn, const std::set<std::uint64_t>& muted, const QJsonObject& msg)
 {
     if (!m_options.notifications)
         return;
-    const ClientState& model = m_conn->model();
+    const bool active = &conn == m_conn;
+    const ClientState& model = conn.model();
     const Id author = idFromJson(msg.value(QStringLiteral("author_id")));
     const Id channelId = idFromJson(msg.value(QStringLiteral("channel_id")));
     if (author == model.self().id())
         return;
     if (model.self().status() == proto::USER_STATUS_DO_NOT_DISTURB)
         return;
-    if (m_mutedChannels.contains(channelId))
+    if (muted.contains(channelId))
         return;
-    if (m_windowFocused && m_focusedChannel == channelId)
+    if (active && m_windowFocused && m_focusedChannel == channelId)
         return;
     const proto::Channel* channel = model.channel(channelId);
     if (!channel)
@@ -375,6 +570,8 @@ void Daemon::maybeNotify(const QJsonObject& msg)
                       .arg(who, QString::fromStdString(channel->name()),
                           server ? QStringLiteral(" (%1)").arg(QString::fromStdString(server->name())) : QString());
     }
+    if (!active) // say which account it came to
+        summary += QStringLiteral(" · %1@%2").arg(conn.account().username, conn.account().host);
     m_notifier.notify(summary, msg.value(QStringLiteral("content")).toString(), QStringLiteral("im.received"), mention);
 }
 
@@ -433,6 +630,16 @@ void Daemon::onVoiceSession(const proto::VoiceSession& s)
     scheduleStatus();
 }
 
+void Daemon::stopVoiceEngine()
+{
+    // Video rides the voice transport: it stops first.
+    m_streamConfirmed = false;
+    if (m_video)
+        m_video->stopAll();
+    if (m_voice)
+        m_voice->stop();
+}
+
 void Daemon::leaveVoice(const Responder* r)
 {
     if (m_voiceChannel)
@@ -440,7 +647,7 @@ void Daemon::leaveVoice(const Responder* r)
     const std::optional<Responder> responder = r ? std::optional<Responder>(*r) : std::nullopt;
     m_voiceChannel = 0;
     m_voicePending = false;
-    m_voice->stop();
+    stopVoiceEngine();
     m_speaking.clear();
     scheduleStatus();
     if (m_conn->state() != ServerConnection::State::Connected) {
@@ -487,7 +694,7 @@ void Daemon::checkVoiceAfterSync()
         return;
     }
     OMA_INFO("voice", "rejoining voice after resynchronization", {"channel", m_voiceChannel});
-    m_voice->stop();
+    stopVoiceEngine();
     joinVoice(m_voiceChannel, nullptr);
 }
 

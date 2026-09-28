@@ -3,10 +3,17 @@
 
 #include "controllers/AppController.hpp"
 
+#include "omachat/core/Paths.hpp"
+#include "text/PasteContent.hpp"
+
+#include <QClipboard>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QJsonArray>
+#include <QMimeData>
 #include <QMimeDatabase>
 #include <QUrl>
 
@@ -24,6 +31,13 @@ QString localPath(const QVariant& v)
     if (!url.isValid() || url.scheme().isEmpty())
         url = QUrl::fromUserInput(v.toString());
     return url.isLocalFile() ? url.toLocalFile() : QString();
+}
+
+// Pasted images are written here so the daemon can upload them like any
+// other file. They must outlive the upload, so they are only pruned by age.
+QString pastedDir()
+{
+    return paths::cacheDir() + QStringLiteral("/pasted");
 }
 
 // Handing a received file to the desktop is only done for types whose
@@ -86,11 +100,53 @@ void AppController::addFiles(const QVariantList& urls)
             showNotice(tr("A message can carry at most %1 files.").arg(kMaxFilesPerMessage), true);
             break;
         }
-        m_pendingFiles.append(QVariantMap{{"path", info.absoluteFilePath()}, {"name", info.fileName()},
-            {"size", static_cast<double>(info.size())}});
+        m_pendingFiles.append(QVariantMap{
+            {"path", info.absoluteFilePath()}, {"name", info.fileName()}, {"size", static_cast<double>(info.size())}});
     }
     emit attachmentsChanged();
     emit focusComposer();
+}
+
+bool AppController::pasteAttachment()
+{
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    if (!mime)
+        return false;
+    switch (PasteContent::classify(*mime)) {
+    case PasteContent::Kind::Text:
+        return false;
+    case PasteContent::Kind::Files: {
+        QVariantList urls;
+        for (const QUrl& u : PasteContent::localFiles(*mime))
+            urls.append(u);
+        addFiles(urls);
+        return true;
+    }
+    case PasteContent::Kind::Image:
+        break;
+    }
+    if (!attachmentsSupported()) {
+        showNotice(tr("This server does not accept attachments."), true);
+        return true;
+    }
+    const QString path = paths::ensurePrivateDir(paths::cacheDir()) && paths::ensurePrivateDir(pastedDir())
+        ? PasteContent::saveImage(*mime, pastedDir())
+        : QString();
+    if (path.isEmpty()) {
+        showNotice(tr("Could not read the image on the clipboard."), true);
+        return true;
+    }
+    addFiles({QUrl::fromLocalFile(path)});
+    return true;
+}
+
+void AppController::prunePastedImages()
+{
+    const QDateTime cutoff = QDateTime::currentDateTime().addDays(-7);
+    for (const QFileInfo& entry : QDir(pastedDir()).entryInfoList(QDir::Files)) {
+        if (entry.lastModified() < cutoff)
+            QFile::remove(entry.absoluteFilePath());
+    }
 }
 
 void AppController::removePendingFile(int index)
@@ -142,8 +198,8 @@ void AppController::saveAttachment(const QString& attachmentId, const QString& f
         QStringLiteral("attachment.download"), {{"attachment", attachmentId}, {"filename", filename}},
         [this](const ipc::Reply& r) {
             if (!r.ok) {
-                showNotice(tr("Download failed: %1").arg(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage),
-                    true);
+                showNotice(
+                    tr("Download failed: %1").arg(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage), true);
                 return;
             }
             const QString path = r.result.value(QStringLiteral("path")).toString();

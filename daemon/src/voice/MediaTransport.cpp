@@ -72,6 +72,10 @@ bool MediaTransport::open(
         ::setsockopt(m_fd, IPPROTO_IP, IP_TOS, &tos, sizeof tos);
     else
         ::setsockopt(m_fd, IPPROTO_IPV6, IPV6_TCLASS, &tos, sizeof tos);
+    // A screen-share keyframe is a burst of a few hundred datagrams.
+    const int bufferBytes = 4 << 20;
+    ::setsockopt(m_fd, SOL_SOCKET, SO_SNDBUF, &bufferBytes, sizeof bufferBytes);
+    ::setsockopt(m_fd, SOL_SOCKET, SO_RCVBUF, &bufferBytes, sizeof bufferBytes);
     // connect() lets the kernel drop datagrams from any other source.
     if (::connect(m_fd, reinterpret_cast<sockaddr*>(&addr), len) != 0) {
         if (error)

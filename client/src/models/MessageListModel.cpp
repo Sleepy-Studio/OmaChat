@@ -38,7 +38,7 @@ QHash<int, QByteArray> MessageListModel::roleNames() const
         {TimeTextRole, "timeText"}, {DayTextRole, "dayText"}, {EditedRole, "edited"}, {IsActionRole, "isAction"},
         {ReplyToRole, "replyTo"}, {ReplyPreviewRole, "replyPreview"}, {MentionsMeRole, "mentionsMe"},
         {ReactionsRole, "reactions"}, {GroupStartRole, "groupStart"}, {DayStartRole, "dayStart"}, {IsOwnRole, "isOwn"},
-        {AttachmentsRole, "attachments"}};
+        {AttachmentsRole, "attachments"}, {E2eRole, "e2e"}};
 }
 
 QVariant MessageListModel::data(const QModelIndex& index, int role) const
@@ -98,6 +98,8 @@ QVariant MessageListModel::data(const QModelIndex& index, int role) const
         return m.value(QStringLiteral("reactions")).toArray().toVariantList();
     case AttachmentsRole:
         return m.value(QStringLiteral("attachments")).toArray().toVariantList();
+    case E2eRole:
+        return m.value(QStringLiteral("e2e")).toString();
     case GroupStartRole: {
         if (!older)
             return true;

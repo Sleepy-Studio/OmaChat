@@ -13,7 +13,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel git cmake ninja clang \
             qt6-base qt6-declarative qt6-svg qt6-wayland qtkeychain-qt6 protobuf abseil-cpp \
-            libsodium opus libpipewire openssl tomlplusplus rnnoise gtest
+            libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
       - uses: actions/checkout@v4
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOMACHAT_WARNINGS_AS_ERRORS=ON

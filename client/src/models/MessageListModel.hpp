@@ -39,6 +39,7 @@ public:
         DayStartRole,
         IsOwnRole,
         AttachmentsRole,
+        E2eRole, // "" (not encrypted) | ok | unverified | undecryptable
     };
 
     struct Hooks {

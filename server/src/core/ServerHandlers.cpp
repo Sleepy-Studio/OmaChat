@@ -390,7 +390,9 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("channel not found"));
         return;
     }
-    if (c->serverId == 0 || !m_state.can(c->id, s.userId, ManageChannel)) {
+    // Group DMs belong to their participants: any of them may rename one.
+    const bool groupDm = c->kind == ChannelKind::GroupDm;
+    if (groupDm ? m.set_topic() : (c->serverId == 0 || !m_state.can(c->id, s.userId, ManageChannel))) {
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage this channel"));
         return;
     }
@@ -461,6 +463,127 @@ void ChatServer::handleDeleteChannel(Session& s, std::uint64_t rid, const proto:
     d->set_channel_id(channelId);
     d->set_server_id(serverId);
     publish(e, audience);
+    replyOk(s, rid);
+}
+
+namespace {
+constexpr size_t kMaxGroupDmRecipients = 10;
+}
+
+void ChatServer::handleCreateGroupDm(Session& s, std::uint64_t rid, const proto::CreateGroupDmRequest& m)
+{
+    if (!limit(s, rid, s.conversations))
+        return;
+    std::vector<Id> recipients{s.userId};
+    const std::set<Id> audience = m_state.audienceOf(s.userId);
+    for (Id uid : m.user_ids()) {
+        if (std::ranges::find(recipients, uid) != recipients.end())
+            continue;
+        if (!m_state.user(uid) || !audience.contains(uid)) {
+            replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you share no server with a user"));
+            return;
+        }
+        recipients.push_back(uid);
+    }
+    if (recipients.size() < 3 || recipients.size() > kMaxGroupDmRecipients) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST,
+            QStringLiteral("a group conversation has 3 to %1 people").arg(kMaxGroupDmRecipients));
+        return;
+    }
+    QString name;
+    if (!m.name().empty()) {
+        const auto valid = validation::channelName(QString::fromStdString(m.name()));
+        if (!valid) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("names are 1-64 characters"));
+            return;
+        }
+        name = *valid;
+    }
+    std::ranges::sort(recipients);
+    ChannelRecord c{m_ids.next(), 0, name, ChannelKind::GroupDm, 0, 0, {}, recipients};
+    if (!m_store.insertChannel(c, now())) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not create conversation"));
+        return;
+    }
+    m_state.putChannel(c);
+    proto::Event e;
+    *e.mutable_channel_create() = toProto(c, 0);
+    publish(e, c.recipients);
+    proto::Envelope env;
+    *env.mutable_channel() = toProto(c, s.userId);
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::handleAddGroupDmRecipient(Session& s, std::uint64_t rid, const proto::AddGroupDmRecipientRequest& m)
+{
+    if (!limit(s, rid, s.conversations))
+        return;
+    ChannelRecord* c = m_state.channel(m.channel_id());
+    if (!c || c->kind != ChannelKind::GroupDm || std::ranges::find(c->recipients, s.userId) == c->recipients.end()) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("conversation not found"));
+        return;
+    }
+    const Id uid = m.user_id();
+    if (!m_state.user(uid) || !m_state.audienceOf(s.userId).contains(uid)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you share no server with that user"));
+        return;
+    }
+    if (std::ranges::find(c->recipients, uid) != c->recipients.end()) {
+        proto::Envelope env;
+        *env.mutable_channel() = toProto(*c, s.userId);
+        reply(s, rid, std::move(env));
+        return;
+    }
+    if (c->recipients.size() >= kMaxGroupDmRecipients) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST,
+            QStringLiteral("a group conversation has at most %1 people").arg(kMaxGroupDmRecipients));
+        return;
+    }
+    if (!m_store.setRecipient(c->id, uid, true)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not add to conversation"));
+        return;
+    }
+    const std::vector<Id> existing = c->recipients;
+    c->recipients.push_back(uid);
+    std::ranges::sort(c->recipients);
+    m_state.invalidatePermissions();
+    proto::Event update;
+    *update.mutable_channel_update() = toProto(*c, 0);
+    publish(update, existing);
+    proto::Event created;
+    *created.mutable_channel_create() = toProto(*c, 0);
+    publish(created, {uid});
+    proto::Envelope env;
+    *env.mutable_channel() = toProto(*c, s.userId);
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::handleLeaveGroupDm(Session& s, std::uint64_t rid, const proto::LeaveGroupDmRequest& m)
+{
+    ChannelRecord* c = m_state.channel(m.channel_id());
+    if (!c || c->kind != ChannelKind::GroupDm || std::ranges::find(c->recipients, s.userId) == c->recipients.end()) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("conversation not found"));
+        return;
+    }
+    const Id channelId = c->id;
+    const bool empty = c->recipients.size() == 1;
+    const bool stored = empty ? m_store.deleteChannel(channelId) : m_store.setRecipient(channelId, s.userId, false);
+    if (!stored) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not leave conversation"));
+        return;
+    }
+    std::erase(c->recipients, s.userId);
+    m_state.invalidatePermissions();
+    if (empty) {
+        m_state.removeChannel(channelId);
+    } else {
+        proto::Event update;
+        *update.mutable_channel_update() = toProto(*c, 0);
+        publish(update, c->recipients);
+    }
+    proto::Event gone;
+    gone.mutable_channel_delete()->set_channel_id(channelId);
+    publish(gone, {s.userId});
     replyOk(s, rid);
 }
 

@@ -51,7 +51,7 @@ void ChatServer::handleJoinVoice(Session& s, std::uint64_t rid, const proto::Joi
     info.expiresAtMs = now() + kVoiceSessionMs;
     m_relay.addStream(info);
     m_relay.setStreamFlags(v.streamId, m_state.can(c->id, s.userId, Speak) && !v.selfMute, v.selfDeaf);
-    m_relay.setVideoAllowed(v.streamId, m_state.can(c->id, s.userId, Stream));
+    m_relay.setVideoAllowed(v.streamId, false); // until SetStreaming
     m_voice[s.userId] = v;
 
     OMA_INFO("voice", "joined", {"user", s.userId}, {"channel", c->id}, {"stream", v.streamId});
@@ -104,6 +104,45 @@ void ChatServer::handleSetVoiceState(Session& s, std::uint64_t rid, const proto:
     replyOk(s, rid);
 }
 
+void ChatServer::handleSetStreaming(Session& s, std::uint64_t rid, const proto::SetStreamingRequest& m)
+{
+    auto it = m_voice.find(s.userId);
+    if (it == m_voice.end()) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("join a voice channel to share your screen"));
+        return;
+    }
+    VoiceRec& v = it->second;
+    if (m.streaming() && !m_state.can(v.channelId, s.userId, Stream)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot share your screen here"));
+        return;
+    }
+    if (v.streaming != m.streaming()) {
+        v.streaming = m.streaming();
+        m_relay.setVideoAllowed(v.streamId, v.streaming);
+        if (!v.streaming)
+            m_relay.clearViewers(v.streamId);
+        OMA_INFO("voice", v.streaming ? "stream started" : "stream stopped", {"user", s.userId});
+        publishVoiceState(s.userId, v, v.channelId);
+    }
+    replyOk(s, rid);
+}
+
+void ChatServer::handleWatchStream(Session& s, std::uint64_t rid, const proto::WatchStreamRequest& m)
+{
+    auto viewer = m_voice.find(s.userId);
+    auto source = m_voice.find(m.user_id());
+    // Watching needs you in the same voice channel as the streamer.
+    if (viewer == m_voice.end() || source == m_voice.end() || source->first == s.userId
+        || source->second.channelId != viewer->second.channelId || (m.watch() && !source->second.streaming)) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("that user is not sharing in your voice channel"));
+        return;
+    }
+    m_relay.setSubscription(viewer->second.streamId, source->second.streamId, m.watch());
+    if (m.watch())
+        m_relay.requestKeyframe(source->second.streamId);
+    replyOk(s, rid);
+}
+
 void ChatServer::handleServerMute(Session& s, std::uint64_t rid, const proto::ServerMuteRequest& m)
 {
     auto it = m_voice.find(m.user_id());
@@ -139,7 +178,12 @@ void ChatServer::refreshVoicePermissions()
         }
         const bool canSpeak = m_state.can(v.channelId, uid, Speak) && !v.selfMute && !v.serverMute;
         m_relay.setStreamFlags(v.streamId, canSpeak, v.selfDeaf || v.serverDeaf);
-        m_relay.setVideoAllowed(v.streamId, m_state.can(v.channelId, uid, Stream));
+        if (v.streaming && !m_state.can(v.channelId, uid, Stream)) {
+            v.streaming = false;
+            m_relay.clearViewers(v.streamId);
+            publishVoiceState(uid, v, v.channelId);
+        }
+        m_relay.setVideoAllowed(v.streamId, v.streaming);
     }
     for (Id uid : evicted)
         leaveVoice(uid);

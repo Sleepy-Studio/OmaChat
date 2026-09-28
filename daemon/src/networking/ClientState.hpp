@@ -7,6 +7,7 @@
 #include <QString>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <utility>
 #include <vector>
@@ -43,6 +44,7 @@ public:
     const proto::Channel* channel(Id id) const;
     const proto::Server* server(Id id) const;
     const proto::User* user(Id id) const;
+    const proto::Role* role(Id id) const;
     const proto::VoiceState* voiceState(Id userId) const;
     const std::map<Id, proto::Server>& servers() const { return m_servers; }
     const std::map<Id, proto::Channel>& channels() const { return m_channels; }
@@ -67,6 +69,17 @@ public:
     QJsonObject memberJson(const proto::Member& m) const;
     QJsonObject voiceStateJson(const proto::VoiceState& v) const;
     QJsonObject messageJson(const proto::ChatMessage& m) const;
+
+    // End-to-end encrypted messages are opened through this hook, which
+    // returns {content, files: [E2EFile…], status}; messageJson then shows
+    // the plaintext, the real attachment names and "e2e": status.
+    struct Decrypted {
+        QString content;
+        std::vector<proto::E2EFile> files;
+        QString status; // ok | unverified | undecryptable
+    };
+    using Decryptor = std::function<Decrypted(const proto::ChatMessage&)>;
+    void setDecryptor(Decryptor d) { m_decryptor = std::move(d); }
     static QJsonObject attachmentJson(const proto::Attachment& a);
 
 private:
@@ -77,6 +90,7 @@ private:
     std::map<Id, proto::Role> m_roles;
     std::map<std::pair<Id, Id>, proto::Member> m_members; // (server, user)
     std::map<Id, proto::User> m_users;
+    Decryptor m_decryptor;
     std::map<Id, proto::VoiceState> m_voice; // by user
     std::map<Id, std::uint64_t> m_serverPermissions;
     std::uint64_t m_lastSequence = 0;

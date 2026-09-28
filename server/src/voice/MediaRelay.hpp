@@ -44,6 +44,9 @@ public:
     // Video subscriptions: only viewers receive a streamer's video packets.
     void setSubscription(std::uint32_t viewerStream, std::uint32_t sourceStream, bool subscribed);
     void setVideoAllowed(std::uint32_t streamId, bool allowed);
+    void clearViewers(std::uint32_t sourceStream);
+    // Asks a streamer for a fresh keyframe (a new viewer needs one to start).
+    void requestKeyframe(std::uint32_t sourceStream);
 
     std::uint32_t allocateStreamId();
 

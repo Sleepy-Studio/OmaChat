@@ -8,6 +8,7 @@ import OmaChat
 //   Enter          send            Shift+Enter   newline
 //   Up (empty)     edit last own   Tab           complete @user / #channel / /command
 //   Esc            cancel reply or edit
+//   Ctrl+V         paste text, or attach a copied image / files
 Item {
     id: composer
 
@@ -187,7 +188,8 @@ Item {
                     elide: Text.ElideMiddle
                     color: Theme.textMuted
                     font.pixelSize: Theme.px(12)
-                    text: qsTr("Uploading %1").arg(modelData.name)
+                    text: modelData.waiting ? qsTr("%1 continues when reconnected").arg(modelData.name)
+                                            : qsTr("Uploading %1").arg(modelData.name)
                 }
                 ProgressBar {
                     Layout.fillWidth: true
@@ -231,6 +233,7 @@ Item {
                     wrapMode: TextArea.Wrap
                     color: Theme.text
                     placeholderText: !App.canSend ? qsTr("You do not have permission to send messages here")
+                                   : App.selectedChannelType === "group_dm" ? qsTr("Message %1").arg(App.selectedChannelName)
                                    : App.homeSelected ? qsTr("Message @%1").arg(App.selectedChannelName)
                                    : qsTr("Message #%1").arg(App.selectedChannelName)
                     placeholderTextColor: Theme.textFaint
@@ -257,6 +260,9 @@ Item {
                         } else if (event.key === Qt.Key_Up && input.length === 0 && composer.editingId.length === 0) {
                             composer.editLastRequested()
                             event.accepted = true
+                        } else if (event.matches(StandardKey.Paste) && composer.editingId.length === 0) {
+                            // Images and copied files become attachments; text pastes normally.
+                            event.accepted = App.pasteAttachment()
                         } else if (event.key === Qt.Key_Tab) {
                             // Only consume Tab when completing; otherwise it moves focus.
                             event.accepted = composer.complete()

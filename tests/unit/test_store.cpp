@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 2);
+    EXPECT_EQ(store.schemaVersion(), 3);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -30,7 +30,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     EXPECT_EQ(store.purgeExpiredSessions(5000), 1);
 }
 
-TEST(ServerStore, VersionOneDatabasesGainAttachments)
+TEST(ServerStore, VersionOneDatabasesAreMigrated)
 {
     QTemporaryDir dir;
     const QString path = dir.filePath(QStringLiteral("s.db"));
@@ -47,6 +47,8 @@ TEST(ServerStore, VersionOneDatabasesGainAttachments)
         ASSERT_TRUE(db.open());
         QSqlQuery q(db);
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE attachments")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE device_keys")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN encrypted")));
         ASSERT_TRUE(q.exec(QStringLiteral("PRAGMA user_version=1")));
         q.finish();
         db.close();
@@ -56,9 +58,29 @@ TEST(ServerStore, VersionOneDatabasesGainAttachments)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 2);
+    EXPECT_EQ(store.schemaVersion(), 3);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
+
+    // v3: encrypted payloads and device keys.
+    server::ServerRecord srv;
+    srv.id = 10;
+    srv.name = QStringLiteral("S");
+    srv.ownerId = 1;
+    ASSERT_TRUE(store.insertServer(srv, 0));
+    ASSERT_TRUE(store.insertChannel({20, 10, QStringLiteral("general"), server::ChannelKind::Text, 0, 0, {}, {}}, 0));
+    server::MessageRecord m{30, 20, 1, QString(), 0, 0, false, {}, {}, QByteArray("\x01sealed", 7)};
+    ASSERT_TRUE(store.insertMessage(m));
+    EXPECT_EQ(store.message(30)->encrypted, QByteArray("\x01sealed", 7));
+    EXPECT_TRUE(store.updateMessage(30, QString(), 5, {}, QByteArray("\x02again", 7)));
+    EXPECT_EQ(store.message(30)->encrypted, QByteArray("\x02again", 7));
+    ASSERT_TRUE(store.addDeviceKey({1, QByteArray(32, 'k'), 1}));
+    EXPECT_TRUE(store.addDeviceKey({1, QByteArray(32, 'k'), 2})) << "republishing is harmless";
+    ASSERT_TRUE(store.addDeviceKey({1, QByteArray(32, 'j'), 3}));
+    EXPECT_EQ(store.deviceKeys({1}).size(), 2u);
+    EXPECT_TRUE(store.removeDeviceKey(1, QByteArray(32, 'k')));
+    ASSERT_EQ(store.deviceKeys({1}).size(), 1u);
+    EXPECT_EQ(store.deviceKeys({1})[0].publicKey, QByteArray(32, 'j'));
 }
 
 TEST(ServerStore, MessagesPagingEditDeleteSearch)
@@ -75,7 +97,7 @@ TEST(ServerStore, MessagesPagingEditDeleteSearch)
     ASSERT_TRUE(store.insertServer(srv, 0));
     ASSERT_TRUE(store.insertChannel({20, 10, QStringLiteral("general"), server::ChannelKind::Text, 0, 0, {}, {}}, 0));
     for (server::Id id = 1000; id < 1120; ++id)
-        ASSERT_TRUE(store.insertMessage({id, 20, 1, QStringLiteral("message %1").arg(id), 0, 0, false, {}, {}}));
+        ASSERT_TRUE(store.insertMessage({id, 20, 1, QStringLiteral("message %1").arg(id), 0, 0, false, {}, {}, {}}));
 
     bool more = false;
     auto page = store.messagePage(20, 0, 50, &more);
@@ -87,12 +109,21 @@ TEST(ServerStore, MessagesPagingEditDeleteSearch)
     EXPECT_FALSE(more);
 
     EXPECT_TRUE(store.updateMessage(1050, QStringLiteral("unicorn sighting"), 99, {1}));
-    auto hits = store.searchMessages(20, QStringLiteral("unicorn"), 10);
+    auto hits = store.searchMessages({20}, QStringLiteral("unicorn"), 10);
     ASSERT_EQ(hits.size(), 1u);
     EXPECT_EQ(hits[0].id, 1050u);
     EXPECT_EQ(hits[0].mentions.size(), 1u);
     // FTS syntax in user input is treated literally, never as operators.
-    EXPECT_NO_THROW(store.searchMessages(20, QStringLiteral("\"unbalanced OR NEAR("), 10));
+    EXPECT_NO_THROW(store.searchMessages({20}, QStringLiteral("\"unbalanced OR NEAR("), 10));
+
+    // Server-wide search spans exactly the channels it is given.
+    ASSERT_TRUE(store.insertChannel({21, 10, QStringLiteral("random"), server::ChannelKind::Text, 0, 1, {}, {}}, 0));
+    ASSERT_TRUE(store.insertMessage({2000, 21, 1, QStringLiteral("another unicorn"), 0, 0, false, {}, {}, {}}));
+    auto both = store.searchMessages({20, 21}, QStringLiteral("unicorn"), 10);
+    ASSERT_EQ(both.size(), 2u);
+    EXPECT_EQ(both[0].id, 2000u) << "newest first across channels";
+    EXPECT_EQ(store.searchMessages({21}, QStringLiteral("unicorn"), 10).size(), 1u);
+    EXPECT_TRUE(store.searchMessages({}, QStringLiteral("unicorn"), 10).empty());
 
     EXPECT_TRUE(store.setReaction(1050, 1, QStringLiteral("👍"), true));
     EXPECT_TRUE(store.setReaction(1050, 1, QStringLiteral("👍"), true)); // idempotent
@@ -102,7 +133,7 @@ TEST(ServerStore, MessagesPagingEditDeleteSearch)
     EXPECT_TRUE(reactions[0].me);
 
     EXPECT_TRUE(store.deleteMessage(1050));
-    EXPECT_TRUE(store.searchMessages(20, QStringLiteral("unicorn"), 10).empty()) << "FTS index follows deletes";
+    EXPECT_TRUE(store.searchMessages({20}, QStringLiteral("unicorn"), 10).empty()) << "FTS index follows deletes";
     EXPECT_TRUE(store.reactions(1050, 1).empty());
 }
 

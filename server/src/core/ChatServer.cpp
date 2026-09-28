@@ -70,8 +70,8 @@ bool ChatServer::start(const TlsIdentity& identity, QString* error)
                 *error = QStringLiteral("cannot create files directory %1").arg(m_config.filesPath);
             return false;
         }
-        QFile::setPermissions(m_config.filesPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner
-                | QFileDevice::ExeOwner);
+        QFile::setPermissions(
+            m_config.filesPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
     }
     collectAttachmentGarbage();
 
@@ -165,7 +165,7 @@ void ChatServer::onClosed(quint64 connId)
     std::unique_ptr<Session> s = std::move(it->second);
     m_sessions.erase(it);
 
-    abortUploadsOf(connId);
+    detachUploadsOf(connId);
     const QString ip = s->peer.toString();
     if (--m_connectionsPerIp[ip] <= 0)
         m_connectionsPerIp.remove(ip);
@@ -265,6 +265,24 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kOpenDm:
         handleOpenDm(s, rid, env.open_dm());
         break;
+    case P::kPublishDeviceKey:
+        handlePublishDeviceKey(s, rid, env.publish_device_key());
+        break;
+    case P::kRevokeDeviceKey:
+        handleRevokeDeviceKey(s, rid, env.revoke_device_key());
+        break;
+    case P::kGetDeviceKeys:
+        handleGetDeviceKeys(s, rid, env.get_device_keys());
+        break;
+    case P::kCreateGroupDm:
+        handleCreateGroupDm(s, rid, env.create_group_dm());
+        break;
+    case P::kAddGroupDmRecipient:
+        handleAddGroupDmRecipient(s, rid, env.add_group_dm_recipient());
+        break;
+    case P::kLeaveGroupDm:
+        handleLeaveGroupDm(s, rid, env.leave_group_dm());
+        break;
     case P::kSendMessage:
         handleSendMessage(s, rid, env.send_message());
         break;
@@ -295,6 +313,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kUploadChunk:
         handleUploadChunk(s, rid, env.upload_chunk());
         break;
+    case P::kResumeUpload:
+        handleResumeUpload(s, rid, env.resume_upload());
+        break;
     case P::kFinishUpload:
         handleFinishUpload(s, rid, env.finish_upload());
         break;
@@ -309,6 +330,12 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
         break;
     case P::kLeaveVoice:
         handleLeaveVoice(s, rid);
+        break;
+    case P::kSetStreaming:
+        handleSetStreaming(s, rid, env.set_streaming());
+        break;
+    case P::kWatchStream:
+        handleWatchStream(s, rid, env.watch_stream());
         break;
     case P::kSetVoiceState:
         handleSetVoiceState(s, rid, env.set_voice_state());
@@ -504,6 +531,8 @@ proto::ChatMessage ChatServer::toProto(const MessageRecord& m, Id viewer)
     p.set_reply_to(m.replyTo);
     p.set_edited_at(m.editedAt);
     p.set_is_action(m.isAction);
+    if (!m.encrypted.isEmpty())
+        p.set_encrypted(m.encrypted.toStdString());
     for (Id mention : m.mentions)
         p.add_mention_ids(mention);
     for (const auto& a : m.attachments) {
@@ -535,6 +564,7 @@ proto::VoiceState ChatServer::toProto(Id userId, const VoiceRec& v) const
     p.set_server_mute(v.serverMute);
     p.set_server_deaf(v.serverDeaf);
     p.set_stream_id(v.streamId);
+    p.set_streaming(v.streaming);
     return p;
 }
 

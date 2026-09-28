@@ -10,7 +10,7 @@ inline constexpr const char* kAppId = "org.omarchy.OmaChat";
 // Reliable protocol version. A major mismatch is rejected; minor versions
 // negotiate through capability strings.
 inline constexpr std::uint32_t kProtocolMajor = 1;
-inline constexpr std::uint32_t kProtocolMinor = 1;
+inline constexpr std::uint32_t kProtocolMinor = 2;
 
 // Local IPC contract version (JSON lines over the user socket).
 inline constexpr int kIpcVersion = 1;

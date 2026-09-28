@@ -65,6 +65,7 @@ public:
     bool setMemberRole(Id serverId, Id userId, Id roleId, bool add);
     bool insertChannel(const ChannelRecord& c, std::int64_t createdAt);
     bool updateChannel(const ChannelRecord& c);
+    bool setRecipient(Id channelId, Id userId, bool present); // group DMs
     bool deleteChannel(Id id);
     bool upsertOverride(const OverrideRecord& o);
     bool deleteOverride(Id channelId, int targetType, Id targetId);
@@ -81,12 +82,19 @@ public:
     // Also claims m.attachments (by id) for the message, atomically.
     bool insertMessage(const MessageRecord& m);
     std::optional<MessageRecord> message(Id id);
-    bool updateMessage(Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions);
+    bool updateMessage(Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions,
+        const QByteArray& encrypted = {});
+
+    // ---- end-to-end device keys (public halves only)
+    std::vector<DeviceKeyRecord> deviceKeys(const std::vector<Id>& userIds);
+    bool addDeviceKey(const DeviceKeyRecord& key);
+    bool removeDeviceKey(Id userId, const QByteArray& publicKey);
     bool deleteMessage(Id id);
     // Newest first, strictly older than `beforeId` (0 = newest). Fetches
     // limit + 1 rows internally to report has_more.
     std::vector<MessageRecord> messagePage(Id channelId, Id beforeId, int limit, bool* hasMore);
-    std::vector<MessageRecord> searchMessages(Id channelId, const QString& query, int limit);
+    // Newest matches first, across the given channels.
+    std::vector<MessageRecord> searchMessages(const std::vector<Id>& channelIds, const QString& query, int limit);
 
     // ---- attachments (metadata only; bytes live under files.path)
     bool insertAttachment(const AttachmentRecord& a);

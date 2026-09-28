@@ -207,6 +207,7 @@ bool TestDaemon::start()
     opt.configPath = m_dir.filePath(QStringLiteral("config.toml"));
     opt.memoryCredentials = true;
     opt.nullAudio = true;
+    opt.syntheticScreen = true;
     opt.notifications = false;
     m_daemon = std::make_unique<daemon::Daemon>(opt);
     QString error;
@@ -265,9 +266,20 @@ bool TestDaemon::waitState(const QString& state, int timeoutMs)
 
 bool TestDaemon::registerOn(const TestServer& server, const QString& username, const QString& password)
 {
+    return authOn(server, username, password, QStringLiteral("account.register"));
+}
+
+bool TestDaemon::loginOn(const TestServer& server, const QString& username, const QString& password)
+{
+    return authOn(server, username, password, QStringLiteral("account.login"));
+}
+
+bool TestDaemon::authOn(
+    const TestServer& server, const QString& username, const QString& password, const QString& method)
+{
     const QJsonObject creds{{"host", "127.0.0.1"}, {"port", server.port()}, {"username", username},
         {"password", password}, {"display_name", username.toUpper()}};
-    auto first = call(QStringLiteral("account.register"), creds, 20000);
+    auto first = call(method, creds, 20000);
     if (first.ok)
         return waitState(QStringLiteral("connected"));
     if (first.errorCode != u"CertificateError")
@@ -283,7 +295,7 @@ bool TestDaemon::registerOn(const TestServer& server, const QString& username, c
         return false;
     if (!waitState(QStringLiteral("login_required")))
         return false;
-    auto second = call(QStringLiteral("account.register"), creds, 20000);
+    auto second = call(method, creds, 20000);
     return second.ok && waitState(QStringLiteral("connected"));
 }
 

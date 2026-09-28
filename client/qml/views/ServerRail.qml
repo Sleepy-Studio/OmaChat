@@ -145,6 +145,57 @@ Rectangle {
             tip: qsTr("Add a server")
             onClicked: addMenu.popup()
         }
+
+        // Accounts: every saved account stays connected; this picks the one shown.
+        Item {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.bottomMargin: Theme.px(8)
+            implicitWidth: Theme.px(42)
+            implicitHeight: Theme.px(42)
+            Avatar {
+                anchors.centerIn: parent
+                userId: App.selfId
+                name: App.selfName
+                size: Theme.px(34)
+            }
+            Badge {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                count: App.backgroundUnread
+            }
+            MouseArea {
+                id: accountArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: accountMenu.popup()
+            }
+            ToolTip.visible: accountArea.containsMouse
+            ToolTip.delay: 400
+            ToolTip.text: qsTr("Accounts")
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Accounts, %n mention(s) elsewhere", "", App.backgroundUnread)
+        }
+    }
+
+    MenuPopup {
+        id: accountMenu
+        Instantiator {
+            model: App.accounts
+            delegate: MenuAction {
+                required property var modelData
+                text: (modelData.active ? "✓ " : "") + modelData.username + "@" + modelData.host
+                      + (modelData.state !== "connected" ? " — " + modelData.state.replace("_", " ") : "")
+                      + (modelData.mentions > 0 ? "  (" + modelData.mentions + ")"
+                         : modelData.unread > 0 ? "  •" : "")
+                enabled: !modelData.active
+                onTriggered: App.switchAccount(modelData.id)
+            }
+            onObjectAdded: (index, object) => accountMenu.insertAction(index, object)
+            onObjectRemoved: (index, object) => accountMenu.removeAction(object)
+        }
+        MenuSeparator {}
+        MenuAction { text: qsTr("Add another account"); onTriggered: App.addingAccount = true }
     }
 
     MenuPopup {

@@ -81,12 +81,16 @@ public:
 
     // Registers (trusting the certificate on first contact) and waits until connected.
     bool registerOn(const TestServer& server, const QString& username, const QString& password);
+    // Same, for an account that already exists (a second device).
+    bool loginOn(const TestServer& server, const QString& username, const QString& password);
 
     daemon::Daemon& daemon() { return *m_daemon; }
     audio::NullAudioBackend& audio();
     ipc::IpcClient& ipc() { return m_ipc; }
 
 private:
+    bool authOn(const TestServer& server, const QString& username, const QString& password, const QString& method);
+
     QTemporaryDir m_dir;
     QString m_socket;
     std::unique_ptr<daemon::Daemon> m_daemon;

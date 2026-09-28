@@ -19,9 +19,11 @@ add_executable(omachat_unit_tests
     unit/test_client_state.cpp
     unit/test_server_state.cpp
     unit/test_store.cpp
+    unit/test_video.cpp
+    unit/test_e2e.cpp
 )
 if(OMACHAT_BUILD_CLIENT)
-    target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp)
+    target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp)
     target_link_libraries(omachat_unit_tests PRIVATE omachat_client_text)
 endif()
 omachat_set_warnings(omachat_unit_tests)
@@ -53,7 +55,7 @@ target_link_libraries(omachat_fuzz_smoke PRIVATE omachat_shared omachat_daemon_c
 gtest_discover_tests(omachat_fuzz_smoke PROPERTIES LABELS fuzz)
 
 if(OMACHAT_ENABLE_FUZZERS)
-    foreach(target framing media_header envelope ipc_line)
+    foreach(target framing media_header envelope ipc_line video_fragments e2e_payload)
         add_executable(fuzz_${target} fuzz/libfuzzer_${target}.cpp fuzz/FuzzTargets.cpp)
         target_compile_options(fuzz_${target} PRIVATE -fsanitize=fuzzer,address,undefined)
         target_link_options(fuzz_${target} PRIVATE -fsanitize=fuzzer,address,undefined)

@@ -51,15 +51,38 @@ Item {
                     createChannelDialog.parentId = parentId
                     createChannelDialog.open()
                 }
+                onOpenServerSettings: serverSettings.open()
+                onNewGroup: peoplePicker.openCreate()
+                onAddToGroup: id => peoplePicker.openAdd(id, App.channelRecipients(id))
+                onRenameGroup: (id, name) => {
+                    renameGroupDialog.channelId = id
+                    renameGroupDialog.open()
+                    renameGroupDialog.value = name
+                }
+                onOpenChannelPermissions: (id, name) => channelPermissions.openFor(id, name)
             }
 
-            ChatPane {
-                id: chat
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                membersVisible: root.showMembers
-                onToggleMembers: root.showMembers = !root.showMembers
-                onOpenSearch: searchPanel.open()
+                spacing: 0
+                StreamPanel {
+                    id: streams
+                    visible: App.watchedStreams.length > 0
+                    Layout.fillWidth: true
+                    Layout.fillHeight: expanded
+                    Layout.preferredHeight: expanded ? -1 : root.height * 0.55
+                    onToggleExpanded: expanded = !expanded
+                }
+                ChatPane {
+                    id: chat
+                    visible: !(streams.visible && streams.expanded)
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    membersVisible: root.showMembers
+                    onToggleMembers: root.showMembers = !root.showMembers
+                    onOpenSearch: searchPanel.open()
+                }
             }
 
             MemberList {
@@ -114,6 +137,17 @@ Item {
     SettingsDialog { id: settingsDialog }
     CommandHelp { id: commandHelp }
     SearchPanel { id: searchPanel }
+    ServerSettingsDialog { id: serverSettings }
+    PeoplePickerDialog { id: peoplePicker }
+    TextPromptDialog {
+        id: renameGroupDialog
+        property string channelId
+        title: qsTr("Rename conversation")
+        label: qsTr("Name")
+        acceptText: qsTr("Rename")
+        onAccepted: value => App.renameGroup(channelId, value)
+    }
+    ChannelPermissionsDialog { id: channelPermissions }
     CreateChannelDialog { id: createChannelDialog }
 
     TextPromptDialog {

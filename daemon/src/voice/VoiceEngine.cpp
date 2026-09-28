@@ -298,8 +298,27 @@ void VoiceEngine::mixerLoop()
 
 // --------------------------------------------------------------- network
 
+bool VoiceEngine::sendVideo(std::uint32_t timestamp90k, std::span<const std::uint8_t> payload, bool keyframe)
+{
+    return m_running.load() && m_transport.sendVideo(timestamp90k, payload, keyframe);
+}
+
+void VoiceEngine::requestKeyframe(std::uint32_t sourceStream)
+{
+    const std::uint8_t id[4]
+        = {static_cast<std::uint8_t>(sourceStream >> 24), static_cast<std::uint8_t>(sourceStream >> 16),
+            static_cast<std::uint8_t>(sourceStream >> 8), static_cast<std::uint8_t>(sourceStream)};
+    m_transport.sendControl(media::ControlType::KeyframeRequest, id);
+}
+
 void VoiceEngine::onPacket(const media::Header& h, std::span<const std::uint8_t> payload)
 {
+    const bool keyframeRequest = h.type == media::PacketType::Control && !payload.empty()
+        && payload[0] == static_cast<std::uint8_t>(media::ControlType::KeyframeRequest);
+    if ((h.type == media::PacketType::Video || keyframeRequest) && m_videoHandler) {
+        m_videoHandler(h, payload);
+        return;
+    }
     if (h.type != media::PacketType::Audio || h.senderId == 0 || h.senderId == m_selfUserId)
         return;
     std::lock_guard lock(m_speakersMutex);

@@ -1,9 +1,11 @@
 #include "FuzzTargets.hpp"
 
+#include "crypto/E2E.hpp"
 #include "network.pb.h"
 #include "networking/ClientState.hpp"
 #include "omachat/ipc/IpcMessage.hpp"
 #include "omachat/media/MediaPacket.hpp"
+#include "omachat/media/VideoFragments.hpp"
 #include "omachat/protocol/Framing.hpp"
 #include "voice/JitterBuffer.hpp"
 
@@ -85,6 +87,31 @@ void ipcLine(const std::uint8_t* data, std::size_t size)
             daemon::idFromJson(obj->value(QStringLiteral("params")).toObject().value(QStringLiteral("channel")));
         }
     }
+}
+
+void videoFragments(const std::uint8_t* data, std::size_t size)
+{
+    media::FrameAssembler assembler;
+    std::size_t pos = 0;
+    while (pos + 3 <= size) {
+        media::Header h;
+        h.type = media::PacketType::Video;
+        h.flags = data[pos];
+        const std::size_t len
+            = std::min<std::size_t>((std::size_t{data[pos + 1]} << 8) | data[pos + 2], size - pos - 3);
+        pos += 3;
+        if (auto frame = assembler.add(h, std::span<const std::uint8_t>(data + pos, len)))
+            (void)frame->data.size();
+        pos += len;
+    }
+}
+
+void e2ePayload(const std::uint8_t* data, std::size_t size)
+{
+    static const e2e::Identity me = e2e::Identity::generate();
+    const std::string payload(reinterpret_cast<const char*>(data), size);
+    if (auto opened = e2e::open(payload, {1, 2}, me))
+        (void)opened->body.content().size();
 }
 
 } // namespace omachat::fuzz

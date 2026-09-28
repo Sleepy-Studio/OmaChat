@@ -10,7 +10,7 @@
 namespace omachat::daemon {
 
 namespace {
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 }
 
 LocalStore::LocalStore()
@@ -67,15 +67,67 @@ bool LocalStore::open(const QString& path, QString* error)
             && exec(
                 QStringLiteral("CREATE TABLE muted_channels(account_id INTEGER NOT NULL REFERENCES accounts(id) "
                                "ON DELETE CASCADE, channel_id INTEGER NOT NULL, PRIMARY KEY(account_id, channel_id))"))
-            && exec(QStringLiteral("CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)"))
-            && exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
+            && exec(QStringLiteral("CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)"));
         if (!ok) {
             if (error)
                 *error = QStringLiteral("cannot initialize local database");
             return false;
         }
     }
+    if (version < 2) {
+        // Device keys seen per contact (trust on first use) and whether the
+        // user compared safety numbers for them.
+        const bool ok = exec(QStringLiteral(
+            "CREATE TABLE known_keys(account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, "
+            "user_id INTEGER NOT NULL, public_key BLOB NOT NULL, verified INTEGER NOT NULL DEFAULT 0, "
+            "PRIMARY KEY(account_id, user_id, public_key))"));
+        if (!ok) {
+            if (error)
+                *error = QStringLiteral("cannot upgrade local database");
+            return false;
+        }
+    }
+    exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     return true;
+}
+
+LocalStore::KnownKeys LocalStore::knownKeys(std::int64_t accountId, std::uint64_t userId)
+{
+    KnownKeys out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT public_key, verified FROM known_keys WHERE account_id = ? AND user_id = ?"));
+    q.addBindValue(static_cast<qint64>(accountId));
+    q.addBindValue(static_cast<qint64>(userId));
+    q.exec();
+    out.verified = true;
+    while (q.next()) {
+        out.keys.push_back(q.value(0).toByteArray());
+        out.verified = out.verified && q.value(1).toBool();
+    }
+    out.verified = out.verified && !out.keys.empty();
+    return out;
+}
+
+bool LocalStore::setKnownKeys(
+    std::int64_t accountId, std::uint64_t userId, const std::vector<QByteArray>& keys, bool verified)
+{
+    m_db.transaction();
+    QSqlQuery del(m_db);
+    del.prepare(QStringLiteral("DELETE FROM known_keys WHERE account_id = ? AND user_id = ?"));
+    del.addBindValue(static_cast<qint64>(accountId));
+    del.addBindValue(static_cast<qint64>(userId));
+    bool ok = del.exec();
+    for (const auto& k : keys) {
+        QSqlQuery ins(m_db);
+        ins.prepare(
+            QStringLiteral("INSERT INTO known_keys(account_id, user_id, public_key, verified) VALUES(?,?,?,?)"));
+        ins.addBindValue(static_cast<qint64>(accountId));
+        ins.addBindValue(static_cast<qint64>(userId));
+        ins.addBindValue(k);
+        ins.addBindValue(verified ? 1 : 0);
+        ok = ok && ins.exec();
+    }
+    return ok ? m_db.commit() : (m_db.rollback(), false);
 }
 
 namespace {
@@ -87,7 +139,7 @@ Account readAccount(const QSqlQuery& q)
 constexpr const char* kAccountCols = "id, host, port, username, trusted_fingerprint, last_used";
 } // namespace
 
-std::vector<Account> LocalStore::accounts()
+std::vector<Account> LocalStore::accounts() const
 {
     std::vector<Account> out;
     QSqlQuery q(m_db);

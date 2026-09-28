@@ -217,8 +217,8 @@ TEST_F(DaemonFixture, AttachmentsTravelBetweenDaemons)
         f.write(data);
     }
 
-    auto sent = alice->call(QStringLiteral("message.send"),
-        {{"channel", "general"}, {"content", "look"}, {"files", QJsonArray{source}}});
+    auto sent = alice->call(
+        QStringLiteral("message.send"), {{"channel", "general"}, {"content", "look"}, {"files", QJsonArray{source}}});
     ASSERT_TRUE(sent.ok) << sent.errorMessage.toStdString();
     const auto att = sent.result.value("attachments").toArray();
     ASSERT_EQ(att.size(), 1);
@@ -264,4 +264,308 @@ TEST_F(DaemonFixture, AttachmentsTravelBetweenDaemons)
     auto missing = alice->call(QStringLiteral("message.send"),
         {{"channel", "general"}, {"files", QJsonArray{files.filePath(QStringLiteral("nope"))}}});
     EXPECT_EQ(missing.errorCode, QStringLiteral("NotFound"));
+}
+
+TEST_F(DaemonFixture, RoleEditsKeepOmittedFieldsAndOverridesAcceptUsernames)
+{
+    setupPair();
+    auto created = alice->call(QStringLiteral("role.create"),
+        {{"server", "Sleepy Studio"}, {"name", "DJ"}, {"permissions", QJsonArray{"SPEAK", "STREAM"}}});
+    ASSERT_TRUE(created.ok) << created.errorMessage.toStdString();
+    const QString roleId = created.result.value("id").toString();
+    ASSERT_TRUE(waitFor([&] {
+        const auto roles = alice->call(QStringLiteral("state.snapshot")).result.value("roles").toArray();
+        return std::ranges::any_of(roles, [&](const QJsonValue& r) { return r.toObject().value("id") == roleId; });
+    }));
+
+    auto renamed = alice->call(QStringLiteral("role.update"), {{"role", roleId}, {"name", "Disc Jockey"}});
+    ASSERT_TRUE(renamed.ok) << renamed.errorMessage.toStdString();
+    EXPECT_EQ(renamed.result.value("name").toString(), QStringLiteral("Disc Jockey"));
+    EXPECT_EQ(renamed.result.value("permissions").toArray(), (QJsonArray{"SPEAK", "STREAM"}))
+        << "permissions left out are kept";
+
+    auto recolored = alice->call(QStringLiteral("role.update"), {{"role", roleId}, {"color", "#61afef"}});
+    ASSERT_TRUE(recolored.ok);
+    EXPECT_EQ(recolored.result.value("name").toString(), QStringLiteral("Disc Jockey"));
+    EXPECT_EQ(recolored.result.value("color").toString(), QStringLiteral("#61afef"));
+
+    ASSERT_TRUE(alice
+            ->call(QStringLiteral("override.set"),
+                {{"channel", "general"}, {"user", "bob"}, {"deny", QJsonArray{"SEND_MESSAGES"}}})
+            .ok);
+    auto list = alice->call(QStringLiteral("override.list"), {{"channel", "general"}});
+    ASSERT_TRUE(list.ok);
+    const auto overrides = list.result.value("overrides").toArray();
+    ASSERT_EQ(overrides.size(), 1);
+    EXPECT_EQ(overrides.at(0).toObject().value("target_type").toString(), QStringLiteral("user"));
+    EXPECT_EQ(overrides.at(0).toObject().value("deny").toArray(), (QJsonArray{"SEND_MESSAGES"}));
+    EXPECT_FALSE(bob->call(QStringLiteral("message.send"), {{"channel", "general"}, {"content", "hi"}}).ok);
+}
+
+TEST_F(DaemonFixture, GroupConversationsThroughTheDaemon)
+{
+    setupPair();
+    TestDaemon carol(QStringLiteral("carol"));
+    ASSERT_TRUE(carol.start());
+    ASSERT_TRUE(carol.registerOn(server, QStringLiteral("carol"), QStringLiteral("carol-password")));
+    auto inv = alice->call(QStringLiteral("invite.create"), {{"server", "Sleepy Studio"}});
+    ASSERT_TRUE(carol.call(QStringLiteral("server.join"), {{"invite", inv.result.value("uri")}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return alice->call(QStringLiteral("member.list"), {{"server", "Sleepy Studio"}})
+                   .result.value("members")
+                   .toArray()
+                   .size()
+            == 3;
+    }));
+
+    auto made = alice->call(QStringLiteral("dm.create"), {{"users", QJsonArray{"bob", "carol"}}});
+    ASSERT_TRUE(made.ok) << made.errorMessage.toStdString();
+    EXPECT_EQ(made.result.value("type").toString(), QStringLiteral("group_dm"));
+    EXPECT_EQ(made.result.value("recipients").toArray().size(), 3);
+    const QString id = made.result.value("id").toString();
+    EXPECT_FALSE(made.result.value("name").toString().isEmpty()) << "unnamed groups are named after their people";
+
+    auto created = carol.waitEvent(
+        QStringLiteral("channel.created"), [&](const QJsonObject& c) { return c.value("id").toString() == id; });
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(carol.call(QStringLiteral("message.send"), {{"channel", id}, {"content", "hello all"}}).ok);
+    EXPECT_TRUE(bob->waitEvent(QStringLiteral("message.created"),
+        [](const QJsonObject& m) { return m.value("content").toString() == u"hello all"; }));
+
+    auto renamed = bob->call(QStringLiteral("channel.update"), {{"channel", id}, {"name", "Trio"}});
+    ASSERT_TRUE(renamed.ok) << renamed.errorMessage.toStdString();
+    EXPECT_TRUE(alice->waitEvent(
+        QStringLiteral("channel.updated"), [](const QJsonObject& c) { return c.value("name").toString() == u"Trio"; }));
+
+    ASSERT_TRUE(carol.call(QStringLiteral("dm.leave"), {{"channel", id}}).ok);
+    EXPECT_TRUE(carol.waitEvent(QStringLiteral("channel.deleted")));
+    EXPECT_TRUE(alice->waitEvent(QStringLiteral("channel.updated"),
+        [](const QJsonObject& c) { return c.value("recipients").toArray().size() == 2; }));
+}
+
+TEST_F(DaemonFixture, UploadsContinueAfterTheConnectionDrops)
+{
+    setupPair();
+    QTemporaryDir files;
+    const qint64 size = 24 * 1024 * 1024; // 48 chunks: still going when the link drops
+    QByteArray data(size, Qt::Uninitialized);
+    for (qint64 i = 0; i < size; ++i)
+        data[i] = static_cast<char>((i * 131 + i / 511) & 0xff);
+    const QString source = files.filePath(QStringLiteral("big.bin"));
+    {
+        QFile f(source);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(data);
+    }
+
+    std::optional<ipc::Reply> result;
+    alice->ipc().request(
+        QStringLiteral("message.send"), {{"channel", "general"}, {"content", "big one"}, {"files", QJsonArray{source}}},
+        [&](const ipc::Reply& r) { result = r; }, 0);
+    // Once the server has handed out an attachment id, cut the link.
+    ASSERT_TRUE(alice->waitEvent(QStringLiteral("transfer.progress"),
+        [](const QJsonObject& p) { return p.value("attachment_id").toString() != u"0" && !p.contains("complete"); }));
+    alice->daemon().connection().dropLink(QStringLiteral("test: link dropped"));
+    EXPECT_TRUE(alice->waitEvent(
+        QStringLiteral("transfer.progress"), [](const QJsonObject& p) { return p.value("waiting").toBool(); }));
+
+    ASSERT_TRUE(waitFor([&] { return result.has_value(); }, 60000));
+    ASSERT_TRUE(result->ok) << result->errorMessage.toStdString();
+    const auto att = result->result.value("attachments").toArray();
+    ASSERT_EQ(att.size(), 1);
+    EXPECT_EQ(att[0].toObject().value("size").toDouble(), static_cast<double>(size));
+
+    // Downloads continue from what is already on disk.
+    QTemporaryDir out;
+    std::optional<ipc::Reply> got;
+    bob->ipc().request(
+        QStringLiteral("attachment.download"),
+        {{"attachment", att[0].toObject().value("id")}, {"filename", "big.bin"}, {"to", out.path()}},
+        [&](const ipc::Reply& r) { got = r; }, 0);
+    ASSERT_TRUE(bob->waitEvent(QStringLiteral("transfer.progress"), [](const QJsonObject& p) {
+        return p.value("direction").toString() == u"download" && p.value("transferred").toDouble() > 0
+            && !p.contains("complete");
+    }));
+    bob->daemon().connection().dropLink(QStringLiteral("test: link dropped"));
+    ASSERT_TRUE(waitFor([&] { return got.has_value(); }, 60000));
+    ASSERT_TRUE(got->ok) << got->errorMessage.toStdString();
+    QFile f(got->result.value("path").toString());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_TRUE(f.readAll() == data) << "upload and download both survived a dropped link intact";
+}
+
+TEST_F(DaemonFixture, SeveralAccountsStayConnectedAndSwitchInstantly)
+{
+    setupPair(); // alice and bob on `server`, alice owns "Sleepy Studio"
+    TestServer second;
+    ASSERT_TRUE(second.start());
+    ASSERT_TRUE(alice->registerOn(second, QStringLiteral("alice2"), QStringLiteral("alice-password")));
+    ASSERT_TRUE(alice->call(QStringLiteral("server.create"), {{"name", "Other Place"}}).ok);
+
+    // The second account is active; the first stays connected behind it.
+    const auto accounts = alice->daemon().statusJson().value("accounts").toArray();
+    ASSERT_EQ(accounts.size(), 2);
+    QString firstId, secondId;
+    for (const auto& v : accounts) {
+        const auto a = v.toObject();
+        EXPECT_EQ(a.value("state").toString(), QStringLiteral("connected"))
+            << a.value("username").toString().toStdString();
+        (a.value("active").toBool() ? secondId : firstId) = a.value("id").toString();
+    }
+    ASSERT_FALSE(firstId.isEmpty());
+    ASSERT_FALSE(secondId.isEmpty());
+    EXPECT_EQ(alice->daemon().statusJson().value("account").toObject().value("username").toString(),
+        QStringLiteral("alice2"));
+
+    // Activity on the background account is counted, not broadcast as messages.
+    ASSERT_TRUE(bob->call(QStringLiteral("message.send"), {{"channel", "general"}, {"content", "hey @alice"}}).ok);
+    auto activity = alice->waitEvent(QStringLiteral("account.activity"));
+    ASSERT_TRUE(activity);
+    EXPECT_EQ(activity->value("account").toString(), firstId);
+    EXPECT_EQ(activity->value("unread").toInt(), 1);
+    EXPECT_EQ(activity->value("mentions").toInt(), 1);
+
+    auto switched = alice->call(QStringLiteral("account.switch"), {{"account", firstId}});
+    ASSERT_TRUE(switched.ok) << switched.errorMessage.toStdString();
+    EXPECT_TRUE(alice->waitEvent(QStringLiteral("state.reset")));
+    const auto snap = alice->call(QStringLiteral("state.snapshot")).result;
+    QStringList servers;
+    for (const auto& s : snap.value("servers").toArray())
+        servers << s.toObject().value("name").toString();
+    EXPECT_EQ(servers, QStringList{QStringLiteral("Sleepy Studio")});
+    auto hist = alice->call(QStringLiteral("message.history"), {{"channel", "general"}});
+    ASSERT_TRUE(hist.ok);
+    EXPECT_EQ(hist.result.value("messages").toArray().size(), 1);
+    for (const auto& v : alice->daemon().statusJson().value("accounts").toArray()) {
+        if (v.toObject().value("id").toString() == firstId) {
+            EXPECT_EQ(v.toObject().value("unread").toInt(), 0) << "switching to an account clears its counter";
+        }
+    }
+
+    // Removing the active account falls back to the other one.
+    ASSERT_TRUE(alice->call(QStringLiteral("account.remove"), {{"account", firstId}}).ok);
+    ASSERT_TRUE(waitFor(
+        [&] { return alice->daemon().statusJson().value("account").toObject().value("id").toString() == secondId; }));
+    EXPECT_EQ(alice->daemon().statusJson().value("accounts").toArray().size(), 1);
+}
+
+TEST_F(DaemonFixture, ConversationsAreEndToEndEncrypted)
+{
+    setupPair();
+    auto dm = alice->call(QStringLiteral("dm.open"), {{"user", "bob"}});
+    ASSERT_TRUE(dm.ok);
+    const QString dmId = dm.result.value("id").toString();
+
+    // Text: both daemons read it, the server only ever sees ciphertext.
+    auto sent = alice->call(QStringLiteral("message.send"), {{"channel", dmId}, {"content", "top secret plan"}});
+    ASSERT_TRUE(sent.ok) << sent.errorMessage.toStdString();
+    EXPECT_EQ(sent.result.value("content").toString(), QStringLiteral("top secret plan"));
+    EXPECT_EQ(sent.result.value("e2e").toString(), QStringLiteral("ok"));
+    auto got = bob->waitEvent(QStringLiteral("message.created"),
+        [](const QJsonObject& m) { return m.value("content").toString() == u"top secret plan"; });
+    ASSERT_TRUE(got);
+    EXPECT_EQ(got->value("e2e").toString(), QStringLiteral("ok"));
+
+    RawClient raw(server);
+    ASSERT_TRUE(raw.connect() && raw.hello() && raw.login("bob", "bob-password"));
+    proto::Envelope hist;
+    hist.mutable_get_messages()->set_channel_id(dmId.toULongLong());
+    auto page = raw.call(hist);
+    ASSERT_TRUE(page && page->has_message_page() && page->message_page().messages_size() == 1);
+    const auto& stored = page->message_page().messages(0);
+    EXPECT_TRUE(stored.content().empty());
+    EXPECT_FALSE(stored.encrypted().empty());
+    EXPECT_EQ(stored.encrypted().find("top secret"), std::string::npos);
+
+    // Server channels stay readable by the server.
+    ASSERT_TRUE(alice->call(QStringLiteral("message.send"), {{"channel", "general"}, {"content", "in the open"}}).ok);
+    auto open = bob->waitEvent(QStringLiteral("message.created"),
+        [](const QJsonObject& m) { return m.value("content").toString() == u"in the open"; });
+    ASSERT_TRUE(open);
+    EXPECT_FALSE(open->contains("e2e"));
+
+    // Edits stay encrypted.
+    ASSERT_TRUE(alice
+            ->call(QStringLiteral("message.edit"),
+                {{"message", sent.result.value("id")}, {"content", "top secret plan, revised"}})
+            .ok);
+    EXPECT_TRUE(bob->waitEvent(QStringLiteral("message.updated"),
+        [](const QJsonObject& m) { return m.value("content").toString() == u"top secret plan, revised"; }));
+
+    // Files: the server stores ciphertext under a meaningless name.
+    QTemporaryDir files;
+    const QString source = files.filePath(QStringLiteral("passwords.txt"));
+    const QByteArray secret = QByteArray("hunter2 ").repeated(20000);
+    {
+        QFile f(source);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(secret);
+    }
+    auto withFile = alice->call(QStringLiteral("message.send"),
+        {{"channel", dmId}, {"content", "see attached"}, {"files", QJsonArray{source}}});
+    ASSERT_TRUE(withFile.ok) << withFile.errorMessage.toStdString();
+    auto fileEv = bob->waitEvent(QStringLiteral("message.created"),
+        [](const QJsonObject& m) { return m.value("content").toString() == u"see attached"; });
+    ASSERT_TRUE(fileEv);
+    const QJsonObject att = fileEv->value("attachments").toArray().at(0).toObject();
+    EXPECT_EQ(att.value("filename").toString(), QStringLiteral("passwords.txt"));
+    EXPECT_EQ(att.value("size").toDouble(), static_cast<double>(secret.size()));
+    EXPECT_TRUE(att.value("encrypted").toBool());
+
+    proto::Envelope raw2;
+    raw2.mutable_get_messages()->set_channel_id(dmId.toULongLong());
+    auto page2 = raw.call(raw2);
+    ASSERT_TRUE(page2 && page2->has_message_page());
+    const auto& storedFile = page2->message_page().messages(0).attachments(0);
+    EXPECT_EQ(storedFile.filename().find("passwords"), std::string::npos);
+    proto::Envelope dl;
+    dl.mutable_download()->set_attachment_id(storedFile.id());
+    auto chunk = raw.call(dl);
+    ASSERT_TRUE(chunk && chunk->has_file_chunk());
+    EXPECT_EQ(chunk->file_chunk().data().find("hunter2"), std::string::npos);
+
+    QTemporaryDir out;
+    auto saved = bob->call(QStringLiteral("attachment.download"),
+        {{"attachment", att.value("id")}, {"filename", att.value("filename")}, {"to", out.path()}});
+    ASSERT_TRUE(saved.ok) << saved.errorMessage.toStdString();
+    QFile back(saved.result.value("path").toString());
+    ASSERT_TRUE(back.open(QIODevice::ReadOnly));
+    EXPECT_TRUE(back.readAll() == secret);
+
+    // Safety numbers agree; a new device of Bob's changes them and warns Alice.
+    const auto aliceView = alice->call(QStringLiteral("e2e.safety"), {{"user", "bob"}}).result;
+    const auto bobView = bob->call(QStringLiteral("e2e.safety"), {{"user", "alice"}}).result;
+    EXPECT_EQ(aliceView.value("number").toString(), bobView.value("number").toString());
+    ASSERT_TRUE(alice->call(QStringLiteral("e2e.verify"), {{"user", "bob"}}).result.value("verified").toBool());
+
+    TestDaemon bobLaptop(QStringLiteral("bob-laptop"));
+    ASSERT_TRUE(bobLaptop.start());
+    ASSERT_TRUE(bobLaptop.loginOn(server, QStringLiteral("bob"), QStringLiteral("bob-password")));
+    auto changed = alice->waitEvent(QStringLiteral("e2e.keys_changed"), {}, 10000);
+    ASSERT_TRUE(changed);
+    const auto after = alice->call(QStringLiteral("e2e.safety"), {{"user", "bob"}}).result;
+    EXPECT_NE(after.value("number").toString(), aliceView.value("number").toString());
+    EXPECT_FALSE(after.value("verified").toBool()) << "a new device voids the verification";
+    EXPECT_EQ(after.value("devices").toInt(), 2);
+    // New messages reach both of Bob's devices.
+    ASSERT_TRUE(alice->call(QStringLiteral("message.send"), {{"channel", dmId}, {"content", "both of you"}}).ok);
+    EXPECT_TRUE(bobLaptop.waitEvent(QStringLiteral("message.created"),
+        [](const QJsonObject& m) { return m.value("content").toString() == u"both of you"; }));
+}
+
+TEST_F(DaemonFixture, NoPlaintextFallbackWhenSomeoneHasNoKeys)
+{
+    setupPair();
+    // Mallory uses an old client: she never publishes a device key.
+    RawClient mallory(server);
+    ASSERT_TRUE(mallory.connect() && mallory.hello() && mallory.registerUser("mallory", "mallory-password"));
+    auto inv = alice->call(QStringLiteral("invite.create"), {{"server", "Sleepy Studio"}});
+    proto::Envelope join;
+    join.mutable_join_invite()->set_token(inv.result.value("token").toString().toStdString());
+    ASSERT_TRUE(mallory.call(join)->has_server());
+    ASSERT_TRUE(waitFor([&] { return alice->daemon().connection().model().resolveUser("mallory") != 0; }));
+
+    auto sent = alice->call(QStringLiteral("dm.send"), {{"user", "mallory"}, {"content", "hi"}});
+    EXPECT_FALSE(sent.ok);
+    EXPECT_TRUE(sent.errorMessage.contains(QStringLiteral("encryption"))) << sent.errorMessage.toStdString();
 }

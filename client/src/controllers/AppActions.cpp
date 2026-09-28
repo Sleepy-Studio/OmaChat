@@ -21,6 +21,19 @@ void AppController::retryDaemon()
     m_link.retry();
 }
 
+void AppController::switchAccount(const QString& accountId)
+{
+    m_addingAccount = false;
+    emit authChanged();
+    call(
+        QStringLiteral("account.switch"), {{"account", accountId.toLongLong()}},
+        [this](const QJsonObject& r) {
+            if (r.value(QStringLiteral("left_voice")).toBool())
+                showNotice(tr("Left voice: it belongs to the account you switched from."));
+        },
+        tr("Cannot switch account"));
+}
+
 void AppController::login(const QString& host, int port, const QString& username, const QString& password,
     bool registerAccount, const QString& displayName)
 {
@@ -31,6 +44,9 @@ void AppController::login(const QString& host, int port, const QString& username
     }
     m_authBusy = true;
     m_authError.clear();
+    // The daemon makes this account the active one right away; from here the
+    // pages follow its connection state like any other account's.
+    m_addingAccount = false;
     emit authChanged();
     QJsonObject params{
         {"host", host.trimmed()}, {"port", port}, {"username", username.trimmed()}, {"password", password}};
@@ -428,29 +444,33 @@ void AppController::openLink(const QString& url)
     showNotice(tr("Blocked a link with an unsupported scheme (%1)").arg(scheme), true);
 }
 
-void AppController::search(const QString& query)
+void AppController::search(const QString& query, bool wholeServer)
 {
-    if (query.trimmed().isEmpty() || m_selectedChannel.isEmpty()) {
+    wholeServer = wholeServer && !homeSelected();
+    if (query.trimmed().isEmpty() || (!wholeServer && m_selectedChannel.isEmpty())) {
         clearSearch();
         return;
     }
-    call(QStringLiteral("message.search"), {{"channel", m_selectedChannel}, {"query", query}},
-        [this](const QJsonObject& r) {
-            QList<QVariantMap> rows;
-            for (const auto& v : r.value(QStringLiteral("messages")).toArray()) {
-                const QJsonObject m = v.toObject();
-                const auto when = QDateTime::fromMSecsSinceEpoch(
-                    static_cast<qint64>(m.value(QStringLiteral("timestamp")).toDouble()));
-                rows.append({{"key", m.value(QStringLiteral("id")).toString()},
-                    {"itemId", m.value(QStringLiteral("id")).toString()},
-                    {"author", userName(m.value(QStringLiteral("author_id")).toString())},
-                    {"preview", MarkdownRenderer::plainPreview(m.value(QStringLiteral("content")).toString(), 160)},
-                    {"time", QLocale().toString(when, QLocale::ShortFormat)}});
-            }
-            m_searchResults.setRows(std::move(rows));
-            if (m_searchResults.count() == 0)
-                showNotice(tr("No messages found"));
-        });
+    const QJsonObject params = wholeServer ? QJsonObject{{"server", m_selectedServer}, {"query", query}, {"limit", 50}}
+                                           : QJsonObject{{"channel", m_selectedChannel}, {"query", query}};
+    call(QStringLiteral("message.search"), params, [this](const QJsonObject& r) {
+        QList<QVariantMap> rows;
+        for (const auto& v : r.value(QStringLiteral("messages")).toArray()) {
+            const QJsonObject m = v.toObject();
+            const auto when
+                = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(m.value(QStringLiteral("timestamp")).toDouble()));
+            const QString channelId = m.value(QStringLiteral("channel_id")).toString();
+            rows.append({{"key", m.value(QStringLiteral("id")).toString()},
+                {"itemId", m.value(QStringLiteral("id")).toString()}, {"channelId", channelId},
+                {"channel", m_channelsById.value(channelId).value(QStringLiteral("name")).toString()},
+                {"author", userName(m.value(QStringLiteral("author_id")).toString())},
+                {"preview", MarkdownRenderer::plainPreview(m.value(QStringLiteral("content")).toString(), 160)},
+                {"time", QLocale().toString(when, QLocale::ShortFormat)}});
+        }
+        m_searchResults.setRows(std::move(rows));
+        if (m_searchResults.count() == 0)
+            showNotice(tr("No messages found"));
+    });
 }
 
 void AppController::clearSearch()
@@ -488,6 +508,62 @@ void AppController::pushToTalk(bool pressed)
 void AppController::setInputMode(const QString& mode)
 {
     call(QStringLiteral("voice.mode"), {{"mode", mode}});
+}
+
+// ---------------------------------------------------------- screen sharing
+
+bool AppController::canShareScreen() const
+{
+    return voiceJoined() && capabilities().contains(QStringLiteral("video.h264"))
+        && channel(voiceChannelId()).value(QStringLiteral("can_stream")).toBool(true);
+}
+
+bool AppController::isStreaming(const QString& userId) const
+{
+    return m_voiceByUser.value(userId).value(QStringLiteral("streaming")).toBool();
+}
+
+QVariantList AppController::watchedStreams() const
+{
+    QVariantList out;
+    for (const auto& v : voice().value(QStringLiteral("watching")).toArray()) {
+        const QJsonObject w = v.toObject();
+        const QString uid = w.value(QStringLiteral("user_id")).toString();
+        out.append(QVariantMap{{"userId", uid}, {"name", userName(uid)}, {"path", w.value(QStringLiteral("path"))}});
+    }
+    return out;
+}
+
+void AppController::toggleScreenShare()
+{
+    if (sharingScreen()) {
+        call(QStringLiteral("stream.stop"));
+        return;
+    }
+    if (m_shareStarting)
+        return;
+    m_shareStarting = true;
+    emit voiceChanged();
+    // The desktop shows its own screen/window picker; no timeout.
+    m_link.request(
+        QStringLiteral("stream.start"), {},
+        [this](const ipc::Reply& r) {
+            m_shareStarting = false;
+            emit voiceChanged();
+            if (!r.ok && r.errorMessage != u"cancelled")
+                showNotice(tr("Cannot share your screen: %1").arg(r.errorMessage), true);
+        },
+        0);
+}
+
+void AppController::watchStream(const QString& userId)
+{
+    call(QStringLiteral("stream.watch"), {{"user", userId}}, {}, tr("Cannot watch %1").arg(userName(userId)));
+}
+
+void AppController::unwatchStream(const QString& userId)
+{
+    call(QStringLiteral("stream.unwatch"), {{"user", userId}});
 }
 
 void AppController::setUserVolume(const QString& userId, int percent)
@@ -597,6 +673,104 @@ void AppController::openDm(const QString& userId)
             emit focusComposer();
         },
         tr("Cannot open conversation"));
+}
+
+bool AppController::selectedEncrypted() const
+{
+    const QString type = selectedChannelType();
+    return (type == u"dm" || type == u"group_dm") && capabilities().contains(QStringLiteral("e2e.v1"));
+}
+
+void AppController::loadSafetyNumbers()
+{
+    m_safetyNumbers.clear();
+    emit safetyChanged();
+    const QString channelId = m_selectedChannel;
+    for (const QString& uid : channelRecipients(channelId)) {
+        if (uid == selfId())
+            continue;
+        call(QStringLiteral("e2e.safety"), {{"user", uid}}, [this, channelId, uid](const QJsonObject& r) {
+            if (channelId != m_selectedChannel)
+                return;
+            QVariantMap row = r.toVariantMap();
+            row.insert(QStringLiteral("userId"), uid);
+            row.insert(QStringLiteral("name"), userName(uid));
+            // Replace or append, keeping a stable order.
+            for (auto& v : m_safetyNumbers) {
+                if (v.toMap().value(QStringLiteral("userId")) == uid) {
+                    v = row;
+                    emit safetyChanged();
+                    return;
+                }
+            }
+            m_safetyNumbers.append(row);
+            emit safetyChanged();
+        });
+    }
+}
+
+void AppController::setVerified(const QString& userId, bool verified)
+{
+    call(
+        QStringLiteral("e2e.verify"), {{"user", userId}, {"verified", verified}},
+        [this](const QJsonObject&) { loadSafetyNumbers(); }, tr("Cannot change verification"));
+}
+
+QStringList AppController::channelRecipients(const QString& channelId) const
+{
+    QStringList out;
+    for (const auto& r : channel(channelId).value(QStringLiteral("recipients")).toArray())
+        out << r.toString();
+    return out;
+}
+
+QVariantList AppController::knownUsers() const
+{
+    QVariantList out;
+    for (auto it = m_usersById.cbegin(); it != m_usersById.cend(); ++it) {
+        if (it.key() == selfId())
+            continue;
+        out.append(QVariantMap{{"userId", it.key()}, {"name", userName(it.key())},
+            {"username", it->value(QStringLiteral("username")).toString()}, {"status", userStatus(it.key())}});
+    }
+    std::ranges::sort(out, [](const QVariant& a, const QVariant& b) {
+        return a.toMap()
+                   .value(QStringLiteral("name"))
+                   .toString()
+                   .localeAwareCompare(b.toMap().value(QStringLiteral("name")).toString())
+            < 0;
+    });
+    return out;
+}
+
+void AppController::createGroup(const QStringList& userIds, const QString& name)
+{
+    call(
+        QStringLiteral("dm.create"), {{"users", QJsonArray::fromStringList(userIds)}, {"name", name.trimmed()}},
+        [this](const QJsonObject& c) {
+            m_channelsById.insert(c.value(QStringLiteral("id")).toString(), c);
+            selectHome();
+            selectChannel(c.value(QStringLiteral("id")).toString());
+        },
+        tr("Cannot start the conversation"));
+}
+
+void AppController::addToGroup(const QString& channelId, const QStringList& userIds)
+{
+    for (const QString& uid : userIds)
+        call(QStringLiteral("dm.add"), {{"channel", channelId}, {"user", uid}}, {},
+            tr("Cannot add %1").arg(userName(uid)));
+}
+
+void AppController::renameGroup(const QString& channelId, const QString& name)
+{
+    call(QStringLiteral("channel.update"), {{"channel", channelId}, {"name", name.trimmed()}}, {},
+        tr("Cannot rename the conversation"));
+}
+
+void AppController::leaveGroup(const QString& channelId)
+{
+    call(QStringLiteral("dm.leave"), {{"channel", channelId}}, {}, tr("Cannot leave the conversation"));
 }
 
 void AppController::kick(const QString& userId, const QString& reason)
@@ -728,6 +902,24 @@ void AppController::refreshAudio()
         if (!r.ok)
             return;
         m_audioSettings = r.result.toVariantMap();
+        emit audioChanged();
+    });
+    m_link.request(QStringLiteral("video.settings"), {}, [this](const ipc::Reply& r) {
+        if (!r.ok)
+            return;
+        m_videoSettings = r.result.toVariantMap();
+        emit audioChanged();
+    });
+}
+
+void AppController::setVideo(const QString& key, const QVariant& value)
+{
+    m_link.request(QStringLiteral("video.set"), {{key, QJsonValue::fromVariant(value)}}, [this](const ipc::Reply& r) {
+        if (!r.ok) {
+            showNotice(r.errorMessage, true);
+            return;
+        }
+        m_videoSettings = r.result.toVariantMap();
         emit audioChanged();
     });
 }

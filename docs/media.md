@@ -91,7 +91,47 @@ PipeWire's `echo-cancel` module (select its source).
 
 ## Screen sharing
 
-Not implemented in 0.1. The packet format, relay and daemon transport
-already carry a separate video type with subscription-only forwarding and
-keyframe requests so H.264 (NVENC/VAAPI/QSV/software) over
-xdg-desktop-portal + PipeWire can be added without changing voice.
+```text
+xdg-desktop-portal ScreenCast (the desktop's own picker)
+  → PipeWire video stream, shared-memory buffers (BGRx/BGRA/RGBx/…)
+  → newest-frame slot → encoder thread, paced to the frame rate:
+      swscale → YUV 4:2:0 → H.264 (h264_nvenc, h264_amf or libx264;
+      CBR, no B-frames, SPS/PPS on every IDR)
+  → fragments → paced UDP on the sender's voice media stream (type 2)
+  → relay: only to members of the same voice channel who asked to watch
+  → per-sharer frame assembly → decode thread (libavcodec, slice threads)
+  → BGRA into a shared-memory frame file → GUI maps it and draws the newest
+```
+
+Defaults: 1080p (aspect kept, never upscaled), 30 fps, 4 Mbit/s,
+encoder `auto` (NVENC, then AMF, then x264). `[video]` in `config.toml`
+or Settings → Screen sharing change them for the next share.
+
+**Fragments.** Each video payload starts with `[frame number:4][fragment
+index:2][fragment count:2]`, then up to 1352 bytes of the access unit.
+The media header's keyframe flag marks every fragment of an IDR frame; its
+timestamp is a 90 kHz capture clock. Frame numbers start at a random value
+per share.
+
+**Loss.** There are no retransmissions. A receiver decodes a frame only if
+it is a keyframe or directly follows the last decoded frame; after any gap
+it discards frames and sends `KeyframeRequest` (control packet with the
+sharer's stream id) every 500 ms until a keyframe arrives. The relay
+forwards requests only from subscribed viewers, and the sharer produces at
+most one keyframe per 300 ms. When the screen is idle (PipeWire only sends
+changed frames) the last captured frame is re-encoded for a keyframe
+request, so a new viewer never waits for motion.
+
+**Bursts.** Keyframes are a few hundred datagrams. The sender paces
+fragments at max(20 Mbit/s, 4× the stream bitrate) and retries briefly
+when its socket buffer is full; sockets on both ends ask for 4 MiB buffers
+(the kernel may grant less, e.g. `net.core.wmem_max`).
+
+**Frame file.** `$XDG_RUNTIME_DIR/omachat/video/<user>-<random>.frame`
+(directory 0700, file 0600): a 64-byte header with a sequence lock, then
+up to 2560×1600 BGRA pixels. The daemon writes; the GUI copies the newest
+complete frame at display rate. The file is deleted when you stop
+watching. Decoded streams larger than that are scaled down.
+
+**Not yet:** audio of the shared screen or window; DMA-BUF (zero-copy)
+capture; VAAPI/QSV encoding.

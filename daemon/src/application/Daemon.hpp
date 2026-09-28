@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio/AudioBackend.hpp"
+#include "crypto/E2EManager.hpp"
 #include "ipc/IpcServer.hpp"
 #include "networking/FileTransfers.hpp"
 #include "networking/ServerConnection.hpp"
@@ -8,6 +9,7 @@
 #include "omachat/config/ClientConfig.hpp"
 #include "platform/CredentialStore.hpp"
 #include "storage/LocalStore.hpp"
+#include "video/VideoManager.hpp"
 #include "voice/VoiceEngine.hpp"
 
 #include <QHash>
@@ -15,6 +17,7 @@
 #include <QTimer>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -26,11 +29,18 @@ struct DaemonOptions {
     QString configPath;
     bool memoryCredentials = false;
     bool nullAudio = false;
+    bool syntheticScreen = false; // share a test pattern instead of using the portal
     bool notifications = true;
 };
 
-// omachatd: owns the server session, voice engine and local IPC. The GUI,
+// omachatd: owns the server sessions, voice engine and local IPC. The GUI,
 // CLI and Omarchy plugin are all clients of this object via the socket.
+//
+// Every saved account keeps its own connection ("link"). One of them is
+// active: IPC methods, events and status describe it, exactly as with a
+// single account. The others stay connected in the background, notify and
+// count unread messages, and become active with account.switch. Voice
+// belongs to the active account; switching leaves it.
 class Daemon : public QObject {
     Q_OBJECT
 public:
@@ -44,6 +54,7 @@ public:
     ServerConnection& connection() { return *m_conn; }
     voice::VoiceEngine& voiceEngine() { return *m_voice; }
     audio::AudioBackend& audioBackend() { return *m_audio; }
+    video::VideoManager& videoManager() { return *m_video; }
     QJsonObject statusJson() const;
 
 private:
@@ -63,8 +74,8 @@ private:
 
     // attachments
     void uploadAll(Id channelId, QStringList files, std::vector<proto::Attachment> done,
-        std::function<void(bool ok, const QString& code, const QString& message,
-            const std::vector<proto::Attachment>& attachments)>
+        std::function<void(
+            bool ok, const QString& code, const QString& message, const std::vector<proto::Attachment>& attachments)>
             finish);
     void pruneAttachmentCache();
     QString downloadDestination(Id attachmentId, const QString& filename, const QString& to, QString* error) const;
@@ -72,15 +83,35 @@ private:
     // voice
     void joinVoice(Id channelId, const Responder* r);
     void leaveVoice(const Responder* r);
+    void stopVoiceEngine(); // video first, then voice
     void setSelfVoiceState(bool mute, bool deafen);
     void onVoiceSession(const proto::VoiceSession& session);
     void checkVoiceAfterSync();
     voice::VoiceEngine::Settings engineSettings() const;
+    video::H264Encoder::Settings videoSettings() const;
+    void setStreaming(bool streaming, std::function<void(bool ok, const QString& code, const QString& msg)> done);
 
     // connection / account
+    struct Link {
+        std::unique_ptr<ServerConnection> conn;
+        std::unique_ptr<FileTransfers> transfers;
+        std::unique_ptr<E2EManager> e2e;
+        std::set<std::uint64_t> muted; // background notifications only
+        int unread = 0; // messages while in the background
+        int mentions = 0;
+    };
+    Link& linkFor(std::int64_t accountId); // created on first use
+    void activate(std::int64_t accountId);
+    void onBackgroundEvent(Link& link, const QString& name, const QJsonObject& data);
+    QJsonArray accountsJson() const;
     void startAccount(const Account& account, ServerConnection::Credentials creds = {});
+    void startLink(Link& link, const Account& account, ServerConnection::Credentials creds = {});
+    // Sends through the active account; direct and group conversations are
+    // end-to-end encrypted (files included) when the server supports it.
+    void sendMessage(
+        Id channelId, const QString& content, Id replyTo, bool action, const QStringList& files, const Responder& r);
     void onModelEvent(const QString& name, const QJsonObject& data);
-    void maybeNotify(const QJsonObject& message);
+    void maybeNotify(const ServerConnection& conn, const std::set<std::uint64_t>& muted, const QJsonObject& message);
     void scheduleStatus();
 
     void applyConfig();
@@ -90,10 +121,14 @@ private:
     config::ClientConfig m_config;
     LocalStore m_store;
     std::unique_ptr<ICredentialStore> m_credentials;
-    std::unique_ptr<ServerConnection> m_conn;
-    std::unique_ptr<FileTransfers> m_transfers;
+    std::map<std::int64_t, Link> m_links; // by account id; 0 = no account yet
+    ServerConnection* m_conn = nullptr; // the active link
+    FileTransfers* m_transfers = nullptr;
+    E2EManager* m_e2e = nullptr;
+    std::int64_t m_active = 0;
     std::unique_ptr<audio::AudioBackend> m_audio;
     std::unique_ptr<voice::VoiceEngine> m_voice;
+    std::unique_ptr<video::VideoManager> m_video;
     IpcServer m_ipc;
     Notifier m_notifier;
     QHash<QString, Method> m_methods;
@@ -104,6 +139,7 @@ private:
     bool m_selfMute = false;
     bool m_selfDeaf = false;
     QLocalSocket* m_pttOwner = nullptr;
+    bool m_streamConfirmed = false; // the server accepted our SetStreaming(true)
     std::set<Id> m_speaking;
     QString m_audioError;
 

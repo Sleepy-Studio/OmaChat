@@ -46,6 +46,8 @@ int main(int argc, char** argv)
     parser.addOption(
         {QStringLiteral("memory-credentials"), QStringLiteral("Keep session tokens in memory only (no keyring).")});
     parser.addOption({QStringLiteral("null-audio"), QStringLiteral("Disable audio devices (testing/headless).")});
+    parser.addOption({QStringLiteral("synthetic-screen"),
+        QStringLiteral("Share a moving test pattern instead of the screen (testing/headless).")});
     parser.addOption({QStringLiteral("no-notifications"), QStringLiteral("Do not send desktop notifications.")});
     parser.process(app);
 
@@ -62,6 +64,7 @@ int main(int argc, char** argv)
     options.memoryCredentials = parser.isSet(QStringLiteral("memory-credentials"))
         || qEnvironmentVariable("OMACHAT_CREDENTIALS") == u"memory";
     options.nullAudio = parser.isSet(QStringLiteral("null-audio")) || qEnvironmentVariable("OMACHAT_AUDIO") == u"null";
+    options.syntheticScreen = parser.isSet(QStringLiteral("synthetic-screen"));
     options.notifications = !parser.isSet(QStringLiteral("no-notifications"));
 
     daemon::Daemon d(options);

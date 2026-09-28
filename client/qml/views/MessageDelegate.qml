@@ -27,6 +27,7 @@ Item {
     required property bool groupStart
     required property bool dayStart
     required property bool isOwn
+    required property string e2e
 
     property bool editing: false
     signal editRequested(string id)
@@ -153,6 +154,25 @@ Item {
                                 color: Theme.textFaint
                                 font.pixelSize: Theme.px(11)
                             }
+                            Icon {
+                                // Decrypted, but the sending device is not one we know for this person.
+                                visible: root.e2e === "unverified"
+                                name: "alert"
+                                size: Theme.px(13)
+                                color: Theme.warning
+                                HoverHandler { id: unverifiedHover }
+                                ToolTip.visible: unverifiedHover.hovered
+                                ToolTip.text: qsTr("Sent from a device OmaChat does not know for %1. Compare safety numbers.").arg(root.authorName)
+                            }
+                        }
+                        Text {
+                            visible: root.e2e === "undecryptable"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: qsTr("🔒 Encrypted for other devices. This device joined after the message was sent, or its key was lost.")
+                            color: Theme.textFaint
+                            font.italic: true
+                            font.pixelSize: Theme.px(13)
                         }
 
                         TextEdit {

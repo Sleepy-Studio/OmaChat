@@ -11,6 +11,7 @@
 #include <QObject>
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -73,6 +74,14 @@ public:
 
     QJsonObject statsJson() const;
 
+    // Screen sharing rides the same media stream. The handler receives video
+    // packets and keyframe requests (Qt thread); sendVideo() and
+    // requestKeyframe() may be called from any thread while active().
+    using VideoHandler = std::function<void(const media::Header& header, std::span<const std::uint8_t> payload)>;
+    void setVideoHandler(VideoHandler handler) { m_videoHandler = std::move(handler); }
+    bool sendVideo(std::uint32_t timestamp90k, std::span<const std::uint8_t> payload, bool keyframe);
+    void requestKeyframe(std::uint32_t sourceStream);
+
 signals:
     void speakingChanged(quint64 userId, bool speaking);
     void transmittingChanged(bool transmitting);
@@ -100,6 +109,7 @@ private:
 
     audio::AudioBackend& m_backend;
     MediaTransport m_transport;
+    VideoHandler m_videoHandler;
     Settings m_settings;
     std::uint64_t m_selfUserId = 0;
 

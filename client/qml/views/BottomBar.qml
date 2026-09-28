@@ -114,6 +114,17 @@ Rectangle {
                     }
                 }
                 IconButton {
+                    visible: App.voiceJoined && App.capabilities.indexOf("video.h264") >= 0
+                    iconName: "monitor"
+                    checkable: true
+                    checked: App.sharingScreen
+                    enabled: App.sharingScreen || (App.canShareScreen && !App.shareStarting)
+                    tip: App.sharingScreen ? qsTr("Stop sharing your screen")
+                       : App.shareStarting ? qsTr("Pick a screen or window…")
+                       : App.canShareScreen ? qsTr("Share your screen") : qsTr("You cannot share your screen here")
+                    onClicked: App.toggleScreenShare()
+                }
+                IconButton {
                     iconName: "hangup"
                     danger: true
                     tip: qsTr("Disconnect from voice")

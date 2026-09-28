@@ -65,7 +65,7 @@ Dialog {
             Layout.fillWidth: true
             background: Rectangle { color: "transparent" }
             Repeater {
-                model: [qsTr("Voice & Audio"), qsTr("Notifications"), qsTr("Account")]
+                model: [qsTr("Voice & Audio"), qsTr("Screen sharing"), qsTr("Notifications"), qsTr("Account")]
                 delegate: TabButton {
                     required property string modelData
                     text: modelData
@@ -224,6 +224,60 @@ Dialog {
                         text: qsTr("Echo cancellation: use PipeWire's echo-cancel module and select its source above.")
                     }
                 }
+            }
+
+            // ------------------------------------------ screen sharing
+            ColumnLayout {
+                spacing: Theme.px(12)
+                Row2 {
+                    label: qsTr("Resolution")
+                    Combo {
+                        model: [{ id: 720, name: "720p" }, { id: 1080, name: qsTr("1080p (default)") }, { id: 1440, name: "1440p" }]
+                        currentIndex: Math.max(0, indexOfValue(App.videoSettings.max_height))
+                        onActivated: App.setVideo("max_height", currentValue)
+                        Accessible.name: qsTr("Resolution")
+                    }
+                }
+                Row2 {
+                    label: qsTr("Frame rate")
+                    Combo {
+                        model: [{ id: 15, name: "15 fps" }, { id: 30, name: qsTr("30 fps (default)") }, { id: 60, name: "60 fps" }]
+                        currentIndex: Math.max(0, indexOfValue(App.videoSettings.fps))
+                        onActivated: App.setVideo("fps", currentValue)
+                        Accessible.name: qsTr("Frame rate")
+                    }
+                }
+                Row2 {
+                    label: qsTr("Bitrate")
+                    Combo {
+                        model: [{ id: 1500, name: "1.5 Mbps" }, { id: 2500, name: "2.5 Mbps" },
+                                { id: 4000, name: qsTr("4 Mbps (default)") }, { id: 6000, name: "6 Mbps" },
+                                { id: 10000, name: "10 Mbps" }]
+                        currentIndex: Math.max(0, indexOfValue(App.videoSettings.bitrate_kbps))
+                        onActivated: App.setVideo("bitrate_kbps", currentValue)
+                        Accessible.name: qsTr("Bitrate")
+                    }
+                }
+                Row2 {
+                    label: qsTr("Encoder")
+                    Combo {
+                        readonly property var names: ({ nvenc: "NVIDIA NVENC", amf: "AMD AMF", x264: qsTr("x264 (CPU)") })
+                        model: [{ id: "auto", name: qsTr("Automatic") }].concat(
+                                   (App.videoSettings.encoders || []).map(e => ({ id: e, name: names[e] || e })))
+                        currentIndex: Math.max(0, indexOfValue(App.videoSettings.encoder))
+                        onActivated: App.setVideo("encoder", currentValue)
+                        Accessible.name: qsTr("Encoder")
+                    }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.px(11)
+                    text: qsTr("Changes apply the next time you share. Automatic tries your GPU first and falls back to the CPU. "
+                               + "Only the people in your voice channel who choose to watch receive your screen.")
+                }
+                Item { Layout.fillHeight: true }
             }
 
             // ------------------------------------------- notifications

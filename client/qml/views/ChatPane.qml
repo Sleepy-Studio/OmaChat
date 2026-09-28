@@ -43,7 +43,7 @@ Rectangle {
                 spacing: Theme.px(8)
 
                 Icon {
-                    name: App.homeSelected ? "at" : "hash"
+                    name: App.selectedChannelType === "group_dm" ? "users" : App.homeSelected ? "at" : "hash"
                     size: Theme.px(20)
                     color: Theme.textFaint
                 }
@@ -54,6 +54,14 @@ Rectangle {
                     font.bold: true
                     Accessible.role: Accessible.Heading
                     Accessible.name: text
+                }
+                IconButton {
+                    visible: App.selectedEncrypted
+                    iconName: "lock"
+                    iconSize: Theme.px(15)
+                    iconColor: Theme.success
+                    tip: qsTr("End-to-end encrypted. Compare safety numbers")
+                    onClicked: safetyDialog.open()
                 }
                 Rectangle {
                     visible: topic.text.length > 0
@@ -294,4 +302,6 @@ Rectangle {
         onAboutToShow: value = App.selectedChannelTopic
         onAccepted: value => App.setTopic(value)
     }
+
+    SafetyDialog { id: safetyDialog }
 }

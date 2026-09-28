@@ -54,6 +54,8 @@ private:
         TokenBucket typing{4, 0.5};
         TokenBucket presence{5, 0.2};
         TokenBucket invites{5, 0.1};
+        TokenBucket conversations{10, 0.5}; // group creation and adding people
+        TokenBucket deviceKeys{6, 0.1}; // publishing end-to-end keys
         TokenBucket history{30, 5};
         TokenBucket uploads{10, 1}; // BeginUpload only; chunks use `transfer`
         TokenBucket transfer{64, 40}; // upload and download chunks
@@ -88,6 +90,7 @@ private:
         bool serverMute = false;
         bool serverDeaf = false;
         std::uint32_t streamId = 0;
+        bool streaming = false;
     };
 
     // ---- connection lifecycle
@@ -140,6 +143,15 @@ private:
     void handleUpdateChannel(Session& s, std::uint64_t rid, const proto::UpdateChannelRequest& m);
     void handleDeleteChannel(Session& s, std::uint64_t rid, const proto::DeleteChannelRequest& m);
     void handleOpenDm(Session& s, std::uint64_t rid, const proto::OpenDmRequest& m);
+    void handlePublishDeviceKey(Session& s, std::uint64_t rid, const proto::PublishDeviceKeyRequest& m);
+    void handleRevokeDeviceKey(Session& s, std::uint64_t rid, const proto::RevokeDeviceKeyRequest& m);
+    void handleGetDeviceKeys(Session& s, std::uint64_t rid, const proto::GetDeviceKeysRequest& m);
+    void publishDeviceKeysChanged(Id userId);
+    bool validEncrypted(
+        const ChannelRecord& c, const std::string& content, const std::string& payload, Session& s, std::uint64_t rid);
+    void handleCreateGroupDm(Session& s, std::uint64_t rid, const proto::CreateGroupDmRequest& m);
+    void handleAddGroupDmRecipient(Session& s, std::uint64_t rid, const proto::AddGroupDmRecipientRequest& m);
+    void handleLeaveGroupDm(Session& s, std::uint64_t rid, const proto::LeaveGroupDmRequest& m);
 
     // ---- handlers: messages & presence (MessageHandlers.cpp)
     void handleSendMessage(Session& s, std::uint64_t rid, const proto::SendMessageRequest& m);
@@ -154,13 +166,14 @@ private:
 
     // ---- handlers: attachments (AttachmentHandlers.cpp)
     void handleBeginUpload(Session& s, std::uint64_t rid, const proto::BeginUploadRequest& m);
+    void handleResumeUpload(Session& s, std::uint64_t rid, const proto::ResumeUploadRequest& m);
     void handleUploadChunk(Session& s, std::uint64_t rid, const proto::UploadChunkRequest& m);
     void handleFinishUpload(Session& s, std::uint64_t rid, const proto::FinishUploadRequest& m);
     void handleCancelUpload(Session& s, std::uint64_t rid, const proto::CancelUploadRequest& m);
     void handleDownload(Session& s, std::uint64_t rid, const proto::DownloadRequest& m);
     Upload* uploadFor(Session& s, std::uint64_t rid, Id attachmentId);
     void abortUpload(Id uploadId);
-    void abortUploadsOf(quint64 connId);
+    void detachUploadsOf(quint64 connId);
     void removeAttachmentFiles(const std::vector<Id>& ids);
     void collectAttachmentGarbage();
     QString attachmentPath(Id id) const;
@@ -170,6 +183,8 @@ private:
     void handleJoinVoice(Session& s, std::uint64_t rid, const proto::JoinVoiceRequest& m);
     void handleLeaveVoice(Session& s, std::uint64_t rid);
     void handleSetVoiceState(Session& s, std::uint64_t rid, const proto::SetVoiceStateRequest& m);
+    void handleSetStreaming(Session& s, std::uint64_t rid, const proto::SetStreamingRequest& m);
+    void handleWatchStream(Session& s, std::uint64_t rid, const proto::WatchStreamRequest& m);
     void handleServerMute(Session& s, std::uint64_t rid, const proto::ServerMuteRequest& m);
     void leaveVoice(Id userId);
     void refreshVoicePermissions();

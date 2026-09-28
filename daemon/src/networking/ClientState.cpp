@@ -2,6 +2,7 @@
 
 #include "omachat/core/Permissions.hpp"
 
+#include <QRegularExpression>
 #include <QStringList>
 
 namespace omachat::daemon {
@@ -72,7 +73,9 @@ QString channelTypeName(proto::ChannelType t)
 
 void ClientState::clear()
 {
+    Decryptor keep = std::move(m_decryptor); // wiring, not state
     *this = ClientState{};
+    m_decryptor = std::move(keep);
 }
 
 void ClientState::reset(const proto::SyncState& sync)
@@ -118,6 +121,12 @@ const proto::User* ClientState::user(Id id) const
 {
     auto it = m_users.find(id);
     return it == m_users.end() ? nullptr : &it->second;
+}
+
+const proto::Role* ClientState::role(Id id) const
+{
+    auto it = m_roles.find(id);
+    return it == m_roles.end() ? nullptr : &it->second;
 }
 
 const proto::VoiceState* ClientState::voiceState(Id userId) const
@@ -352,6 +361,10 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
     case proto::Event::kPermissionsChanged:
         needsResync = true;
         break;
+    case proto::Event::kDeviceKeysChanged:
+        out.push_back(
+            {QStringLiteral("e2e.device_keys_changed"), {{"user_id", idString(e.device_keys_changed().user_id())}}});
+        break;
     case proto::Event::KIND_NOT_SET:
         break;
     }
@@ -387,6 +400,16 @@ QJsonObject ClientState::channelJson(const proto::Channel& c) const
                 if (const auto* u = user(r))
                     name = QString::fromStdString(u->display_name());
         }
+    } else if (c.type() == proto::CHANNEL_TYPE_GROUP_DM && name.isEmpty()) {
+        // Unnamed groups are called after the other people in them.
+        QStringList others;
+        for (Id r : c.recipient_ids()) {
+            if (r == m_self.id())
+                continue;
+            const auto* u = user(r);
+            others << (u ? QString::fromStdString(u->display_name()) : QStringLiteral("?"));
+        }
+        name = others.join(QStringLiteral(", "));
     }
     const auto p = c.effective_permissions();
     return {{"id", idString(c.id())}, {"server_id", idString(c.server_id())}, {"name", name},
@@ -395,6 +418,7 @@ QJsonObject ClientState::channelJson(const proto::Channel& c) const
         {"recipients", recipients}, {"can_send", permissions::has(p, permissions::SendMessages)},
         {"can_connect", permissions::has(p, permissions::ConnectVoice)},
         {"can_speak", permissions::has(p, permissions::Speak)},
+        {"can_stream", permissions::has(p, permissions::Stream)},
         {"can_manage_messages", permissions::has(p, permissions::ManageMessages)},
         {"can_manage", permissions::has(p, permissions::ManageChannel)},
         {"locked",
@@ -428,7 +452,7 @@ QJsonObject ClientState::voiceStateJson(const proto::VoiceState& v) const
 {
     return {{"user_id", idString(v.user_id())}, {"channel_id", idString(v.channel_id())}, {"self_mute", v.self_mute()},
         {"self_deaf", v.self_deaf()}, {"server_mute", v.server_mute()}, {"server_deaf", v.server_deaf()},
-        {"stream_id", static_cast<double>(v.stream_id())}};
+        {"stream_id", static_cast<double>(v.stream_id())}, {"streaming", v.streaming()}};
 }
 
 QJsonObject ClientState::attachmentJson(const proto::Attachment& a)
@@ -451,13 +475,43 @@ QJsonObject ClientState::messageJson(const proto::ChatMessage& m) const
         reactions.append(QJsonObject{
             {"emoji", QString::fromStdString(r.emoji())}, {"count", static_cast<int>(r.count())}, {"me", r.me()}});
     QJsonArray attachments;
-    for (const auto& a : m.attachments())
-        attachments.append(attachmentJson(a));
-    return {{"id", idString(m.id())}, {"channel_id", idString(m.channel_id())}, {"author_id", idString(m.author_id())},
-        {"timestamp", static_cast<double>(m.timestamp())}, {"content", QString::fromStdString(m.content())},
+    QString content = QString::fromStdString(m.content());
+    QString e2eStatus;
+    if (!m.encrypted().empty()) {
+        const Decrypted d = m_decryptor ? m_decryptor(m) : Decrypted{{}, {}, QStringLiteral("undecryptable")};
+        content = d.content;
+        e2eStatus = d.status;
+        // The server only knows "file.enc"; the real name, type and size
+        // travel inside the encrypted body.
+        for (const auto& a : m.attachments()) {
+            QJsonObject json = attachmentJson(a);
+            const auto f = std::ranges::find_if(d.files, [&](const auto& x) { return x.attachment_id() == a.id(); });
+            if (f != d.files.end()) {
+                json.insert(QStringLiteral("filename"), QString::fromStdString(f->filename()));
+                json.insert(QStringLiteral("mime_type"), QString::fromStdString(f->mime_type()));
+                json.insert(QStringLiteral("size"), static_cast<double>(f->size()));
+                json.insert(QStringLiteral("encrypted"), true);
+            }
+            attachments.append(json);
+        }
+        // Mentions are computed here: the server cannot read the text.
+        const QString me = QString::fromStdString(m_self.username());
+        mentionsMe = !me.isEmpty()
+            && content.contains(
+                QRegularExpression(QStringLiteral("(?:^|[^\\w@])@%1\\b").arg(QRegularExpression::escape(me)),
+                    QRegularExpression::CaseInsensitiveOption));
+    } else {
+        for (const auto& a : m.attachments())
+            attachments.append(attachmentJson(a));
+    }
+    QJsonObject out{{"id", idString(m.id())}, {"channel_id", idString(m.channel_id())},
+        {"author_id", idString(m.author_id())}, {"timestamp", static_cast<double>(m.timestamp())}, {"content", content},
         {"reply_to", idString(m.reply_to())}, {"edited_at", static_cast<double>(m.edited_at())},
         {"is_action", m.is_action()}, {"mentions", mentions}, {"mentions_me", mentionsMe}, {"reactions", reactions},
         {"attachments", attachments}};
+    if (!e2eStatus.isEmpty())
+        out.insert(QStringLiteral("e2e"), e2eStatus);
+    return out;
 }
 
 QJsonObject ClientState::snapshotJson() const

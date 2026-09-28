@@ -12,17 +12,27 @@ assistants, bots or LLM features.
 
 ## What you get
 
-- Servers with categories, text channels and voice channels; direct messages
+- Servers with categories, text channels and voice channels; direct
+  messages and group conversations (3–10 people), end-to-end encrypted
+  with safety numbers (text and files; see [security](docs/security.md))
 - Persistent history (paged, 50 at a time), edits, deletes, replies,
-  @mentions, reactions, typing indicators, per-channel full-text search
+  @mentions, reactions, typing indicators, full-text search of a channel
+  or a whole server
+- File attachments: picker, drag and drop, pasted images, inline previews;
+  transfers continue after a dropped connection
 - Markdown subset (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
   fenced code blocks, `> quotes`, links) rendered through a sanitizer —
   raw HTML is always shown literally
 - Voice: Opus 48 kHz mono, 20 ms frames, adaptive jitter buffers, FEC/PLC,
   voice activity / push-to-talk / always-on, mute and deafen, per-user local
   volume, RNNoise noise suppression, device hot-plug via PipeWire
-- Roles and per-channel permission overrides, kick, ban, server mute —
-  all enforced by the server
+- Screen sharing in voice channels: the desktop's own screen/window picker
+  (xdg-desktop-portal), H.264 on the GPU (NVENC, AMF) or CPU (x264), up to
+  1440p60; people choose whether to watch
+- Roles and per-channel permission overrides with an editor in the GUI,
+  kick, ban, server mute — all enforced by the server
+- Several accounts (on one or more servers) connected at once, switched
+  instantly; background accounts still notify
 - Presence (online, idle, do not disturb, offline) and desktop notifications
   for DMs and mentions that respect DND and muted channels
 - `omachatd` keeps your session and voice call alive when the window closes
@@ -55,7 +65,7 @@ Arch Linux:
 
 ```bash
 sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland \
-    qtkeychain-qt6 protobuf libsodium opus libpipewire openssl tomlplusplus rnnoise gtest
+    qtkeychain-qt6 protobuf libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
 ctest --test-dir build              # unit, integration and fuzz suites
@@ -101,9 +111,15 @@ omachatctl channel list
 omachatctl message send general "hello"
 omachatctl message send general "logs" --attach ./crash.log --attach ./shot.png
 omachatctl attachment get ATTACHMENT_ID --output ~/Downloads
+omachatctl message search --server "Sleepy Studio" release notes
+omachatctl group create alice bob --name "Weekend"
 omachatctl voice join General
 omachatctl mute | unmute | deafen | undeafen
 omachatctl ptt begin | ptt end
+omachatctl stream start      # opens the desktop's screen/window picker
+omachatctl e2e safety alice  # compare with Alice to verify encryption
+omachatctl account list      # * marks the active account; all stay connected
+omachatctl account switch 2
 omachatctl events voice      # stream events as JSON lines
 ```
 
@@ -158,6 +174,12 @@ noise_suppression = true
 vad_threshold_db = -50.0
 bitrate = 40000            # 24000 - 96000
 
+[video]                    # screen sharing (what you send)
+fps = 30                   # 5 - 60
+max_height = 1080          # 360 - 1440
+bitrate_kbps = 4000        # 500 - 20000
+encoder = "auto"           # auto | nvenc | amf | x264
+
 [notifications]
 messages = true            # direct messages
 mentions = true
@@ -205,25 +227,25 @@ Open TCP 6473 and UDP 6474. Full guide: [docs/self-hosting.md](docs/self-hosting
 
 Working and tested (see `ctest`): accounts, sessions and resume, TLS with
 explicit certificate trust, servers, invites, categories, text and voice
-channels, history, edits, deletes, replies, mentions, reactions, search,
-DMs, presence, typing, roles/overrides/kick/ban/server-mute enforced
-server-side, voice (verified end-to-end through the relay with a synthetic
-device clock, and with real PipeWire devices on one machine), mute, deafen,
-VAD, push-to-talk, reconnect after server restart with automatic voice
-rejoin, file attachments (picker, drag and drop, inline image previews,
-uploads that survive closing the window), CLI with JSON, desktop
-notifications, Omarchy bar widget.
+channels, history, edits, deletes, replies, mentions, reactions, channel
+and server-wide search, DMs and group conversations, presence, typing,
+roles/overrides/kick/ban/server-mute enforced server-side with a GUI
+editor, voice (verified end-to-end through the relay with a synthetic
+device clock, and with real PipeWire devices on one machine), mute,
+deafen, VAD, push-to-talk, reconnect after server restart with automatic
+voice rejoin, file attachments (picker, drag and drop, pasting images,
+inline previews, transfers that survive closing the window and a dropped
+connection), screen sharing (encode → relay → decode → GUI verified with a
+synthetic source), several accounts at once, end-to-end encrypted
+conversations, CLI with JSON, desktop notifications, Omarchy bar widget.
 
 Not done yet — be aware:
 
 - **Voice between two separate machines has not been tested yet**, and
   mouth-to-ear latency on real hardware has not been measured.
-- **Screen sharing** (portal + PipeWire + H.264) is not implemented; the
-  media protocol reserves a video packet type for it.
-- Group DMs, custom role/permission editing UI (roles work via
-  `omachatctl role …`), server-wide search.
-- One active account at a time in the daemon (several can be saved).
-- No end-to-end encryption (see [docs/security.md](docs/security.md)).
+- Screen capture through the desktop portal has not been tried by hand
+  yet (the rest of the video path is tested); screen shares carry no audio.
+- See [docs/status.md](docs/status.md) for the current list.
 
 ## License
 

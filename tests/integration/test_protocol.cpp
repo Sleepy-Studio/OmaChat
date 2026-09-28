@@ -473,8 +473,8 @@ proto::Envelope download(RawClient& c, std::uint64_t id, std::uint64_t offset, s
 
 std::string sha256(const std::string& data)
 {
-    return QCryptographicHash::hash(QByteArrayView(data.data(), static_cast<qsizetype>(data.size())),
-        QCryptographicHash::Sha256)
+    return QCryptographicHash::hash(
+        QByteArrayView(data.data(), static_cast<qsizetype>(data.size())), QCryptographicHash::Sha256)
         .toStdString();
 }
 
@@ -576,10 +576,8 @@ TEST_F(Fixture, AttachmentUploadsAreValidated)
     // Out-of-order chunks, overruns and bad checksums cancel the upload.
     auto t = beginUpload(*alice, general, "a.txt", 4);
     ASSERT_TRUE(t.has_upload_ticket());
-    EXPECT_EQ(uploadChunk(*alice, t.upload_ticket().attachment_id(), 2, "ab").error().code(),
-        proto::ERROR_BAD_REQUEST);
-    EXPECT_EQ(uploadChunk(*alice, t.upload_ticket().attachment_id(), 0, "abcd").error().code(),
-        proto::ERROR_NOT_FOUND);
+    EXPECT_EQ(uploadChunk(*alice, t.upload_ticket().attachment_id(), 2, "ab").error().code(), proto::ERROR_BAD_REQUEST);
+    EXPECT_EQ(uploadChunk(*alice, t.upload_ticket().attachment_id(), 0, "abcd").error().code(), proto::ERROR_NOT_FOUND);
 
     t = beginUpload(*alice, general, "b.txt", 4);
     ASSERT_TRUE(uploadChunk(*alice, t.upload_ticket().attachment_id(), 0, "abcd").has_ok());
@@ -588,8 +586,7 @@ TEST_F(Fixture, AttachmentUploadsAreValidated)
 
     // Another connection cannot feed someone else's upload.
     t = beginUpload(*alice, general, "c.txt", 4);
-    EXPECT_EQ(uploadChunk(*bob, t.upload_ticket().attachment_id(), 0, "abcd").error().code(),
-        proto::ERROR_NOT_FOUND);
+    EXPECT_EQ(uploadChunk(*bob, t.upload_ticket().attachment_id(), 0, "abcd").error().code(), proto::ERROR_NOT_FOUND);
 
     // Users without ATTACH_FILES are refused.
     std::uint64_t bobId = 0;
@@ -606,19 +603,178 @@ TEST_F(Fixture, AttachmentUploadsAreValidated)
     EXPECT_EQ(beginUpload(*bob, general, "d.txt", 4).error().code(), proto::ERROR_PERMISSION_DENIED);
 }
 
-TEST_F(Fixture, UnfinishedUploadsDieWithTheirConnection)
+TEST_F(Fixture, InterruptedUploadsResumeOnlyForTheirOwner)
 {
     auto alice = client("alice");
+    auto bob = client("bob");
     const auto sid = createServer(*alice, "Drop");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
     const auto general = channelNamed(sync(*alice), "general", proto::CHANNEL_TYPE_TEXT);
     const auto t = beginUpload(*alice, general, "partial.bin", 8);
     ASSERT_TRUE(t.has_upload_ticket());
-    ASSERT_TRUE(uploadChunk(*alice, t.upload_ticket().attachment_id(), 0, "1234").has_ok());
+    const auto id = t.upload_ticket().attachment_id();
+    ASSERT_TRUE(uploadChunk(*alice, id, 0, "1234").has_ok());
     alice->abort();
 
+    auto resume = [&](RawClient& c) {
+        proto::Envelope env;
+        env.mutable_resume_upload()->set_attachment_id(id);
+        return c.call(env).value_or(proto::Envelope{});
+    };
     auto again = client("alice");
-    EXPECT_EQ(uploadChunk(*again, t.upload_ticket().attachment_id(), 4, "5678").error().code(),
-        proto::ERROR_NOT_FOUND);
-    EXPECT_EQ(download(*again, t.upload_ticket().attachment_id(), 0).error().code(), proto::ERROR_NOT_FOUND);
-    (void)sid;
+    // Chunks are refused until the new connection claims the upload.
+    EXPECT_EQ(uploadChunk(*again, id, 4, "5678").error().code(), proto::ERROR_NOT_FOUND);
+    EXPECT_EQ(download(*again, id, 0).error().code(), proto::ERROR_NOT_FOUND) << "not finished yet";
+    EXPECT_EQ(resume(*bob).error().code(), proto::ERROR_NOT_FOUND) << "someone else's upload";
+
+    const auto ticket = resume(*again);
+    ASSERT_TRUE(ticket.has_upload_ticket()) << ticket.error().message();
+    EXPECT_EQ(ticket.upload_ticket().received(), 4u);
+    ASSERT_TRUE(uploadChunk(*again, id, 4, "5678").has_ok());
+    const auto done = finishUpload(*again, id, sha256("12345678"));
+    ASSERT_TRUE(done.has_attachment()) << done.error().message();
+    EXPECT_EQ(done.attachment().size(), 8u);
+
+    // A second interrupted upload can be cancelled from the new connection.
+    const auto t2 = beginUpload(*again, general, "other.bin", 8);
+    ASSERT_TRUE(t2.has_upload_ticket());
+    again->abort();
+    auto third = client("alice");
+    proto::Envelope cancel;
+    cancel.mutable_cancel_upload()->set_attachment_id(t2.upload_ticket().attachment_id());
+    EXPECT_TRUE(third->call(cancel)->has_ok());
+}
+
+TEST_F(Fixture, ServerWideSearchSkipsChannelsYouCannotRead)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    auto stranger = client("mallory");
+    const auto sid = createServer(*alice, "Search");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+
+    proto::Envelope mk;
+    mk.mutable_create_channel()->set_server_id(sid);
+    mk.mutable_create_channel()->set_name("secret");
+    auto secretReply = alice->call(mk);
+    ASSERT_TRUE(secretReply && secretReply->has_channel());
+    const auto secret = secretReply->channel().id();
+    auto state = sync(*alice);
+    const auto general = channelNamed(state, "general", proto::CHANNEL_TYPE_TEXT);
+    std::uint64_t bobId = 0;
+    for (const auto& u : state.users())
+        if (u.username() == "bob")
+            bobId = u.id();
+    ASSERT_TRUE(general && bobId);
+
+    proto::Envelope hide;
+    auto* o = hide.mutable_set_override()->mutable_override();
+    o->set_channel_id(secret);
+    o->set_target_type(proto::PermissionOverride::TARGET_USER);
+    o->set_target_id(bobId);
+    o->set_deny(permissions::ViewChannel);
+    ASSERT_TRUE(alice->call(hide)->has_ok());
+
+    ASSERT_TRUE(send(*alice, general, "a unicorn in general").has_chat_message());
+    ASSERT_TRUE(send(*alice, secret, "a unicorn in secret").has_chat_message());
+
+    auto search = [&](RawClient& c) {
+        proto::Envelope env;
+        env.mutable_search_messages()->set_server_id(sid);
+        env.mutable_search_messages()->set_query("unicorn");
+        return c.call(env).value_or(proto::Envelope{});
+    };
+    const auto mine = search(*alice);
+    ASSERT_TRUE(mine.has_message_page());
+    EXPECT_EQ(mine.message_page().messages_size(), 2);
+
+    const auto his = search(*bob);
+    ASSERT_TRUE(his.has_message_page());
+    ASSERT_EQ(his.message_page().messages_size(), 1);
+    EXPECT_EQ(his.message_page().messages(0).channel_id(), general);
+
+    EXPECT_EQ(search(*stranger).error().code(), proto::ERROR_NOT_FOUND);
+}
+
+TEST_F(Fixture, GroupConversationsAddRenameAndLeave)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    auto carol = client("carol");
+    auto dave = client("dave");
+    auto stranger = client("mallory");
+    const auto sid = createServer(*alice, "Group");
+    const auto token = invite(*alice, sid);
+    for (auto* c : {bob.get(), carol.get(), dave.get()})
+        ASSERT_TRUE(join(*c, token).has_server());
+    std::map<std::string, std::uint64_t> ids;
+    for (auto* c : {alice.get(), stranger.get()}) {
+        const auto state = sync(*c);
+        for (const auto& u : state.users())
+            ids[u.username()] = u.id();
+    }
+
+    auto create = [&](std::vector<std::uint64_t> users, const std::string& name = {}) {
+        proto::Envelope env;
+        for (auto u : users)
+            env.mutable_create_group_dm()->add_user_ids(u);
+        env.mutable_create_group_dm()->set_name(name);
+        return alice->call(env).value_or(proto::Envelope{});
+    };
+    EXPECT_EQ(create({ids["bob"]}).error().code(), proto::ERROR_BAD_REQUEST) << "two people is a DM";
+    EXPECT_EQ(create({ids["bob"], ids["mallory"]}).error().code(), proto::ERROR_PERMISSION_DENIED);
+
+    const auto made = create({ids["bob"], ids["carol"]}, "Plans");
+    ASSERT_TRUE(made.has_channel()) << made.error().message();
+    const auto& group = made.channel();
+    EXPECT_EQ(group.type(), proto::CHANNEL_TYPE_GROUP_DM);
+    EXPECT_EQ(group.name(), "Plans");
+    EXPECT_EQ(group.recipient_ids_size(), 3);
+    EXPECT_TRUE(carol->waitEvent([](const proto::Event& e) { return e.has_channel_create(); }));
+
+    ASSERT_TRUE(send(*bob, group.id(), "hi group").has_chat_message());
+    EXPECT_TRUE(carol->waitEvent([](const proto::Event& e) { return e.has_message_create(); }));
+    EXPECT_EQ(send(*dave, group.id(), "let me in").error().code(), proto::ERROR_NOT_FOUND);
+
+    // Carol adds Dave; he gets the conversation and can read its history.
+    proto::Envelope add;
+    add.mutable_add_group_dm_recipient()->set_channel_id(group.id());
+    add.mutable_add_group_dm_recipient()->set_user_id(ids["dave"]);
+    auto added = carol->call(add);
+    ASSERT_TRUE(added && added->has_channel());
+    EXPECT_EQ(added->channel().recipient_ids_size(), 4);
+    EXPECT_TRUE(dave->waitEvent([](const proto::Event& e) { return e.has_channel_create(); }));
+    proto::Envelope hist;
+    hist.mutable_get_messages()->set_channel_id(group.id());
+    auto page = dave->call(hist);
+    ASSERT_TRUE(page && page->has_message_page());
+    EXPECT_EQ(page->message_page().messages_size(), 1);
+
+    // Any participant may rename it, but group DMs have no topic.
+    proto::Envelope rename;
+    rename.mutable_update_channel()->set_channel_id(group.id());
+    rename.mutable_update_channel()->set_name("Weekend plans");
+    auto renamed = dave->call(rename);
+    ASSERT_TRUE(renamed && renamed->has_channel());
+    EXPECT_EQ(renamed->channel().name(), "Weekend plans");
+    proto::Envelope topic;
+    topic.mutable_update_channel()->set_channel_id(group.id());
+    topic.mutable_update_channel()->set_topic("x");
+    topic.mutable_update_channel()->set_set_topic(true);
+    EXPECT_EQ(dave->call(topic)->error().code(), proto::ERROR_PERMISSION_DENIED);
+
+    // Leaving: the leaver loses access, the rest are told.
+    bob->clearEvents();
+    proto::Envelope leave;
+    leave.mutable_leave_group_dm()->set_channel_id(group.id());
+    ASSERT_TRUE(alice->call(leave)->has_ok());
+    EXPECT_TRUE(alice->waitEvent([](const proto::Event& e) { return e.has_channel_delete(); }));
+    auto update = bob->waitEvent([](const proto::Event& e) { return e.has_channel_update(); });
+    ASSERT_TRUE(update);
+    EXPECT_EQ(update->channel_update().recipient_ids_size(), 3);
+    EXPECT_EQ(send(*alice, group.id(), "back?").error().code(), proto::ERROR_NOT_FOUND);
+
+    for (auto* c : {bob.get(), carol.get(), dave.get()})
+        ASSERT_TRUE(c->call(leave)->has_ok());
+    EXPECT_EQ(send(*bob, group.id(), "anyone?").error().code(), proto::ERROR_NOT_FOUND) << "last one out deletes it";
 }

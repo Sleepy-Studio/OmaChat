@@ -10,6 +10,7 @@
 #include <QHostAddress>
 #include <QObject>
 #include <QPointer>
+#include <QStringList>
 #include <QTimer>
 
 #include <functional>
@@ -62,6 +63,9 @@ public:
     // otherwise a stored refresh token is used.
     void start(const Account& account, Credentials credentials = {});
     void stop(); // disconnect without reconnecting
+    // Closes the socket as a network failure would; the normal reconnect
+    // (resume, transfers continuing) follows. For stale links and tests.
+    void dropLink(const QString& reason);
     void login(Credentials credentials);
     void logout(AuthCallback done);
     void updateAccount(const Account& account) { m_account = account; }
@@ -84,6 +88,11 @@ public:
     quint16 mediaPort() const { return m_mediaPort; }
     // 0 when the server does not accept attachments.
     std::uint64_t maxUploadBytes() const { return m_maxUploadBytes; }
+    // What the server announced in HelloReply ("search.server", …).
+    const QStringList& capabilities() const { return m_capabilities; }
+    // Changes whenever the socket is torn down: a reply error that arrives
+    // after it changed means "connection lost", not "the server refused".
+    quint64 linkGeneration() const { return m_generation; }
 
     ClientState& model() { return m_model; }
     const ClientState& model() const { return m_model; }
@@ -140,6 +149,7 @@ private:
     QHostAddress m_serverAddress;
     quint16 m_mediaPort = 0;
     std::uint64_t m_maxUploadBytes = 0;
+    QStringList m_capabilities;
 
     QString m_accessToken;
     quint64 m_sessionId = 0;

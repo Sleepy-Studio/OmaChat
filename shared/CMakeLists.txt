@@ -10,6 +10,8 @@ add_library(omachat_shared STATIC
     src/omachat/protocol/Framing.cpp
     src/omachat/protocol/ProtocolConnection.cpp
     src/omachat/media/MediaPacket.cpp
+    src/omachat/media/VideoFragments.cpp
+    src/omachat/media/FrameBuffer.cpp
     src/omachat/ipc/IpcMessage.cpp
     src/omachat/ipc/IpcClient.cpp
     src/omachat/config/ClientConfig.cpp

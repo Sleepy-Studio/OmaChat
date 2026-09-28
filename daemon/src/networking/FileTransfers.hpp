@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QObject>
+#include <QTimer>
 
 #include <functional>
 #include <map>
@@ -16,7 +17,10 @@ namespace omachat::daemon {
 
 // Moves attachment bytes over the control connection in pipelined chunks.
 // Transfers are owned by the daemon, not by the IPC client that asked for
-// them, so closing the window does not cancel an upload in flight.
+// them, so closing the window does not cancel an upload in flight. When the
+// connection drops they wait and continue after the reconnect: downloads
+// from the bytes already written, uploads from what the server kept
+// (ResumeUpload), or from the start on servers without that.
 class FileTransfers : public QObject {
     Q_OBJECT
 public:
@@ -43,6 +47,9 @@ public:
 
     // Chunks kept in flight per transfer: enough to hide one round trip.
     static constexpr int kWindow = 4;
+    // A transfer waiting for the connection longer than this fails. Just
+    // under the server's 10 minute idle limit for interrupted uploads.
+    static constexpr qint64 kMaxWaitMs = 9 * 60 * 1000;
 
 signals:
     void progress(const QJsonObject& data);
@@ -63,9 +70,19 @@ private:
         std::uint32_t chunk = 0;
         int inFlight = 0;
         qint64 lastProgressMs = 0;
+        qint64 waitingSinceMs = 0; // 0 = not waiting for the connection
+        QString mimeType;
         Done callback;
     };
 
+    using Reply = std::function<void(Transfer&, const proto::Envelope&)>;
+    // Sends a request for transfer `id`. The callback only runs for a live
+    // transfer and a real answer; a lost connection makes it wait instead.
+    void send(quint64 id, proto::Envelope env, Reply onReply);
+    void beginUpload(quint64 id);
+    void onReconnected();
+    void onConnectionState();
+    void expireWaiting();
     void pumpUpload(quint64 id);
     void finishUpload(quint64 id);
     void pumpDownload(quint64 id);
@@ -77,6 +94,7 @@ private:
     QJsonObject json(const Transfer& t) const;
 
     ServerConnection& m_conn;
+    QTimer m_waitTimer;
     std::map<quint64, Transfer> m_transfers;
     quint64 m_nextId = 1;
 };

@@ -307,6 +307,9 @@ void ServerConnection::onEncrypted()
         m_instanceName = QString::fromStdString(hr.instance_name());
         m_mediaPort = static_cast<quint16>(hr.media_udp_port());
         m_maxUploadBytes = hr.max_upload_bytes();
+        m_capabilities.clear();
+        for (const auto& c : hr.capabilities())
+            m_capabilities << QString::fromStdString(c);
         beginAuth();
     });
 }
@@ -590,6 +593,14 @@ void ServerConnection::onEnvelope(const proto::Envelope& env)
     p.timer->deleteLater();
     if (p.cb)
         p.cb(env);
+}
+
+void ServerConnection::dropLink(const QString& reason)
+{
+    if (!m_conn)
+        return;
+    m_errorMessage = reason;
+    onSocketClosed();
 }
 
 void ServerConnection::onSocketClosed()

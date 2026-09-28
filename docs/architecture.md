@@ -71,6 +71,21 @@ rejoins automatically.
 named IPC events (`message.created`, `voice.state`, …). The GUI and plugin
 never talk to the server.
 
+## End-to-end encryption
+
+`crypto/E2E.*` is the pure scheme (libsodium: seal/open, file streams,
+safety numbers); `crypto/E2EManager` holds one account's device key
+(keyring), its contacts' key directory and local pins, and is wired into
+`ClientState::messageJson` as the decryptor. The send path
+(`Daemon::sendMessage`) encrypts text and files for conversations.
+
+## Screen sharing
+
+`video/ScreenSource` (portal + PipeWire, or a synthetic pattern),
+`video/H264Codec` (libavcodec), and `video/VideoManager` (sending pipeline,
+per-sharer viewers, shared-memory frame files for the GUI's
+`VideoFrameItem`). See [media.md](media.md#screen-sharing).
+
 ## Voice engine
 
 See [media.md](media.md). Realtime PipeWire callbacks only touch lock-free

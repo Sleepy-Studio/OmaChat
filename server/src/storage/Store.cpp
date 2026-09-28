@@ -10,7 +10,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -132,6 +132,17 @@ const char* const kSchemaV2[] = {
     "CREATE INDEX attachments_pending ON attachments(uploader_id) WHERE message_id IS NULL",
 };
 
+// v3: end-to-end encrypted direct messages. The server stores the opaque
+// payload and each user's published device keys, never a private key.
+const char* const kSchemaV3[] = {
+    "ALTER TABLE messages ADD COLUMN encrypted BLOB",
+    R"(CREATE TABLE device_keys(
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        public_key BLOB NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(user_id, public_key)))",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -169,6 +180,7 @@ MessageRecord readMessage(const QSqlQuery& q)
     m.editedAt = q.value(5).toLongLong();
     m.isAction = q.value(6).toBool();
     m.mentions = splitIds(q.value(7).toString());
+    m.encrypted = q.value(8).toByteArray();
     return m;
 }
 
@@ -190,7 +202,8 @@ AttachmentRecord readAttachment(const QSqlQuery& q)
 constexpr const char* kAttachmentColumns
     = "id, channel_id, uploader_id, message_id, filename, mime_type, size, sha256, created_at";
 
-constexpr const char* kMessageColumns = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions";
+constexpr const char* kMessageColumns
+    = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions, encrypted";
 
 } // namespace
 
@@ -258,6 +271,8 @@ bool Store::migrate(QString* error)
     if (current < 1 && !apply(kSchemaV1))
         return false;
     if (current < 2 && !apply(kSchemaV2))
+        return false;
+    if (current < 3 && !apply(kSchemaV3))
         return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
@@ -565,6 +580,14 @@ bool Store::updateChannel(const ChannelRecord& c)
         {c.name, sid(c.parentId), c.position, c.topic, sid(c.id)});
 }
 
+bool Store::setRecipient(Id channelId, Id userId, bool present)
+{
+    return present ? exec(QStringLiteral("INSERT OR IGNORE INTO dm_recipients(channel_id, user_id) VALUES(?,?)"),
+                         {sid(channelId), sid(userId)})
+                   : exec(QStringLiteral("DELETE FROM dm_recipients WHERE channel_id = ? AND user_id = ?"),
+                         {sid(channelId), sid(userId)});
+}
+
 bool Store::deleteChannel(Id id)
 {
     return exec(QStringLiteral("DELETE FROM channels WHERE id = ?"), {sid(id)});
@@ -649,9 +672,10 @@ bool Store::insertMessage(const MessageRecord& m)
     if (!begin())
         return false;
     bool ok = exec(QStringLiteral("INSERT INTO messages(id, channel_id, author_id, content, reply_to, edited_at, "
-                                  "is_action, mentions) VALUES(?,?,?,?,?,?,?,?)"),
+                                  "is_action, mentions, encrypted) VALUES(?,?,?,?,?,?,?,?,?)"),
         {sid(m.id), sid(m.channelId), sid(m.authorId), m.content, sid(m.replyTo), qint64(m.editedAt),
-            m.isAction ? 1 : 0, joinIds(m.mentions)});
+            m.isAction ? 1 : 0, joinIds(m.mentions),
+            m.encrypted.isEmpty() ? QVariant(QMetaType(QMetaType::QByteArray)) : QVariant(m.encrypted)});
     for (const auto& a : m.attachments) {
         if (!ok)
             break;
@@ -684,10 +708,40 @@ std::optional<MessageRecord> Store::message(Id id)
     return m;
 }
 
-bool Store::updateMessage(Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions)
+bool Store::updateMessage(
+    Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions, const QByteArray& encrypted)
 {
-    return exec(QStringLiteral("UPDATE messages SET content = ?, edited_at = ?, mentions = ? WHERE id = ?"),
-        {content, qint64(editedAt), joinIds(mentions), sid(id)});
+    return exec(
+        QStringLiteral("UPDATE messages SET content = ?, edited_at = ?, mentions = ?, encrypted = ? WHERE id = ?"),
+        {content, qint64(editedAt), joinIds(mentions),
+            encrypted.isEmpty() ? QVariant(QMetaType(QMetaType::QByteArray)) : QVariant(encrypted), sid(id)});
+}
+
+std::vector<DeviceKeyRecord> Store::deviceKeys(const std::vector<Id>& userIds)
+{
+    std::vector<DeviceKeyRecord> out;
+    for (Id user : userIds) {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral(
+            "SELECT user_id, public_key, created_at FROM device_keys WHERE user_id = ? ORDER BY created_at"));
+        q.addBindValue(sid(user));
+        q.exec();
+        while (q.next())
+            out.push_back({uid(q.value(0)), q.value(1).toByteArray(), q.value(2).toLongLong()});
+    }
+    return out;
+}
+
+bool Store::addDeviceKey(const DeviceKeyRecord& k)
+{
+    return exec(QStringLiteral("INSERT OR IGNORE INTO device_keys(user_id, public_key, created_at) VALUES(?,?,?)"),
+        {sid(k.userId), k.publicKey, qint64(k.createdAt)});
+}
+
+bool Store::removeDeviceKey(Id userId, const QByteArray& publicKey)
+{
+    return exec(
+        QStringLiteral("DELETE FROM device_keys WHERE user_id = ? AND public_key = ?"), {sid(userId), publicKey});
 }
 
 bool Store::deleteMessage(Id id)
@@ -722,7 +776,7 @@ std::vector<MessageRecord> Store::messagePage(Id channelId, Id beforeId, int lim
     return out;
 }
 
-std::vector<MessageRecord> Store::searchMessages(Id channelId, const QString& query, int limit)
+std::vector<MessageRecord> Store::searchMessages(const std::vector<Id>& channelIds, const QString& query, int limit)
 {
     // Quote every term so user input can never use FTS5 query syntax.
     QStringList terms;
@@ -731,14 +785,21 @@ std::vector<MessageRecord> Store::searchMessages(Id channelId, const QString& qu
         terms << u'"' + term + u'"';
     }
     std::vector<MessageRecord> out;
-    if (terms.isEmpty())
+    if (terms.isEmpty() || channelIds.empty())
         return out;
+    // Channel ids are integers, so they are bound one placeholder each.
+    QStringList placeholders;
+    for (size_t i = 0; i < channelIds.size(); ++i)
+        placeholders << QStringLiteral("?");
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT m.id, m.channel_id, m.author_id, m.content, m.reply_to, m.edited_at, "
-                             "m.is_action, m.mentions FROM messages_fts f JOIN messages m ON m.id = f.rowid "
-                             "WHERE messages_fts MATCH ? AND m.channel_id = ? ORDER BY m.id DESC LIMIT ?"));
+    q.prepare(
+        QStringLiteral("SELECT m.id, m.channel_id, m.author_id, m.content, m.reply_to, m.edited_at, "
+                       "m.is_action, m.mentions, m.encrypted FROM messages_fts f JOIN messages m ON m.id = f.rowid "
+                       "WHERE messages_fts MATCH ? AND m.channel_id IN (%1) ORDER BY m.id DESC LIMIT ?")
+            .arg(placeholders.join(u',')));
     q.addBindValue(terms.join(u' '));
-    q.addBindValue(sid(channelId));
+    for (Id id : channelIds)
+        q.addBindValue(sid(id));
     q.addBindValue(limit);
     q.exec();
     while (q.next())
@@ -754,8 +815,8 @@ bool Store::insertAttachment(const AttachmentRecord& a)
 {
     return exec(QStringLiteral("INSERT INTO attachments(id, channel_id, uploader_id, message_id, filename, "
                                "mime_type, size, sha256, created_at) VALUES(?,?,?,NULL,?,?,?,?,?)"),
-        {sid(a.id), sid(a.channelId), sid(a.uploaderId), a.filename, a.mimeType, static_cast<qint64>(a.size),
-            a.sha256, qint64(a.createdAt)});
+        {sid(a.id), sid(a.channelId), sid(a.uploaderId), a.filename, a.mimeType, static_cast<qint64>(a.size), a.sha256,
+            qint64(a.createdAt)});
 }
 
 std::optional<AttachmentRecord> Store::attachment(Id id)

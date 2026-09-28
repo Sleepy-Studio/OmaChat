@@ -203,3 +203,63 @@ TEST_F(VoiceFixture, LeavingStopsForwarding)
     }));
     (void)st;
 }
+
+#include "omachat/media/FrameBuffer.hpp"
+
+#include <QFile>
+
+TEST_F(VoiceFixture, ScreenShareTravelsToWatchersAndStops)
+{
+    // Alice shares the synthetic 1280x720 pattern; Bob watches it.
+    auto started = alice->call(QStringLiteral("stream.start"), {}, 30000);
+    ASSERT_TRUE(started.ok) << started.errorMessage.toStdString();
+    EXPECT_EQ(started.result.value("source").toString(), QStringLiteral("synthetic"));
+    ASSERT_TRUE(waitFor([&] {
+        for (const auto& p : bob->daemon().statusJson().value("voice").toObject().value("participants").toArray())
+            if (p.toObject().value("name").toString() == u"ALICE" && p.toObject().value("streaming").toBool())
+                return true;
+        return false;
+    })) << "Bob sees that Alice is sharing";
+
+    auto watched = bob->call(QStringLiteral("stream.watch"), {{"user", "alice"}});
+    ASSERT_TRUE(watched.ok) << watched.errorMessage.toStdString();
+    const QString path = watched.result.value("path").toString();
+    ASSERT_TRUE(QFile::exists(path));
+
+    media::FrameBufferReader reader;
+    ASSERT_TRUE(reader.open(path));
+    media::FrameBufferReader::Frame frame;
+    ASSERT_TRUE(waitFor([&] { return reader.readIfNewer(0, frame); }, 10000)) << "a decoded frame arrives";
+    EXPECT_EQ(frame.width, 1280u);
+    EXPECT_EQ(frame.height, 720u);
+    // The quadrants survive the trip (the sweeping bar is 8 px wide; avoid it
+    // by checking two columns far apart and accepting either).
+    auto near = [&](int x, int y, int b, int g) {
+        const std::uint8_t* p = &frame.pixels[(static_cast<std::size_t>(y) * frame.width + x) * 4];
+        return std::abs(p[0] - b) < 24 && std::abs(p[1] - g) < 24;
+    };
+    EXPECT_TRUE(near(100, 100, 20, 30) || near(500, 100, 20, 30)) << "top-left quadrant";
+    EXPECT_TRUE(near(1180, 620, 230, 220) || near(800, 620, 230, 220)) << "bottom-right quadrant";
+
+    // Frames keep coming.
+    const auto first = frame.sequence;
+    ASSERT_TRUE(waitFor([&] { return reader.readIfNewer(first, frame) && frame.sequence > first + 20; }, 10000));
+    EXPECT_FALSE(alice->call(QStringLiteral("stream.stats"))
+            .result.value("share")
+            .toObject()
+            .value("encoder")
+            .toString()
+            .isEmpty());
+    auto stats = bob->call(QStringLiteral("stream.stats")).result;
+    const auto viewer = stats.value("watching").toArray().at(0).toObject();
+    EXPECT_GT(viewer.value("decoded").toDouble(), 10);
+
+    // Stopping ends it for the viewer, who drops the frame file.
+    ASSERT_TRUE(alice->call(QStringLiteral("stream.stop")).ok);
+    EXPECT_TRUE(bob->waitEvent(QStringLiteral("stream.ended")));
+    EXPECT_TRUE(waitFor([&] { return !QFile::exists(path); }));
+    EXPECT_TRUE(bob->daemon().statusJson().value("voice").toObject().value("watching").toArray().isEmpty());
+
+    // Watching someone who is not sharing is refused.
+    EXPECT_FALSE(bob->call(QStringLiteral("stream.watch"), {{"user", "alice"}}).ok);
+}

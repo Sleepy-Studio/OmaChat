@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QSqlDatabase>
 #include <QString>
 
@@ -30,7 +31,7 @@ public:
 
     bool open(const QString& path, QString* error);
 
-    std::vector<Account> accounts();
+    std::vector<Account> accounts() const;
     std::optional<Account> account(std::int64_t id);
     std::optional<Account> findAccount(const QString& host, quint16 port, const QString& username);
     std::int64_t addAccount(const Account& a); // returns id, 0 on failure
@@ -44,6 +45,14 @@ public:
 
     std::set<std::uint64_t> mutedChannels(std::int64_t accountId);
     bool setChannelMuted(std::int64_t accountId, std::uint64_t channelId, bool muted);
+
+    // End-to-end encryption: the device keys pinned for a contact.
+    struct KnownKeys {
+        std::vector<QByteArray> keys;
+        bool verified = false; // safety number compared for exactly these keys
+    };
+    KnownKeys knownKeys(std::int64_t accountId, std::uint64_t userId);
+    bool setKnownKeys(std::int64_t accountId, std::uint64_t userId, const std::vector<QByteArray>& keys, bool verified);
 
     QString value(const QString& key, const QString& fallback = {});
     bool setValue(const QString& key, const QString& value);

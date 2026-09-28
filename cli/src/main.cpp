@@ -52,7 +52,8 @@ Status
   events [TOPIC...]                       stream daemon events as JSON lines
 
 Accounts
-  account list
+  account list                            * marks the active one; all stay connected
+  account switch ACCOUNT_ID               make another account the active one
   account login HOST[:PORT] USERNAME      prompts for the password (or --password-stdin)
   account register HOST[:PORT] USERNAME [--display-name NAME]
   account logout
@@ -74,7 +75,10 @@ Messages
   message history CHANNEL [--limit N]
   message edit MESSAGE_ID TEXT... | delete MESSAGE_ID
   message search CHANNEL QUERY...
+  message search --server SERVER QUERY... every channel of SERVER you can read
   dm USER TEXT...
+  group create USER USER... [--name NAME] group conversation (3-10 people with you)
+  group add CHANNEL USER | rename CHANNEL NAME... | leave CHANNEL
   attachment get ATTACHMENT_ID [--name NAME] [--output DIR|FILE]
                                           saves to ~/Downloads unless --output is given
   transfer list | cancel TRANSFER_ID
@@ -91,10 +95,26 @@ Voice
 Moderation
   kick SERVER USER [REASON...] | ban SERVER USER [REASON...] | unban SERVER USER_ID
   role create SERVER NAME [PERMISSION...]
+  role list SERVER
+  role update ROLE_ID [--name NAME] [--color RRGGBB] [--position N] [PERMISSION...|none]
+  role delete ROLE_ID
   role assign SERVER USER ROLE_ID | role unassign SERVER USER ROLE_ID
+  override list CHANNEL
+  override set CHANNEL role|user ROLE_ID|USER [+PERMISSION|-PERMISSION]...
+                                          no changes removes the override
+
+End-to-end encryption (direct and group conversations)
+  e2e status
+  e2e safety USER                         compare this number with USER in person
+  e2e verify USER | unverify USER
+
+Screen sharing (in a voice channel)
+  stream start                            pick a screen or window in the desktop's dialog
+  stream stop | stats
+  stream watch USER | unwatch USER        watching is shown in the GUI
 
 CHANNEL accepts an id, a name ("general") or SERVER/NAME. USER accepts an id or
-username. Screen sharing (stream start|stop) is not available in this release.
+username.
 )";
 
 struct Invocation {
@@ -261,7 +281,10 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
                     const auto o = a.toObject();
                     out() << (o.value("id").toString() == active ? "* " : "  ") << o.value("id").toString() << "  "
                           << o.value("username").toString() << "@" << o.value("host").toString() << ":"
-                          << o.value("port").toInt() << "\n";
+                          << o.value("port").toInt() << "  " << o.value("state").toString();
+                    if (o.value("unread").toInt() > 0)
+                        out() << "  (" << o.value("unread").toInt() << " unread)";
+                    out() << "\n";
                 }
             };
         } else if (sub == u"login" || sub == u"register") {
@@ -279,6 +302,14 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
         } else if (sub == u"logout") {
             inv.method = QStringLiteral("account.logout");
             inv.print = simpleOk(QStringLiteral("logged out"));
+        } else if (sub == u"switch" && need(3)) {
+            inv.method = QStringLiteral("account.switch");
+            inv.params = {{"account", args.at(2).toLongLong()}};
+            inv.print = [](const QJsonObject& r) {
+                const auto a = r.value("account").toObject();
+                out() << "active account: " << a.value("username").toString() << "@" << a.value("host").toString()
+                      << (r.value("left_voice").toBool() ? " (left voice)" : "") << "\n";
+            };
         } else if (sub == u"remove" && need(3)) {
             inv.method = QStringLiteral("account.remove");
             inv.params = {{"account", args.at(2).toLongLong()}};
@@ -420,9 +451,13 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.method = QStringLiteral("message.delete");
             inv.params = {{"message", args.at(2)}};
             inv.print = simpleOk(QStringLiteral("deleted"));
-        } else if (sub == u"search" && need(4)) {
+        } else if (sub == u"search") {
+            const auto server = optionValue(args, QStringLiteral("--server"));
+            if (!need(server ? 3 : 4))
+                return std::nullopt;
             inv.method = QStringLiteral("message.search");
-            inv.params = {{"channel", args.at(2)}, {"query", joinRest(args, 3)}};
+            inv.params = server ? QJsonObject{{"server", *server}, {"query", joinRest(args, 2)}}
+                                : QJsonObject{{"channel", args.at(2)}, {"query", joinRest(args, 3)}};
             inv.print = printMessages;
         } else {
             usageError = QStringLiteral("unknown message command");
@@ -453,8 +488,8 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
                 for (const auto& t : list) {
                     const auto o = t.toObject();
                     out() << o.value("id").toString() << "  " << o.value("direction").toString() << "  "
-                          << o.value("name").toString() << "  " << humanSize(o.value("transferred").toDouble())
-                          << " / " << humanSize(o.value("total").toDouble()) << "\n";
+                          << o.value("name").toString() << "  " << humanSize(o.value("transferred").toDouble()) << " / "
+                          << humanSize(o.value("total").toDouble()) << "\n";
                 }
             };
         } else if (sub == u"cancel" && need(3)) {
@@ -469,6 +504,33 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
         inv.method = QStringLiteral("dm.send");
         inv.params = {{"user", args.at(1)}, {"content", joinRest(args, 2)}};
         inv.print = [](const QJsonObject& r) { out() << "sent " << r.value("id").toString() << "\n"; };
+    } else if (cmd == u"group") {
+        const auto printChannel = [](const QJsonObject& r) {
+            out() << "[" << r.value("id").toString() << "] " << r.value("name").toString() << "\n";
+        };
+        if (sub == u"create") {
+            const auto name = optionValue(args, QStringLiteral("--name"));
+            if (!need(4))
+                return std::nullopt;
+            inv.method = QStringLiteral("dm.create");
+            inv.params = {{"users", QJsonArray::fromStringList(args.mid(2))}, {"name", name.value_or(QString())}};
+            inv.print = printChannel;
+        } else if (sub == u"add" && need(4)) {
+            inv.method = QStringLiteral("dm.add");
+            inv.params = {{"channel", args.at(2)}, {"user", args.at(3)}};
+            inv.print = printChannel;
+        } else if (sub == u"rename" && need(4)) {
+            inv.method = QStringLiteral("channel.update");
+            inv.params = {{"channel", args.at(2)}, {"name", joinRest(args, 3)}};
+            inv.print = printChannel;
+        } else if (sub == u"leave" && need(3)) {
+            inv.method = QStringLiteral("dm.leave");
+            inv.params = {{"channel", args.at(2)}};
+            inv.print = simpleOk(QStringLiteral("left the conversation"));
+        } else {
+            usageError = QStringLiteral("unknown group command");
+            return std::nullopt;
+        }
     } else if (cmd == u"presence" && need(2)) {
         inv.method = QStringLiteral("presence.set");
         inv.params = {{"status", args.at(1)}};
@@ -553,6 +615,58 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.method = QStringLiteral("role.create");
             inv.params = {{"server", args.at(2)}, {"name", args.at(3)}, {"permissions", perms}};
             inv.print = [](const QJsonObject& r) { out() << "created role " << r.value("id").toString() << "\n"; };
+        } else if (sub == u"list" && need(3)) {
+            inv.method = QStringLiteral("state.snapshot");
+            const QString server = args.at(2);
+            inv.params = {};
+            inv.print = [server](const QJsonObject& snap) {
+                QString sid;
+                for (const auto& v : snap.value("servers").toArray()) {
+                    const auto s = v.toObject();
+                    if (s.value("id").toString() == server || s.value("name").toString() == server)
+                        sid = s.value("id").toString();
+                }
+                QList<QJsonObject> roles;
+                for (const auto& v : snap.value("roles").toArray())
+                    if (v.toObject().value("server_id").toString() == sid)
+                        roles << v.toObject();
+                std::ranges::sort(roles, [](const QJsonObject& a, const QJsonObject& b) {
+                    return a.value("position").toInt() > b.value("position").toInt();
+                });
+                for (const auto& r : roles) {
+                    QStringList perms;
+                    for (const auto& p : r.value("permissions").toArray())
+                        perms << p.toString();
+                    out() << "[" << r.value("id").toString() << "] " << r.value("name").toString() << "  (position "
+                          << r.value("position").toInt() << (r.value("is_default").toBool() ? ", default" : "")
+                          << ")\n    " << (perms.isEmpty() ? QStringLiteral("no permissions") : perms.join(u' '))
+                          << "\n";
+                }
+            };
+        } else if (sub == u"update" && need(3)) {
+            const auto name = optionValue(args, QStringLiteral("--name"));
+            const auto color = optionValue(args, QStringLiteral("--color"));
+            const auto position = optionValue(args, QStringLiteral("--position"));
+            inv.method = QStringLiteral("role.update");
+            inv.params = {{"role", args.at(2)}};
+            if (name)
+                inv.params.insert("name", *name);
+            if (color)
+                inv.params.insert("color", *color);
+            if (position)
+                inv.params.insert("position", position->toInt());
+            if (args.size() > 3) {
+                QJsonArray perms;
+                for (const auto& p : args.mid(3))
+                    if (p != u"none")
+                        perms.append(p);
+                inv.params.insert("permissions", perms);
+            }
+            inv.print = simpleOk(QStringLiteral("role updated"));
+        } else if (sub == u"delete" && need(3)) {
+            inv.method = QStringLiteral("role.delete");
+            inv.params = {{"role", args.at(2)}};
+            inv.print = simpleOk(QStringLiteral("role deleted"));
         } else if ((sub == u"assign" || sub == u"unassign") && need(5)) {
             inv.method = QStringLiteral("role.assign");
             inv.params
@@ -562,9 +676,89 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             usageError = QStringLiteral("unknown role command");
             return std::nullopt;
         }
+    } else if (cmd == u"override") {
+        // override set CHANNEL role|user TARGET [+PERM|-PERM]...   (no changes = remove)
+        if (sub == u"set" && need(5)) {
+            QJsonArray allow, deny;
+            for (const auto& p : args.mid(5)) {
+                if (p.startsWith(u'+'))
+                    allow.append(p.mid(1));
+                else if (p.startsWith(u'-'))
+                    deny.append(p.mid(1));
+            }
+            inv.method = QStringLiteral("override.set");
+            inv.params = {{"channel", args.at(2)}, {"allow", allow}, {"deny", deny},
+                {"remove", allow.isEmpty() && deny.isEmpty()}};
+            inv.params.insert(args.at(3) == u"user" ? QStringLiteral("user") : QStringLiteral("role"), args.at(4));
+            inv.print = simpleOk(QStringLiteral("channel permissions updated"));
+        } else if (sub == u"list" && need(3)) {
+            inv.method = QStringLiteral("override.list");
+            inv.params = {{"channel", args.at(2)}};
+            inv.print = [](const QJsonObject& r) {
+                for (const auto& v : r.value("overrides").toArray()) {
+                    const auto o = v.toObject();
+                    QStringList parts;
+                    for (const auto& a : o.value("allow").toArray())
+                        parts << u'+' + a.toString();
+                    for (const auto& d : o.value("deny").toArray())
+                        parts << u'-' + d.toString();
+                    out() << o.value("target_type").toString() << " " << o.value("target_id").toString() << ": "
+                          << parts.join(u' ') << "\n";
+                }
+            };
+        } else {
+            usageError = QStringLiteral("unknown override command");
+            return std::nullopt;
+        }
+    } else if (cmd == u"e2e") {
+        const auto printSafety = [](const QJsonObject& r) {
+            const QStringList g = r.value("number").toString().split(u' ');
+            for (int i = 0; i + 4 <= g.size(); i += 4)
+                out() << "  " << g.mid(i, 4).join(QStringLiteral("  ")) << "\n";
+            out() << (r.value("verified").toBool() ? "verified" : "not verified") << ", " << r.value("devices").toInt()
+                  << " device(s)\n";
+        };
+        if (sub == u"status" || sub.isEmpty()) {
+            inv.method = QStringLiteral("e2e.status");
+            inv.print = [](const QJsonObject& r) {
+                out() << "end-to-end: " << (r.value("enabled").toBool() ? "on" : "off")
+                      << "   this device: " << r.value("device").toString() << "\n";
+            };
+        } else if (sub == u"safety" && need(3)) {
+            inv.method = QStringLiteral("e2e.safety");
+            inv.params = {{"user", args.at(2)}};
+            inv.print = printSafety;
+        } else if ((sub == u"verify" || sub == u"unverify") && need(3)) {
+            inv.method = QStringLiteral("e2e.verify");
+            inv.params = {{"user", args.at(2)}, {"verified", sub == u"verify"}};
+            inv.print = printSafety;
+        } else {
+            usageError = QStringLiteral("unknown e2e command");
+            return std::nullopt;
+        }
     } else if (cmd == u"stream") {
-        usageError = QStringLiteral("screen sharing is not available in OmaChat %1").arg(QString::fromLatin1(kVersion));
-        return std::nullopt;
+        if (sub == u"start") {
+            inv.method = QStringLiteral("stream.start");
+            inv.timeoutMs = 0; // the desktop's picker waits for the user
+            inv.print = [](const QJsonObject&) { out() << "sharing your screen\n"; };
+        } else if (sub == u"stop") {
+            inv.method = QStringLiteral("stream.stop");
+            inv.print = simpleOk(QStringLiteral("stopped sharing"));
+        } else if (sub == u"watch" && need(3)) {
+            inv.method = QStringLiteral("stream.watch");
+            inv.params = {{"user", args.at(2)}};
+            inv.print = [](const QJsonObject& r) { out() << "frames: " << r.value("path").toString() << "\n"; };
+        } else if (sub == u"unwatch" && need(3)) {
+            inv.method = QStringLiteral("stream.unwatch");
+            inv.params = {{"user", args.at(2)}};
+            inv.print = simpleOk(QStringLiteral("stopped watching"));
+        } else if (sub == u"stats") {
+            inv.method = QStringLiteral("stream.stats");
+            inv.print = [](const QJsonObject& r) { out() << QJsonDocument(r).toJson(QJsonDocument::Indented); };
+        } else {
+            usageError = QStringLiteral("unknown stream command");
+            return std::nullopt;
+        }
     } else {
         usageError = QStringLiteral("unknown command '%1'").arg(cmd);
         return std::nullopt;

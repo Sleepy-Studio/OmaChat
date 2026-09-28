@@ -10,8 +10,11 @@
 #include "omachat/core/Version.hpp"
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QMimeDatabase>
+#include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -20,6 +23,12 @@ namespace omachat::daemon {
 namespace e = ipc::errors;
 
 namespace {
+
+// Resolves to the active link's model at call time.
+struct ActiveModel {
+    ServerConnection* const* conn;
+    const ClientState* operator->() const { return &(*conn)->model(); }
+};
 
 QJsonObject accountJson(const Account& a)
 {
@@ -105,6 +114,126 @@ Id Daemon::userParam(const QJsonObject& params, const Responder& r, const char* 
     return id;
 }
 
+void Daemon::sendMessage(
+    Id cid, const QString& content, Id replyTo, bool action, const QStringList& files, const Responder& r)
+{
+    if (files.size() > 10) {
+        r.error(e::BadRequest, QStringLiteral("at most 10 files per message"));
+        return;
+    }
+    const ActiveModel model{&m_conn};
+    auto send = [this, model, cid, replyTo, action, r](proto::Envelope env) {
+        auto* s = env.mutable_send_message();
+        s->set_channel_id(cid);
+        s->set_reply_to(replyTo);
+        s->set_is_action(action);
+        forward(std::move(env), r,
+            [model](const proto::Envelope& reply) { return model->messageJson(reply.chat_message()); });
+    };
+
+    if (!m_e2e->appliesTo(cid)) {
+        proto::Envelope env;
+        env.mutable_send_message()->set_content(content.toStdString());
+        if (files.isEmpty()) {
+            send(std::move(env));
+            return;
+        }
+        if (!requireConnected(r))
+            return;
+        uploadAll(cid, files, {},
+            [r, send, env](bool ok, const QString& code, const QString& message,
+                const std::vector<proto::Attachment>& attachments) mutable {
+                if (!ok) {
+                    r.error(code, message);
+                    return;
+                }
+                for (const auto& a : attachments)
+                    env.mutable_send_message()->add_attachment_ids(a.id());
+                send(std::move(env));
+            });
+        return;
+    }
+
+    // End-to-end: files are encrypted before they leave this machine, and
+    // their real names and keys travel inside the sealed message.
+    if (!m_e2e->active()) {
+        r.error(e::BadRequest, QStringLiteral("this device's encryption key is not ready yet; try again in a moment"));
+        return;
+    }
+    struct Sealed {
+        QString temp;
+        proto::E2EFile file;
+    };
+    std::vector<Sealed> sealed;
+    const QString dir = paths::cacheDir() + QStringLiteral("/e2e-upload");
+    if (!files.isEmpty() && (!paths::ensurePrivateDir(paths::cacheDir()) || !paths::ensurePrivateDir(dir))) {
+        r.error(e::StorageError, QStringLiteral("cannot create %1").arg(dir));
+        return;
+    }
+    for (const QString& path : files) {
+        const QFileInfo info(path);
+        Sealed s;
+        s.temp = QStringLiteral("%1/%2.enc")
+                     .arg(dir)
+                     .arg(QRandomGenerator::global()->generate64(), 16, 16, QLatin1Char('0'));
+        QByteArray key;
+        QString error;
+        if (!info.isFile() || !e2e::encryptFile(info.absoluteFilePath(), s.temp, &key, &error)) {
+            for (const auto& done : sealed)
+                QFile::remove(done.temp);
+            r.error(e::StorageError,
+                QStringLiteral("cannot encrypt %1: %2")
+                    .arg(info.fileName(), error.isEmpty() ? QStringLiteral("not a file") : error));
+            return;
+        }
+        s.file.set_filename(info.fileName().toStdString());
+        s.file.set_mime_type(QMimeDatabase().mimeTypeForFile(info).name().toStdString());
+        s.file.set_size(static_cast<std::uint64_t>(info.size()));
+        s.file.set_key(key.toStdString());
+        sealed.push_back(std::move(s));
+    }
+    auto sealAndSend
+        = [this, cid, content, send, r](std::vector<Sealed> done, const std::vector<proto::Attachment>& attachments) {
+              proto::E2EBody body;
+              body.set_content(content.toStdString());
+              proto::Envelope env;
+              for (std::size_t i = 0; i < done.size() && i < attachments.size(); ++i) {
+                  done[i].file.set_attachment_id(attachments[i].id());
+                  *body.add_files() = done[i].file;
+                  env.mutable_send_message()->add_attachment_ids(attachments[i].id());
+              }
+              m_e2e->seal(cid, std::move(body),
+                  [send, env, r](std::optional<std::string> payload, const QString& error) mutable {
+                      if (!payload) {
+                          r.error(e::BadRequest, error);
+                          return;
+                      }
+                      env.mutable_send_message()->set_encrypted(*payload);
+                      send(std::move(env));
+                  });
+          };
+    if (sealed.empty()) {
+        sealAndSend({}, {});
+        return;
+    }
+    if (!requireConnected(r))
+        return;
+    QStringList temps;
+    for (const auto& s : sealed)
+        temps << s.temp;
+    uploadAll(cid, temps, {},
+        [r, sealed, sealAndSend](
+            bool ok, const QString& code, const QString& message, const std::vector<proto::Attachment>& attachments) {
+            for (const auto& s : sealed)
+                QFile::remove(s.temp);
+            if (!ok) {
+                r.error(code, message);
+                return;
+            }
+            sealAndSend(sealed, attachments);
+        });
+}
+
 void Daemon::uploadAll(Id channelId, QStringList files, std::vector<proto::Attachment> done,
     std::function<void(bool, const QString&, const QString&, const std::vector<proto::Attachment>&)> finish)
 {
@@ -120,7 +249,7 @@ void Daemon::uploadAll(Id channelId, QStringList files, std::vector<proto::Attac
                 for (const auto& a : done) {
                     proto::Envelope env;
                     env.mutable_cancel_upload()->set_attachment_id(a.id());
-                    m_conn->request(std::move(env), [](const proto::Envelope&) {});
+                    m_conn->request(std::move(env), [](const proto::Envelope&) { });
                 }
                 finish(false, res.code, res.message, {});
                 return;
@@ -185,7 +314,8 @@ void Daemon::dispatch(const QString& method, const QJsonObject& params, const Re
 void Daemon::registerMethods()
 {
     auto& m = m_methods;
-    const ClientState& model = m_conn->model();
+    // Always the active account's model, also after account.switch.
+    const ActiveModel model{&m_conn};
 
     // ------------------------------------------------------------ daemon
     m[QStringLiteral("daemon.status")] = [this](const QJsonObject&, const Responder& r) { r.ok(statusJson()); };
@@ -193,8 +323,8 @@ void Daemon::registerMethods()
         r.ok({{"version", QString::fromLatin1(kVersion)}, {"ipc", kIpcVersion},
             {"protocol_major", int(kProtocolMajor)}});
     };
-    m[QStringLiteral("state.snapshot")] = [this, &model](const QJsonObject&, const Responder& r) {
-        QJsonObject snap = model.snapshotJson();
+    m[QStringLiteral("state.snapshot")] = [this, model](const QJsonObject&, const Responder& r) {
+        QJsonObject snap = model->snapshotJson();
         QJsonArray muted;
         for (auto id : m_mutedChannels)
             muted.append(idString(id));
@@ -212,10 +342,37 @@ void Daemon::registerMethods()
     // ----------------------------------------------------------- accounts
     m[QStringLiteral("account.list")] = [this](const QJsonObject&, const Responder& r) {
         QJsonArray list;
-        for (const auto& a : m_store.accounts())
-            list.append(accountJson(a));
+        const QJsonArray states = accountsJson();
+        for (const auto& a : m_store.accounts()) {
+            QJsonObject entry = accountJson(a);
+            for (const auto& s : states) {
+                if (s.toObject().value(QStringLiteral("id")).toString()
+                    == entry.value(QStringLiteral("id")).toString()) {
+                    for (const QString& key : {QStringLiteral("state"), QStringLiteral("unread"),
+                             QStringLiteral("mentions"), QStringLiteral("active"), QStringLiteral("instance")})
+                        entry.insert(key, s.toObject().value(key));
+                }
+            }
+            list.append(entry);
+        }
         r.ok(
             {{"accounts", list}, {"active", m_conn->hasAccount() ? QString::number(m_conn->account().id) : QString()}});
+    };
+    // Makes another saved account the active one; it connects if it was not.
+    m[QStringLiteral("account.switch")] = [this](const QJsonObject& p, const Responder& r) {
+        const auto a = m_store.account(p.value(QStringLiteral("account")).toVariant().toLongLong());
+        if (!a) {
+            r.error(e::NotFound, QStringLiteral("no such account"));
+            return;
+        }
+        const bool leftVoice = m_voiceChannel != 0 && a->id != m_active;
+        Link& link = linkFor(a->id);
+        const auto state = link.conn->state();
+        if (!link.conn->hasAccount() || state == ServerConnection::State::Disconnected
+            || state == ServerConnection::State::NotConfigured)
+            startLink(link, *a);
+        activate(a->id);
+        r.ok({{"account", accountJson(*a)}, {"left_voice", leftVoice}});
     };
     auto ensureAccount = [this](const QJsonObject& p, const Responder& r) -> std::optional<Account> {
         if (p.contains(QStringLiteral("account"))) {
@@ -234,11 +391,20 @@ void Daemon::registerMethods()
         if (auto existing = m_store.findAccount(host, static_cast<quint16>(port), *username))
             return existing;
         Account a{0, host, static_cast<quint16>(port), *username, {}, 0};
+        // Another account on the same server already pinned its certificate
+        // with the user's explicit consent; the new one inherits that pin.
+        for (const auto& other : m_store.accounts()) {
+            if (other.host.compare(host, Qt::CaseInsensitive) == 0 && other.port == port
+                && !other.trustedFingerprint.isEmpty())
+                a.trustedFingerprint = other.trustedFingerprint;
+        }
         a.id = m_store.addAccount(a);
         if (!a.id) {
             r.error(e::StorageError, QStringLiteral("could not save account"));
             return std::nullopt;
         }
+        if (!a.trustedFingerprint.isEmpty())
+            m_store.setTrustedFingerprint(a.id, a.trustedFingerprint);
         return a;
     };
     m[QStringLiteral("account.add")] = [ensureAccount](const QJsonObject& p, const Responder& r) {
@@ -247,15 +413,29 @@ void Daemon::registerMethods()
     };
     m[QStringLiteral("account.remove")] = [this](const QJsonObject& p, const Responder& r) {
         const auto id = p.value(QStringLiteral("account")).toVariant().toLongLong();
-        if (m_conn->hasAccount() && m_conn->account().id == id) {
-            leaveVoice(nullptr);
-            m_conn->logout({});
-        }
-        m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
-        if (!m_store.removeAccount(id)) {
+        if (!m_store.account(id)) {
             r.error(e::NotFound, QStringLiteral("no such account"));
             return;
         }
+        if (auto it = m_links.find(id); it != m_links.end()) {
+            if (id == m_active) {
+                leaveVoice(nullptr);
+                const auto others = m_store.accounts();
+                const auto next = std::ranges::find_if(others, [id](const Account& a) { return a.id != id; });
+                activate(next != others.end() ? next->id : 0);
+            }
+            it->second.e2e->forget(); // revoke this device's key before the session ends
+            // The link goes away once the server has forgotten the session.
+            it->second.conn->logout([this, id](bool, const QString&, const QString&) {
+                QTimer::singleShot(0, this, [this, id] {
+                    m_links.erase(id);
+                    scheduleStatus();
+                });
+            });
+        }
+        m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
+        m_store.removeAccount(id);
+        scheduleStatus();
         r.ok();
     };
     auto authMethod = [this, ensureAccount](bool registering) {
@@ -342,28 +522,28 @@ void Daemon::registerMethods()
     };
 
     // ------------------------------------------------------------ servers
-    m[QStringLiteral("server.list")] = [this, &model](const QJsonObject&, const Responder& r) {
+    m[QStringLiteral("server.list")] = [this, model](const QJsonObject&, const Responder& r) {
         if (!requireConnected(r))
             return;
         QJsonArray list;
-        for (const auto& [id, s] : model.servers())
-            list.append(model.serverJson(s));
+        for (const auto& [id, s] : model->servers())
+            list.append(model->serverJson(s));
         r.ok({{"servers", list}});
     };
     // Creating or joining a server brings roles, channels and members with
     // it: reply only once the resynchronized model contains all of it.
-    auto createOrJoin = [this, &model](proto::Envelope env, const Responder& r) {
+    auto createOrJoin = [this, model](proto::Envelope env, const Responder& r) {
         if (!requireConnected(r))
             return;
-        m_conn->request(std::move(env), [this, r, &model](const proto::Envelope& reply) {
+        m_conn->request(std::move(env), [this, r, model](const proto::Envelope& reply) {
             if (reply.has_error()) {
                 r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
                 return;
             }
             const proto::Server server = reply.server();
-            m_conn->resync([r, server, &model](bool) {
-                const proto::Server* synced = model.server(server.id());
-                r.ok(model.serverJson(synced ? *synced : server));
+            m_conn->resync([r, server, model](bool) {
+                const proto::Server* synced = model->server(server.id());
+                r.ok(model->serverJson(synced ? *synced : server));
             });
         });
     };
@@ -428,20 +608,20 @@ void Daemon::registerMethods()
     };
 
     // ----------------------------------------------------------- channels
-    m[QStringLiteral("channel.list")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("channel.list")] = [this, model](const QJsonObject& p, const Responder& r) {
         if (!requireConnected(r))
             return;
         Id sid = 0;
         if (p.contains(QStringLiteral("server")) && !(sid = serverParam(p, r)))
             return;
         QJsonArray list;
-        for (const auto& [id, c] : model.channels()) {
+        for (const auto& [id, c] : model->channels()) {
             if (sid && c.server_id() != sid)
                 continue;
-            QJsonObject cj = model.channelJson(c);
+            QJsonObject cj = model->channelJson(c);
             if (c.type() == proto::CHANNEL_TYPE_VOICE) {
                 QJsonArray members;
-                for (Id uid : model.voiceParticipants(id))
+                for (Id uid : model->voiceParticipants(id))
                     members.append(idString(uid));
                 cj.insert(QStringLiteral("voice_members"), members);
             }
@@ -450,7 +630,7 @@ void Daemon::registerMethods()
         }
         r.ok({{"channels", list}});
     };
-    m[QStringLiteral("channel.create")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("channel.create")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id sid = serverParam(p, r);
         if (!sid)
             return;
@@ -464,12 +644,12 @@ void Daemon::registerMethods()
                                       : proto::CHANNEL_TYPE_TEXT);
         if (p.contains(QStringLiteral("parent")))
             c->set_parent_id(idFromJson(p.value(QStringLiteral("parent"))));
-        forward(std::move(env), r, [this, &model](const proto::Envelope& reply) {
+        forward(std::move(env), r, [this, model](const proto::Envelope& reply) {
             m_conn->model().upsertChannel(reply.channel());
-            return model.channelJson(reply.channel());
+            return model->channelJson(reply.channel());
         });
     };
-    m[QStringLiteral("channel.update")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("channel.update")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
         if (!cid)
             return;
@@ -482,7 +662,7 @@ void Daemon::registerMethods()
             u->set_topic(p.value(QStringLiteral("topic")).toString().toStdString());
         }
         forward(
-            std::move(env), r, [&model](const proto::Envelope& reply) { return model.channelJson(reply.channel()); });
+            std::move(env), r, [model](const proto::Envelope& reply) { return model->channelJson(reply.channel()); });
     };
     m[QStringLiteral("channel.delete")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
@@ -505,20 +685,56 @@ void Daemon::registerMethods()
         m_ipc.broadcast(QStringLiteral("channel.muted"), {{"channel_id", idString(cid)}, {"muted", muted}});
         r.ok({{"channel_id", idString(cid)}, {"muted", muted}});
     };
-    m[QStringLiteral("dm.open")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("dm.open")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id uid = userParam(p, r);
         if (!uid)
             return;
         proto::Envelope env;
         env.mutable_open_dm()->set_user_id(uid);
-        forward(std::move(env), r, [this, &model](const proto::Envelope& reply) {
+        forward(std::move(env), r, [this, model](const proto::Envelope& reply) {
             m_conn->model().upsertChannel(reply.channel());
-            return model.channelJson(reply.channel());
+            return model->channelJson(reply.channel());
         });
+    };
+    m[QStringLiteral("dm.create")] = [this, model](const QJsonObject& p, const Responder& r) {
+        proto::Envelope env;
+        auto* g = env.mutable_create_group_dm();
+        for (const auto& v : p.value(QStringLiteral("users")).toArray()) {
+            const Id uid = userParam(QJsonObject{{"user", v}}, r);
+            if (!uid)
+                return;
+            g->add_user_ids(uid);
+        }
+        g->set_name(p.value(QStringLiteral("name")).toString().toStdString());
+        forward(std::move(env), r, [this, model](const proto::Envelope& reply) {
+            m_conn->model().upsertChannel(reply.channel());
+            return model->channelJson(reply.channel());
+        });
+    };
+    m[QStringLiteral("dm.add")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
+        const Id uid = cid ? userParam(p, r) : 0;
+        if (!uid)
+            return;
+        proto::Envelope env;
+        env.mutable_add_group_dm_recipient()->set_channel_id(cid);
+        env.mutable_add_group_dm_recipient()->set_user_id(uid);
+        forward(std::move(env), r, [this, model](const proto::Envelope& reply) {
+            m_conn->model().upsertChannel(reply.channel());
+            return model->channelJson(reply.channel());
+        });
+    };
+    m[QStringLiteral("dm.leave")] = [this](const QJsonObject& p, const Responder& r) {
+        const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
+        if (!cid)
+            return;
+        proto::Envelope env;
+        env.mutable_leave_group_dm()->set_channel_id(cid);
+        forward(std::move(env), r);
     };
 
     // ----------------------------------------------------------- messages
-    m[QStringLiteral("message.history")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("message.history")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
         if (!cid)
             return;
@@ -527,79 +743,96 @@ void Daemon::registerMethods()
         g->set_channel_id(cid);
         g->set_before_message_id(idFromJson(p.value(QStringLiteral("before"))));
         g->set_limit(static_cast<std::uint32_t>(std::clamp(p.value(QStringLiteral("limit")).toInt(50), 1, 100)));
-        forward(std::move(env), r, [&model](const proto::Envelope& reply) {
+        forward(std::move(env), r, [model](const proto::Envelope& reply) {
             QJsonArray list;
             for (const auto& msg : reply.message_page().messages())
-                list.append(model.messageJson(msg));
+                list.append(model->messageJson(msg));
             return QJsonObject{{"channel_id", idString(reply.message_page().channel_id())}, {"messages", list},
                 {"has_more", reply.message_page().has_more()}};
         });
     };
-    m[QStringLiteral("message.send")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("message.send")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
         if (!cid)
             return;
         QStringList files;
         for (const auto& f : p.value(QStringLiteral("files")).toArray())
             files << f.toString();
-        if (files.size() > 10) {
-            r.error(e::BadRequest, QStringLiteral("at most 10 files per message"));
-            return;
-        }
-        auto send = [this, &model, cid, p, r](const std::vector<proto::Attachment>& attachments) {
-            proto::Envelope env;
-            auto* s = env.mutable_send_message();
-            s->set_channel_id(cid);
-            s->set_content(p.value(QStringLiteral("content")).toString().toStdString());
-            s->set_reply_to(idFromJson(p.value(QStringLiteral("reply_to"))));
-            s->set_is_action(p.value(QStringLiteral("action")).toBool(false));
-            for (const auto& a : attachments)
-                s->add_attachment_ids(a.id());
-            forward(std::move(env), r,
-                [&model](const proto::Envelope& reply) { return model.messageJson(reply.chat_message()); });
-        };
-        if (files.isEmpty()) {
-            send({});
-            return;
-        }
-        if (!requireConnected(r))
-            return;
-        uploadAll(cid, files, {},
-            [r, send](bool ok, const QString& code, const QString& message,
-                const std::vector<proto::Attachment>& attachments) {
-                if (!ok) {
-                    r.error(code, message);
-                    return;
-                }
-                send(attachments);
-            });
+        sendMessage(cid, p.value(QStringLiteral("content")).toString(), idFromJson(p.value(QStringLiteral("reply_to"))),
+            p.value(QStringLiteral("action")).toBool(false), files, r);
     };
-    m[QStringLiteral("message.edit")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    // One step for scripts: opens the conversation and sends into it.
+    m[QStringLiteral("dm.send")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id uid = userParam(p, r);
+        if (!uid)
+            return;
+        proto::Envelope env;
+        env.mutable_open_dm()->set_user_id(uid);
+        const QString content = p.value(QStringLiteral("content")).toString();
+        m_conn->request(std::move(env), [this, model, content, r](const proto::Envelope& reply) {
+            if (reply.has_error()) {
+                r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+                return;
+            }
+            m_conn->model().upsertChannel(reply.channel());
+            sendMessage(reply.channel().id(), content, 0, false, {}, r);
+        });
+    };
+    m[QStringLiteral("message.edit")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id messageId = idFromJson(p.value(QStringLiteral("message")));
+        const QString content = p.value(QStringLiteral("content")).toString();
         proto::Envelope env;
         auto* ed = env.mutable_edit_message();
-        ed->set_message_id(idFromJson(p.value(QStringLiteral("message"))));
-        ed->set_content(p.value(QStringLiteral("content")).toString().toStdString());
-        forward(std::move(env), r,
-            [&model](const proto::Envelope& reply) { return model.messageJson(reply.chat_message()); });
+        ed->set_message_id(messageId);
+        const auto channel = m_e2e->channelOf(messageId);
+        if (!channel) {
+            ed->set_content(content.toStdString());
+            forward(std::move(env), r,
+                [model](const proto::Envelope& reply) { return model->messageJson(reply.chat_message()); });
+            return;
+        }
+        // An encrypted message stays encrypted, attachments included.
+        proto::E2EBody body;
+        body.set_content(content.toStdString());
+        for (const auto& f : m_e2e->filesOf(messageId))
+            *body.add_files() = f;
+        m_e2e->seal(*channel, std::move(body),
+            [this, model, env, r](std::optional<std::string> payload, const QString& error) mutable {
+                if (!payload) {
+                    r.error(e::BadRequest, error);
+                    return;
+                }
+                env.mutable_edit_message()->set_encrypted(*payload);
+                forward(std::move(env), r,
+                    [model](const proto::Envelope& reply) { return model->messageJson(reply.chat_message()); });
+            });
     };
     m[QStringLiteral("message.delete")] = [this](const QJsonObject& p, const Responder& r) {
         proto::Envelope env;
         env.mutable_delete_message()->set_message_id(idFromJson(p.value(QStringLiteral("message"))));
         forward(std::move(env), r);
     };
-    m[QStringLiteral("message.search")] = [this, &model](const QJsonObject& p, const Responder& r) {
-        const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
-        if (!cid)
-            return;
+    m[QStringLiteral("message.search")] = [this, model](const QJsonObject& p, const Responder& r) {
+        // {channel} searches one channel; {server} every channel of it you can read.
         proto::Envelope env;
         auto* s = env.mutable_search_messages();
-        s->set_channel_id(cid);
+        if (p.contains(QStringLiteral("server")) && !p.contains(QStringLiteral("channel"))) {
+            const Id sid = serverParam(p, r);
+            if (!sid)
+                return;
+            s->set_server_id(sid);
+        } else {
+            const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
+            if (!cid)
+                return;
+            s->set_channel_id(cid);
+        }
         s->set_query(p.value(QStringLiteral("query")).toString().toStdString());
         s->set_limit(static_cast<std::uint32_t>(std::clamp(p.value(QStringLiteral("limit")).toInt(25), 1, 50)));
-        forward(std::move(env), r, [&model](const proto::Envelope& reply) {
+        forward(std::move(env), r, [model](const proto::Envelope& reply) {
             QJsonArray list;
             for (const auto& msg : reply.message_page().messages())
-                list.append(model.messageJson(msg));
+                list.append(model->messageJson(msg));
             return QJsonObject{{"messages", list}};
         });
     };
@@ -627,12 +860,32 @@ void Daemon::registerMethods()
         }
         // Cached copies are reused; attachments never change once sent.
         const auto size = p.value(QStringLiteral("size")).toDouble(-1);
-        if (p.value(QStringLiteral("to")).toString() == u"cache" && size > 0 && QFileInfo(dest).size() == qint64(size)) {
+        if (p.value(QStringLiteral("to")).toString() == u"cache" && size > 0
+            && QFileInfo(dest).size() == qint64(size)) {
             r.ok({{"path", dest}, {"cached", true}});
             return;
         }
         if (!requireConnected(r))
             return;
+        if (const auto file = m_e2e->fileFor(aid)) {
+            // End-to-end encrypted: fetch the ciphertext, then decrypt it in place.
+            const QString sealed = dest + QStringLiteral(".encrypted");
+            const QByteArray key = QByteArray::fromStdString(file->key());
+            m_transfers->download(aid, sealed, [r, sealed, dest, key](const FileTransfers::Result& res) {
+                if (!res.ok) {
+                    r.error(res.code, res.message);
+                    return;
+                }
+                QString why;
+                const bool ok = e2e::decryptFile(sealed, dest, key, &why);
+                QFile::remove(sealed);
+                if (ok)
+                    r.ok({{"path", dest}, {"cached", false}});
+                else
+                    r.error(e::StorageError, why);
+            });
+            return;
+        }
         m_transfers->download(aid, dest, [r](const FileTransfers::Result& res) {
             if (res.ok)
                 r.ok({{"path", res.path}, {"cached", false}});
@@ -640,9 +893,8 @@ void Daemon::registerMethods()
                 r.error(res.code, res.message);
         });
     };
-    m[QStringLiteral("transfer.list")] = [this](const QJsonObject&, const Responder& r) {
-        r.ok({{"transfers", m_transfers->activeJson()}});
-    };
+    m[QStringLiteral("transfer.list")]
+        = [this](const QJsonObject&, const Responder& r) { r.ok({{"transfers", m_transfers->activeJson()}}); };
     m[QStringLiteral("transfer.cancel")] = [this](const QJsonObject& p, const Responder& r) {
         if (m_transfers->cancel(p.value(QStringLiteral("id")).toString().toULongLong()))
             r.ok();
@@ -669,32 +921,32 @@ void Daemon::registerMethods()
         env.mutable_set_presence()->set_status(status);
         forward(std::move(env), r);
     };
-    m[QStringLiteral("member.list")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("member.list")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id sid = serverParam(p, r);
         if (!sid)
             return;
-        const QJsonObject snap = model.snapshotJson();
+        const QJsonObject snap = model->snapshotJson();
         QJsonArray members;
         for (const auto& v : snap.value(QStringLiteral("members")).toArray()) {
             const QJsonObject mem = v.toObject();
             if (idFromJson(mem.value(QStringLiteral("server_id"))) != sid)
                 continue;
             QJsonObject entry = mem;
-            if (const auto* u = model.user(idFromJson(mem.value(QStringLiteral("user_id")))))
-                entry.insert(QStringLiteral("user"), model.userJson(*u));
+            if (const auto* u = model->user(idFromJson(mem.value(QStringLiteral("user_id")))))
+                entry.insert(QStringLiteral("user"), model->userJson(*u));
             members.append(entry);
         }
         r.ok({{"members", members}});
     };
 
     // -------------------------------------------------------------- voice
-    m[QStringLiteral("voice.join")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("voice.join")] = [this, model](const QJsonObject& p, const Responder& r) {
         if (!requireConnected(r))
             return;
         const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Voice);
         if (!cid)
             return;
-        const auto* c = model.channel(cid);
+        const auto* c = model->channel(cid);
         if (!c || c->type() != proto::CHANNEL_TYPE_VOICE) {
             r.error(e::BadRequest, QStringLiteral("not a voice channel"));
             return;
@@ -718,6 +970,102 @@ void Daemon::registerMethods()
     m[QStringLiteral("voice.undeafen")] = voiceSet([this] { return std::pair{m_selfMute, false}; });
     m[QStringLiteral("voice.toggle_deafen")] = voiceSet([this] { return std::pair{m_selfMute, !m_selfDeaf}; });
     m[QStringLiteral("voice.stats")] = [this](const QJsonObject&, const Responder& r) { r.ok(m_voice->statsJson()); };
+
+    // --------------------------------------------------- end-to-end encryption
+    m[QStringLiteral("e2e.status")] = [this](const QJsonObject&, const Responder& r) { r.ok(m_e2e->statusJson()); };
+    // Safety number with one person: compare it with them over another channel.
+    m[QStringLiteral("e2e.safety")] = [this](const QJsonObject& p, const Responder& r) {
+        const Id uid = userParam(p, r);
+        if (uid)
+            r.ok(m_e2e->safetyJson(uid));
+    };
+    m[QStringLiteral("e2e.verify")] = [this](const QJsonObject& p, const Responder& r) {
+        const Id uid = userParam(p, r);
+        if (!uid)
+            return;
+        if (!m_e2e->setVerified(uid, p.value(QStringLiteral("verified")).toBool(true))) {
+            r.error(e::NotFound, QStringLiteral("no encryption keys are known for that user yet"));
+            return;
+        }
+        r.ok(m_e2e->safetyJson(uid));
+    };
+
+    // ------------------------------------------------------- screen sharing
+    // stream.start answers once the desktop picker is done: call it without a timeout.
+    m[QStringLiteral("stream.start")] = [this](const QJsonObject&, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("video.h264"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support screen sharing"));
+            return;
+        }
+        if (!m_voiceChannel || !m_voice->active()) {
+            r.error(e::BadRequest, QStringLiteral("join a voice channel to share your screen"));
+            return;
+        }
+        m_video->startSharing([this, r](bool ok, const QString& error) {
+            if (!ok) {
+                r.error(error == u"cancelled" ? e::BadRequest : e::MediaDeviceUnavailable, error);
+                return;
+            }
+            setStreaming(true, [this, r](bool accepted, const QString& code, const QString& message) {
+                if (!accepted) {
+                    m_video->stopSharing();
+                    r.error(code, message);
+                    return;
+                }
+                m_streamConfirmed = true;
+                scheduleStatus();
+                r.ok(m_video->statsJson().value(QStringLiteral("share")).toObject());
+            });
+        });
+    };
+    m[QStringLiteral("stream.stop")] = [this](const QJsonObject&, const Responder& r) {
+        const bool was = m_video->sharing();
+        m_video->stopSharing();
+        m_streamConfirmed = false;
+        if (was && m_voiceChannel && m_conn->state() == ServerConnection::State::Connected)
+            setStreaming(false, {});
+        scheduleStatus();
+        r.ok();
+    };
+    m[QStringLiteral("stream.watch")] = [this](const QJsonObject& p, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        const Id uid = userParam(p, r);
+        if (!uid)
+            return;
+        proto::Envelope env;
+        env.mutable_watch_stream()->set_user_id(uid);
+        env.mutable_watch_stream()->set_watch(true);
+        m_conn->request(std::move(env), [this, r, uid](const proto::Envelope& reply) {
+            if (reply.has_error()) {
+                r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+                return;
+            }
+            QString error;
+            const auto path = m_video->watch(uid, &error);
+            if (!path) {
+                r.error(e::StorageError, error);
+                return;
+            }
+            r.ok({{"user_id", idString(uid)}, {"path", *path}});
+        });
+    };
+    m[QStringLiteral("stream.unwatch")] = [this](const QJsonObject& p, const Responder& r) {
+        const Id uid = userParam(p, r);
+        if (!uid)
+            return;
+        m_video->unwatch(uid);
+        if (m_conn->state() == ServerConnection::State::Connected) {
+            proto::Envelope env;
+            env.mutable_watch_stream()->set_user_id(uid);
+            env.mutable_watch_stream()->set_watch(false);
+            m_conn->request(std::move(env), [](const proto::Envelope&) { });
+        }
+        r.ok();
+    };
+    m[QStringLiteral("stream.stats")] = [this](const QJsonObject&, const Responder& r) { r.ok(m_video->statsJson()); };
     m[QStringLiteral("voice.mode")] = [this](const QJsonObject& p, const Responder& r) {
         const QString mode = p.value(QStringLiteral("mode")).toString();
         if (mode != u"vad" && mode != u"ptt" && mode != u"always") {
@@ -789,6 +1137,36 @@ void Daemon::registerMethods()
         applyConfig();
         dispatch(QStringLiteral("audio.settings"), {}, r);
     };
+    // Screen-share quality; applies to the next share.
+    m[QStringLiteral("video.settings")] = [this](const QJsonObject&, const Responder& r) {
+        const auto& v = m_config.video;
+        r.ok({{"fps", v.fps}, {"max_height", v.maxHeight}, {"bitrate_kbps", v.bitrateKbps}, {"encoder", v.encoder},
+            {"encoders", QJsonArray::fromStringList(video::H264Encoder::available())}});
+    };
+    m[QStringLiteral("video.set")] = [this](const QJsonObject& p, const Responder& r) {
+        auto& v = m_config.video;
+        if (p.contains(QStringLiteral("fps")))
+            v.fps = std::clamp(p.value(QStringLiteral("fps")).toInt(), 5, 60);
+        if (p.contains(QStringLiteral("max_height")))
+            v.maxHeight = std::clamp(p.value(QStringLiteral("max_height")).toInt(), 360, 1440);
+        if (p.contains(QStringLiteral("bitrate_kbps")))
+            v.bitrateKbps = std::clamp(p.value(QStringLiteral("bitrate_kbps")).toInt(), 500, 20000);
+        if (p.contains(QStringLiteral("encoder"))) {
+            const QString enc = p.value(QStringLiteral("encoder")).toString();
+            if (enc != u"auto" && !video::H264Encoder::available().contains(enc)) {
+                r.error(e::BadRequest,
+                    QStringLiteral("encoder must be auto or one of: %1")
+                        .arg(video::H264Encoder::available().join(QStringLiteral(", "))));
+                return;
+            }
+            v.encoder = enc;
+        }
+        QString err;
+        if (!saveConfig(&err))
+            OMA_WARN("daemon", "could not save config", {"error", err});
+        applyConfig();
+        dispatch(QStringLiteral("video.settings"), {}, r);
+    };
     m[QStringLiteral("audio.user_volume")] = [this](const QJsonObject& p, const Responder& r) {
         const Id uid = userParam(p, r);
         if (!uid)
@@ -848,7 +1226,7 @@ void Daemon::registerMethods()
         s->set_deaf(p.value(QStringLiteral("deaf")).toBool(false));
         forward(std::move(env), r);
     };
-    m[QStringLiteral("role.create")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("role.create")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id sid = serverParam(p, r);
         if (!sid)
             return;
@@ -863,23 +1241,36 @@ void Daemon::registerMethods()
         c->set_server_id(sid);
         c->set_name(p.value(QStringLiteral("name")).toString().toStdString());
         c->set_permissions(bits);
-        forward(std::move(env), r, [&model](const proto::Envelope& reply) { return model.roleJson(reply.role()); });
+        forward(std::move(env), r, [model](const proto::Envelope& reply) { return model->roleJson(reply.role()); });
     };
-    m[QStringLiteral("role.update")] = [this, &model](const QJsonObject& p, const Responder& r) {
-        bool ok = false;
-        const auto bits = permissionBits(p.value(QStringLiteral("permissions")), &ok);
+    // Fields left out keep their current value.
+    m[QStringLiteral("role.update")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const proto::Role* current = model->role(idFromJson(p.value(QStringLiteral("role"))));
+        if (!current) {
+            r.error(e::NotFound, QStringLiteral("no such role"));
+            return;
+        }
+        bool ok = true;
+        const auto bits = p.contains(QStringLiteral("permissions"))
+            ? permissionBits(p.value(QStringLiteral("permissions")), &ok)
+            : current->permissions();
         if (!ok) {
             r.error(e::BadRequest, QStringLiteral("unknown permission name"));
             return;
         }
         proto::Envelope env;
         auto* u = env.mutable_update_role();
-        u->set_role_id(idFromJson(p.value(QStringLiteral("role"))));
-        u->set_name(p.value(QStringLiteral("name")).toString().toStdString());
+        u->set_role_id(current->id());
+        u->set_name(p.contains(QStringLiteral("name")) ? p.value(QStringLiteral("name")).toString().toStdString()
+                                                       : current->name());
         u->set_permissions(bits);
-        u->set_position(static_cast<std::uint32_t>(std::max(1, p.value(QStringLiteral("position")).toInt(1))));
-        u->set_color(p.value(QStringLiteral("color")).toString().remove(u'#').toUInt(nullptr, 16));
-        forward(std::move(env), r, [&model](const proto::Envelope& reply) { return model.roleJson(reply.role()); });
+        u->set_position(p.contains(QStringLiteral("position"))
+                ? static_cast<std::uint32_t>(std::max(1, p.value(QStringLiteral("position")).toInt(1)))
+                : current->position());
+        u->set_color(p.contains(QStringLiteral("color"))
+                ? p.value(QStringLiteral("color")).toString().remove(u'#').toUInt(nullptr, 16)
+                : current->color());
+        forward(std::move(env), r, [model](const proto::Envelope& reply) { return model->roleJson(reply.role()); });
     };
     m[QStringLiteral("role.delete")] = [this](const QJsonObject& p, const Responder& r) {
         proto::Envelope env;
@@ -915,8 +1306,11 @@ void Daemon::registerMethods()
         auto* o = s->mutable_override();
         o->set_channel_id(cid);
         if (p.contains(QStringLiteral("user"))) {
+            const Id uid = userParam(p, r);
+            if (!uid)
+                return;
             o->set_target_type(proto::PermissionOverride::TARGET_USER);
-            o->set_target_id(idFromJson(p.value(QStringLiteral("user"))));
+            o->set_target_id(uid);
         } else {
             o->set_target_type(proto::PermissionOverride::TARGET_ROLE);
             o->set_target_id(idFromJson(p.value(QStringLiteral("role"))));
@@ -960,11 +1354,11 @@ void Daemon::registerMethods()
         r.ok();
     };
 
-    m[QStringLiteral("channel.join")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("channel.join")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
         if (!cid)
             return;
-        const auto* c = model.channel(cid);
+        const auto* c = model->channel(cid);
         if (c && c->type() == proto::CHANNEL_TYPE_VOICE) {
             if (requireConnected(r))
                 joinVoice(cid, &r);
@@ -974,11 +1368,11 @@ void Daemon::registerMethods()
             {{"channel_id", idString(cid)}, {"server_id", idString(c ? c->server_id() : 0)}});
         r.ok({{"channel_id", idString(cid)}, {"focused", true}});
     };
-    m[QStringLiteral("ui.navigate")] = [this, &model](const QJsonObject& p, const Responder& r) {
+    m[QStringLiteral("ui.navigate")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
         if (!cid)
             return;
-        const auto* c = model.channel(cid);
+        const auto* c = model->channel(cid);
         m_ipc.broadcast(QStringLiteral("ui.navigate"),
             {{"channel_id", idString(cid)}, {"server_id", idString(c ? c->server_id() : 0)}});
         r.ok({{"channel_id", idString(cid)}});

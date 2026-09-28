@@ -37,13 +37,15 @@ AppController::AppController(const config::ClientConfig& config, QObject* parent
     , m_link(config.startup.launchDaemon)
     , m_servers({"key", "itemId", "name", "initials", "isHome", "unread", "mentions", "selected", "inVoice"})
     , m_channels({"key", "itemId", "rowType", "name", "depth", "unread", "mentions", "muted", "locked", "selected",
-          "collapsed", "speaking", "userMuted", "userDeafened", "userId", "presence", "voiceCount", "topic"})
+          "collapsed", "speaking", "userMuted", "userDeafened", "userId", "presence", "voiceCount", "topic",
+          "streaming"})
     , m_members(
           {"key", "userId", "name", "username", "status", "nameColor", "section", "isOwner", "inVoice", "speaking"})
     , m_switcher({"key", "kind", "itemId", "label", "detail"})
-    , m_searchResults({"key", "itemId", "author", "preview", "time"})
+    , m_searchResults({"key", "itemId", "channelId", "channel", "author", "preview", "time"})
 {
     g_app = this;
+    prunePastedImages();
     connect(&m_link, &DaemonLink::stateChanged, this, &AppController::daemonChanged);
     connect(&m_link, &DaemonLink::connected, this, &AppController::onDaemonConnected);
     connect(&m_link, &DaemonLink::eventReceived, this, &AppController::onEvent);
@@ -401,6 +403,24 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
             emit voiceChanged();
         return;
     }
+    if (name == u"e2e.keys_changed") {
+        if (data.value(QStringLiteral("self")).toBool())
+            showNotice(tr("A new device was added to your account. If it was not you, change your password."), true);
+        else
+            showNotice(tr("%1's security keys changed (a new or removed device). Compare safety numbers from the lock "
+                          "icon in your conversation.")
+                           .arg(userName(id("user_id"))),
+                true);
+        return;
+    }
+    if (name == u"stream.ended") {
+        const QString uid = id("user_id");
+        if (uid.isEmpty() || uid == selfId())
+            showNotice(tr("Screen sharing stopped"));
+        else
+            showNotice(tr("%1 stopped sharing").arg(userName(uid)));
+        return;
+    }
     if (name == u"voice.error") {
         showNotice(data.value(QStringLiteral("message")).toString(), true);
         return;
@@ -737,7 +757,7 @@ void AppController::rebuildChannels()
             {"muted", m_mutedChannels.contains(id)}, {"locked", c.value(QStringLiteral("locked")).toBool()},
             {"selected", id == m_selectedChannel}, {"collapsed", m_collapsed.contains(id)}, {"speaking", false},
             {"userMuted", false}, {"userDeafened", false}, {"userId", QString()}, {"presence", QString()},
-            {"voiceCount", 0}, {"topic", c.value(QStringLiteral("topic")).toString()}};
+            {"voiceCount", 0}, {"topic", c.value(QStringLiteral("topic")).toString()}, {"streaming", false}};
         if (type == u"dm") {
             for (const auto& r : c.value(QStringLiteral("recipients")).toArray()) {
                 if (r.toString() != selfId()) {
@@ -772,7 +792,8 @@ void AppController::rebuildChannels()
                         {"userDeafened",
                             v.value(QStringLiteral("self_deaf")).toBool()
                                 || v.value(QStringLiteral("server_deaf")).toBool()},
-                        {"userId", uid}, {"presence", userStatus(uid)}, {"voiceCount", 0}, {"topic", QString()}});
+                        {"userId", uid}, {"presence", userStatus(uid)}, {"voiceCount", 0}, {"topic", QString()},
+                        {"streaming", v.value(QStringLiteral("streaming")).toBool()}});
             }
         }
     };
@@ -863,6 +884,7 @@ void AppController::rebuildMembers()
             {"speaking", m_speaking.contains(uid)}});
     }
     m_members.setRows(std::move(rows));
+    emit rolesChanged();
 }
 
 } // namespace omachat::client

@@ -3,8 +3,10 @@
 
 #include "FuzzTargets.hpp"
 
+#include "crypto/E2E.hpp"
 #include "network.pb.h"
 #include "omachat/media/MediaPacket.hpp"
+#include "omachat/media/VideoFragments.hpp"
 #include "omachat/protocol/Framing.hpp"
 
 #include <gtest/gtest.h>
@@ -132,6 +134,49 @@ TEST(FuzzSmoke, IpcLinesSurviveGarbage)
         fuzz::ipcLine(m.data(), m.size());
         auto r = randomBytes(rng, 256);
         fuzz::ipcLine(r.data(), r.size());
+    }
+    SUCCEED();
+}
+
+TEST(FuzzSmoke, VideoFragmentsSurviveRandomAndMutatedInput)
+{
+    std::mt19937 rng(0xF1A3);
+    // Valid fragments of a few frames, then mutated copies.
+    std::vector<std::uint8_t> valid;
+    for (std::uint32_t n = 1; n <= 3; ++n) {
+        std::vector<std::uint8_t> frame(3000 + n * 500, static_cast<std::uint8_t>(n));
+        for (const auto& part : media::fragmentFrame(n, frame)) {
+            valid.push_back(n == 1 ? media::FlagKeyframe : 0);
+            valid.push_back(static_cast<std::uint8_t>(part.size() >> 8));
+            valid.push_back(static_cast<std::uint8_t>(part.size()));
+            valid.insert(valid.end(), part.begin(), part.end());
+        }
+    }
+    fuzz::videoFragments(valid.data(), valid.size());
+    for (int i = 0; i < 5000; ++i) {
+        auto bytes = randomBytes(rng, 4000);
+        fuzz::videoFragments(bytes.data(), bytes.size());
+        auto m = valid;
+        mutate(rng, m);
+        fuzz::videoFragments(m.data(), m.size());
+    }
+    SUCCEED();
+}
+
+TEST(FuzzSmoke, EncryptedPayloadsSurviveRandomAndMutatedInput)
+{
+    std::mt19937 rng(0xE2E0);
+    const auto me = e2e::Identity::generate();
+    proto::E2EBody body;
+    body.set_content("hello");
+    const auto sealed = e2e::seal(body, {1, 2}, e2e::Identity::generate(), {me.publicBytes()});
+    ASSERT_TRUE(sealed);
+    for (int i = 0; i < 5000; ++i) {
+        auto bytes = randomBytes(rng, 600);
+        fuzz::e2ePayload(bytes.data(), bytes.size());
+        std::vector<std::uint8_t> m(sealed->begin(), sealed->end());
+        mutate(rng, m);
+        fuzz::e2ePayload(m.data(), m.size());
     }
     SUCCEED();
 }
