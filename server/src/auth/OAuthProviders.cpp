@@ -105,6 +105,12 @@ void exchangeAndFetchProfile(QNetworkAccessManager& net, const OAuthProviderMeta
     QNetworkRequest req{QUrl(meta.tokenUrl)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/x-www-form-urlencoded"));
     req.setRawHeader("Accept", "application/json");
+    // client_secret_basic (RFC 6749 §2.3.1): required by Discord's token
+    // endpoint specifically (it 401s on credentials sent only in the body,
+    // even though GitHub's and Google's accept that). Sending both is a
+    // harmless superset that works everywhere.
+    const QByteArray basicAuth = (settings.clientId + u':' + settings.clientSecret).toUtf8().toBase64();
+    req.setRawHeader("Authorization", "Basic " + basicAuth);
 
     auto* tokenReply = net.post(req, body.query(QUrl::FullyEncoded).toUtf8());
     QObject::connect(tokenReply, &QNetworkReply::finished, tokenReply, [&net, &meta, tokenReply, done] {
