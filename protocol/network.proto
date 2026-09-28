@@ -1,0 +1,465 @@
+// OmaChat reliable control protocol (TCP + TLS 1.3).
+//
+// Framing: every frame is a 4-byte big-endian unsigned length followed by
+// exactly that many bytes of a serialized `Envelope`. Frames larger than
+// kMaxFrameBytes (see shared/src/protocol/Framing.hpp) terminate the
+// connection. See docs/protocol.md for the full specification.
+
+syntax = "proto3";
+
+package omachat.proto;
+
+option optimize_for = LITE_RUNTIME;
+
+// ---------------------------------------------------------------- entities
+
+enum UserStatus {
+  USER_STATUS_OFFLINE = 0;
+  USER_STATUS_ONLINE = 1;
+  USER_STATUS_IDLE = 2;
+  USER_STATUS_DO_NOT_DISTURB = 3;
+}
+
+message User {
+  uint64 id = 1;
+  string username = 2;
+  string display_name = 3;
+  string avatar_url = 4;
+  UserStatus status = 5;
+}
+
+message Server {
+  uint64 id = 1;
+  string name = 2;
+  string icon_url = 3;
+  uint64 owner_id = 4;
+}
+
+enum ChannelType {
+  CHANNEL_TYPE_TEXT = 0;
+  CHANNEL_TYPE_VOICE = 1;
+  CHANNEL_TYPE_CATEGORY = 2;
+  CHANNEL_TYPE_DM = 3;
+  CHANNEL_TYPE_GROUP_DM = 4;
+}
+
+message Channel {
+  uint64 id = 1;
+  uint64 server_id = 2;      // 0 for DM / GROUP_DM
+  string name = 3;
+  ChannelType type = 4;
+  uint64 parent_id = 5;      // category id, 0 when top-level
+  uint32 position = 6;
+  string topic = 7;
+  repeated uint64 recipient_ids = 8;  // DM participants
+  uint64 effective_permissions = 9;   // for the receiving user only
+}
+
+message Role {
+  uint64 id = 1;
+  uint64 server_id = 2;
+  string name = 3;
+  uint64 permissions = 4;
+  uint32 position = 5;      // higher outranks lower
+  uint32 color = 6;         // 0xRRGGBB, 0 = default
+  bool is_default = 7;      // implicitly held by every member
+}
+
+message Member {
+  uint64 server_id = 1;
+  uint64 user_id = 2;
+  repeated uint64 role_ids = 3;
+  int64 joined_at = 4;      // unix ms
+}
+
+message Attachment {
+  uint64 id = 1;
+  string filename = 2;
+  string mime_type = 3;
+  uint64 size = 4;
+}
+
+message Reaction {
+  string emoji = 1;
+  uint32 count = 2;
+  bool me = 3;
+}
+
+message ChatMessage {
+  uint64 id = 1;
+  uint64 channel_id = 2;
+  uint64 author_id = 3;
+  int64 timestamp = 4;       // unix ms
+  string content = 5;
+  uint64 reply_to = 6;
+  int64 edited_at = 7;       // unix ms, 0 = never
+  repeated uint64 mention_ids = 8;
+  repeated Attachment attachments = 9;
+  repeated Reaction reactions = 10;
+  bool is_action = 11;       // "/me" message
+}
+
+message VoiceState {
+  uint64 user_id = 1;
+  uint64 channel_id = 2;     // 0 = not in voice
+  bool self_mute = 3;
+  bool self_deaf = 4;
+  bool server_mute = 5;
+  bool server_deaf = 6;
+  uint32 stream_id = 7;      // media stream id for speaking indicators
+}
+
+message Invite {
+  string token = 1;
+  uint64 server_id = 2;
+  int64 expires_at = 3;      // unix ms, 0 = never
+  uint32 max_uses = 4;       // 0 = unlimited
+  uint32 uses = 5;
+  string server_name = 6;
+}
+
+message PermissionOverride {
+  uint64 channel_id = 1;
+  enum TargetType {
+    TARGET_ROLE = 0;
+    TARGET_USER = 1;
+  }
+  TargetType target_type = 2;
+  uint64 target_id = 3;
+  uint64 allow = 4;
+  uint64 deny = 5;
+}
+
+// ------------------------------------------------------------------ errors
+
+enum ErrorCode {
+  ERROR_NONE = 0;
+  ERROR_INTERNAL = 1;
+  ERROR_BAD_REQUEST = 2;
+  ERROR_PROTOCOL_MISMATCH = 3;
+  ERROR_AUTHENTICATION = 4;       // bad credentials / expired token
+  ERROR_NOT_AUTHENTICATED = 5;
+  ERROR_PERMISSION_DENIED = 6;
+  ERROR_NOT_FOUND = 7;
+  ERROR_CONFLICT = 8;             // e.g. username taken
+  ERROR_RATE_LIMITED = 9;
+  ERROR_BANNED = 10;
+  ERROR_INVITE_INVALID = 11;
+  ERROR_RESUME_FAILED = 12;
+  ERROR_REGISTRATION_CLOSED = 13;
+}
+
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  uint32 retry_after_ms = 3;
+}
+
+// -------------------------------------------------------------- handshake
+
+message Hello {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  string client_version = 3;
+  repeated string capabilities = 4;
+}
+
+message HelloReply {
+  uint32 protocol_major = 1;
+  uint32 protocol_minor = 2;
+  string server_version = 3;
+  repeated string capabilities = 4;
+  string instance_name = 5;
+  bool registration_open = 6;
+  uint32 media_udp_port = 7;
+}
+
+// ---------------------------------------------------------- authentication
+
+message RegisterRequest {
+  string username = 1;
+  string password = 2;
+  string display_name = 3;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message RefreshRequest {
+  string refresh_token = 1;
+}
+
+message ResumeRequest {
+  string access_token = 1;
+  uint64 session_id = 2;
+  uint64 last_sequence = 3;
+}
+
+message LogoutRequest {}
+
+message AuthResult {
+  User user = 1;
+  string access_token = 2;
+  string refresh_token = 3;       // only present after login/register/refresh rotation
+  uint64 session_id = 4;
+  int64 access_expires_at = 5;    // unix ms
+}
+
+message ResumeResult {
+  uint64 replayed_events = 1;
+}
+
+// ------------------------------------------------------------- state sync
+
+message SyncRequest {}
+
+message SyncState {
+  User self = 1;
+  repeated Server servers = 2;
+  repeated Channel channels = 3;
+  repeated Role roles = 4;
+  repeated Member members = 5;
+  repeated User users = 6;
+  repeated VoiceState voice_states = 7;
+  uint64 last_sequence = 8;
+  repeated uint64 server_permissions_server_ids = 9;
+  repeated uint64 server_permissions = 10;  // parallel to the field above
+}
+
+// --------------------------------------------------------- server/guilds
+
+message CreateServerRequest { string name = 1; }
+message LeaveServerRequest { uint64 server_id = 1; }
+message DeleteServerRequest { uint64 server_id = 1; }
+message CreateInviteRequest {
+  uint64 server_id = 1;
+  uint32 max_uses = 2;
+  uint32 expires_in_seconds = 3;
+}
+message JoinInviteRequest { string token = 1; }
+message ListInvitesRequest { uint64 server_id = 1; }
+message InviteList { repeated Invite invites = 1; }
+
+message CreateChannelRequest {
+  uint64 server_id = 1;
+  string name = 2;
+  ChannelType type = 3;
+  uint64 parent_id = 4;
+}
+message UpdateChannelRequest {
+  uint64 channel_id = 1;
+  string name = 2;           // empty = unchanged
+  string topic = 3;
+  bool set_topic = 4;
+}
+message DeleteChannelRequest { uint64 channel_id = 1; }
+message OpenDmRequest { uint64 user_id = 1; }
+
+// ---------------------------------------------------------------- messages
+
+message SendMessageRequest {
+  uint64 channel_id = 1;
+  string content = 2;
+  uint64 reply_to = 3;
+  bool is_action = 4;
+  repeated uint64 attachment_ids = 5;
+}
+message EditMessageRequest {
+  uint64 message_id = 1;
+  string content = 2;
+}
+message DeleteMessageRequest { uint64 message_id = 1; }
+message GetMessagesRequest {
+  uint64 channel_id = 1;
+  uint64 before_message_id = 2;   // 0 = newest
+  uint32 limit = 3;               // default 50, max 100
+}
+message MessagePage {
+  uint64 channel_id = 1;
+  repeated ChatMessage messages = 2;  // newest first
+  bool has_more = 3;
+}
+message SearchMessagesRequest {
+  uint64 channel_id = 1;
+  string query = 2;
+  uint32 limit = 3;
+}
+message ReactionRequest {
+  uint64 message_id = 1;
+  string emoji = 2;
+  bool add = 3;
+}
+
+message TypingRequest { uint64 channel_id = 1; }
+message SetPresenceRequest { UserStatus status = 1; }
+
+// ------------------------------------------------------------------- voice
+
+message JoinVoiceRequest {
+  uint64 channel_id = 1;
+  bool self_mute = 2;
+  bool self_deaf = 3;
+}
+message LeaveVoiceRequest {}
+message SetVoiceStateRequest {
+  bool self_mute = 1;
+  bool self_deaf = 2;
+}
+message VoiceSession {
+  uint64 channel_id = 1;
+  uint32 stream_id = 2;          // this client's media stream id
+  bytes media_key = 3;           // 32-byte ChaCha20-Poly1305 key, session-scoped
+  uint32 udp_port = 4;
+  int64 expires_at = 5;          // unix ms; client re-joins before expiry
+  uint32 bitrate = 6;            // suggested Opus bitrate (bps)
+}
+
+// -------------------------------------------------------------- moderation
+
+message KickRequest { uint64 server_id = 1; uint64 user_id = 2; string reason = 3; }
+message BanRequest { uint64 server_id = 1; uint64 user_id = 2; string reason = 3; }
+message UnbanRequest { uint64 server_id = 1; uint64 user_id = 2; }
+message ServerMuteRequest { uint64 server_id = 1; uint64 user_id = 2; bool mute = 3; bool deaf = 4; }
+
+message CreateRoleRequest {
+  uint64 server_id = 1;
+  string name = 2;
+  uint64 permissions = 3;
+  uint32 color = 4;
+}
+message UpdateRoleRequest {
+  uint64 role_id = 1;
+  string name = 2;
+  uint64 permissions = 3;
+  uint32 color = 4;
+  uint32 position = 5;
+}
+message DeleteRoleRequest { uint64 role_id = 1; }
+message AssignRoleRequest {
+  uint64 server_id = 1;
+  uint64 user_id = 2;
+  uint64 role_id = 3;
+  bool add = 4;
+}
+message SetOverrideRequest { PermissionOverride override = 1; bool remove = 2; }
+message ListOverridesRequest { uint64 channel_id = 1; }
+message OverrideList { repeated PermissionOverride overrides = 1; }
+
+// ------------------------------------------------------------------ events
+
+message TypingEvent { uint64 channel_id = 1; uint64 user_id = 2; }
+message MessageDeleteEvent { uint64 channel_id = 1; uint64 message_id = 2; }
+message ChannelDeleteEvent { uint64 channel_id = 1; uint64 server_id = 2; }
+message MemberLeaveEvent { uint64 server_id = 1; uint64 user_id = 2; string reason = 3; }
+message ServerDeleteEvent { uint64 server_id = 1; }
+message RoleDeleteEvent { uint64 server_id = 1; uint64 role_id = 2; }
+message PresenceEvent { uint64 user_id = 1; UserStatus status = 2; }
+message ReactionEvent { uint64 channel_id = 1; uint64 message_id = 2; string emoji = 3; uint64 user_id = 4; bool add = 5; }
+message PermissionsChangedEvent { uint64 server_id = 1; }
+
+message Event {
+  uint64 sequence = 1;   // 0 for ephemeral events (typing) that are not replayed
+  oneof kind {
+    ChatMessage message_create = 10;
+    ChatMessage message_update = 11;
+    MessageDeleteEvent message_delete = 12;
+    Channel channel_create = 13;
+    Channel channel_update = 14;
+    ChannelDeleteEvent channel_delete = 15;
+    Member member_join = 16;
+    Member member_update = 17;
+    MemberLeaveEvent member_leave = 18;
+    PresenceEvent presence_update = 19;
+    VoiceState voice_state_update = 20;
+    ReactionEvent reaction = 21;
+    Role role_update = 22;
+    RoleDeleteEvent role_delete = 23;
+    TypingEvent typing = 24;
+    Server server_create = 25;
+    Server server_update = 26;
+    ServerDeleteEvent server_delete = 27;
+    User user_update = 28;
+    PermissionsChangedEvent permissions_changed = 29;
+  }
+}
+
+// ---------------------------------------------------------------- envelope
+
+message Ok {}
+
+message Envelope {
+  // Client-chosen, echoed in the response. 0 for server-pushed events.
+  uint64 request_id = 1;
+  Error error = 2;
+
+  oneof payload {
+    // handshake/auth
+    Hello hello = 10;
+    HelloReply hello_reply = 11;
+    RegisterRequest register = 12;
+    LoginRequest login = 13;
+    RefreshRequest refresh = 14;
+    ResumeRequest resume = 15;
+    LogoutRequest logout = 16;
+    AuthResult auth_result = 17;
+    ResumeResult resume_result = 18;
+    Ok ok = 19;
+
+    // sync
+    SyncRequest sync = 20;
+    SyncState sync_state = 21;
+
+    // servers / channels
+    CreateServerRequest create_server = 30;
+    LeaveServerRequest leave_server = 31;
+    DeleteServerRequest delete_server = 32;
+    CreateInviteRequest create_invite = 33;
+    JoinInviteRequest join_invite = 34;
+    Invite invite = 35;
+    Server server = 36;
+    CreateChannelRequest create_channel = 37;
+    UpdateChannelRequest update_channel = 38;
+    DeleteChannelRequest delete_channel = 39;
+    Channel channel = 40;
+    OpenDmRequest open_dm = 41;
+    ListInvitesRequest list_invites = 42;
+    InviteList invite_list = 43;
+
+    // messages
+    SendMessageRequest send_message = 50;
+    EditMessageRequest edit_message = 51;
+    DeleteMessageRequest delete_message = 52;
+    GetMessagesRequest get_messages = 53;
+    MessagePage message_page = 54;
+    ChatMessage chat_message = 55;
+    TypingRequest typing = 56;
+    SetPresenceRequest set_presence = 57;
+    SearchMessagesRequest search_messages = 58;
+    ReactionRequest reaction = 59;
+
+    // voice
+    JoinVoiceRequest join_voice = 70;
+    LeaveVoiceRequest leave_voice = 71;
+    SetVoiceStateRequest set_voice_state = 72;
+    VoiceSession voice_session = 73;
+
+    // moderation / roles
+    KickRequest kick = 80;
+    BanRequest ban = 81;
+    UnbanRequest unban = 82;
+    CreateRoleRequest create_role = 83;
+    UpdateRoleRequest update_role = 84;
+    DeleteRoleRequest delete_role = 85;
+    AssignRoleRequest assign_role = 86;
+    SetOverrideRequest set_override = 87;
+    Role role = 88;
+    ServerMuteRequest server_mute = 89;
+    ListOverridesRequest list_overrides = 90;
+    OverrideList override_list = 91;
+
+    // server push
+    Event event = 100;
+  }
+}

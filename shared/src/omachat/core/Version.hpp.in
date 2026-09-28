@@ -1,0 +1,21 @@
+#pragma once
+
+#include <cstdint>
+
+namespace omachat {
+
+inline constexpr const char* kVersion = "@PROJECT_VERSION@";
+inline constexpr const char* kAppId = "org.omarchy.OmaChat";
+
+// Reliable protocol version. A major mismatch is rejected; minor versions
+// negotiate through capability strings.
+inline constexpr std::uint32_t kProtocolMajor = 1;
+inline constexpr std::uint32_t kProtocolMinor = 0;
+
+// Local IPC contract version (JSON lines over the user socket).
+inline constexpr int kIpcVersion = 1;
+
+inline constexpr std::uint16_t kDefaultControlPort = 6473;
+inline constexpr std::uint16_t kDefaultMediaPort = 6474;
+
+} // namespace omachat

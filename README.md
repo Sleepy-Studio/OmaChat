@@ -1,0 +1,226 @@
+# OmaChat
+
+**The native communications layer for Omarchy: fast text, low-latency voice,
+keyboard-first control, and self-hostable infrastructure — no browser runtime.**
+
+IRC simplicity + TeamSpeak latency + Discord usability, as native Linux
+software: C++20, Qt 6 / Qt Quick, PipeWire, Opus, SQLite, TLS 1.3.
+OmaChat is a communication tool, not an AI product: it contains no
+assistants, bots or LLM features.
+
+![OmaChat main window](docs/screenshots/main.png)
+
+## What you get
+
+- Servers with categories, text channels and voice channels; direct messages
+- Persistent history (paged, 50 at a time), edits, deletes, replies,
+  @mentions, reactions, typing indicators, per-channel full-text search
+- Markdown subset (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
+  fenced code blocks, `> quotes`, links) rendered through a sanitizer —
+  raw HTML is always shown literally
+- Voice: Opus 48 kHz mono, 20 ms frames, adaptive jitter buffers, FEC/PLC,
+  voice activity / push-to-talk / always-on, mute and deafen, per-user local
+  volume, RNNoise noise suppression, device hot-plug via PipeWire
+- Roles and per-channel permission overrides, kick, ban, server mute —
+  all enforced by the server
+- Presence (online, idle, do not disturb, offline) and desktop notifications
+  for DMs and mentions that respect DND and muted channels
+- `omachatd` keeps your session and voice call alive when the window closes
+- `omachatctl` for scripts and compositor keybindings, with stable JSON
+- IRC-style commands: `/join /leave /msg /reply /me /mute /unmute /deafen
+  /undeafen /topic /invite /kick /ban /status /help`
+- Keyboard first: `Ctrl+K` quick switcher, `Ctrl+Shift+M` mute,
+  `Ctrl+Shift+D` deafen, `Alt+↑/↓` channels, `Ctrl+L` channel list,
+  `Ctrl+F` search, `Ctrl+/` help, `Up` edits your last message,
+  `Tab` completes `@user`, `#channel` and `/commands` (all configurable)
+- Omarchy theme colors applied live; optional bar widget for Omarchy
+
+## Components
+
+| Binary | Role |
+|---|---|
+| `omachat` | Qt Quick desktop client |
+| `omachatd` | per-user communications daemon (`systemctl --user … omachat.service`) |
+| `omachatctl` | command-line client |
+| `omachat-server` | self-hostable server |
+
+See [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/protocol.md),
+[docs/media.md](docs/media.md), [docs/security.md](docs/security.md) and
+[docs/self-hosting.md](docs/self-hosting.md).
+
+## Build
+
+Arch Linux:
+
+```bash
+sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland \
+    qtkeychain-qt6 protobuf libsodium opus libpipewire openssl tomlplusplus rnnoise gtest
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+ctest --test-dir build              # unit, integration and fuzz suites
+```
+
+CMake options: `OMACHAT_BUILD_CLIENT`, `OMACHAT_BUILD_DAEMON`,
+`OMACHAT_BUILD_SERVER`, `OMACHAT_BUILD_CLI`, `OMACHAT_BUILD_TESTS`
+(all `ON`), `OMACHAT_ENABLE_FUZZERS` (libFuzzer targets, clang),
+`OMACHAT_WARNINGS_AS_ERRORS`. RNNoise is optional; without it noise
+suppression is reported as unavailable.
+
+### Package
+
+```bash
+cd packaging/arch
+OMACHAT_SRC=$PWD/../.. makepkg -si      # build the working tree
+```
+
+The package installs the binaries, desktop entry
+(`org.omarchy.OmaChat.desktop`, also the `omachat://` link handler), icon,
+the `omachat.service` user unit, and the server's system unit and sysusers
+entry. Uninstalling never deletes your data.
+
+## Run
+
+```bash
+systemctl --user enable --now omachat.service   # optional; the GUI starts it on demand
+omachat
+```
+
+On first launch, enter your server, username and password (or register). If
+the server uses a self-signed certificate you will be shown its SHA-256
+fingerprint and must explicitly trust it.
+
+From a terminal:
+
+```bash
+omachatctl account login chat.example.org:6473 howie   # prompts for the password
+omachatctl status
+omachatctl status --json
+omachatctl server list
+omachatctl channel list
+omachatctl message send general "hello"
+omachatctl voice join General
+omachatctl mute | unmute | deafen | undeafen
+omachatctl ptt begin | ptt end
+omachatctl events voice      # stream events as JSON lines
+```
+
+Exit codes: `0` ok, `1` command failed, `2` usage error, `3` daemon not running.
+
+### Global push-to-talk (Hyprland / Omarchy)
+
+Wayland does not let applications grab keys globally, so bind them in the
+compositor. In `~/.config/hypr/bindings.conf`:
+
+```ini
+bind  = , F8, exec, omachatctl ptt begin
+bindr = , F8, exec, omachatctl ptt end
+```
+
+Then choose **Push to talk** under Settings → Voice & Audio (or
+`omachatctl voice mode ptt`). Inside the window, `F8` works without any
+binding.
+
+## Omarchy integration (optional)
+
+![Omarchy bar widget](docs/screenshots/omarchy-bar.png)
+
+A bar widget shows your voice channel and speaker count (`General · 3`);
+left-click opens compact controls (mute, deafen, leave, open OmaChat),
+middle-click toggles mute, right-click opens the app. It talks to
+`omachatd` over the local socket and shows a dim icon when the daemon is
+not running.
+
+```bash
+integrations/omarchy/install.sh      # copies into ~/.config/omarchy/plugins, validates, enables
+integrations/omarchy/uninstall.sh    # disables and removes it
+```
+
+OmaChat works fully without the plugin, and outside Omarchy on any Wayland
+desktop (built-in dark theme, same features).
+
+## Configuration
+
+`~/.config/omachat/config.toml` (XDG). Written by the Settings dialog; never
+contains secrets.
+
+```toml
+[startup]
+launch_daemon = true
+
+[audio]
+input = "default"          # or a PipeWire node name from `omachatctl audio devices`
+output = "default"
+mode = "vad"               # vad | ptt | always
+noise_suppression = true
+vad_threshold_db = -50.0
+bitrate = 40000            # 24000 - 96000
+
+[notifications]
+messages = true            # direct messages
+mentions = true
+voice_join = false
+
+[ui]
+compact_mode = true
+scale = 1.0
+reduced_motion = false
+
+[shortcuts]
+quick_switcher = "Ctrl+K"
+toggle_mute = "Ctrl+Shift+M"
+push_to_talk = "F8"
+```
+
+Data: `~/.local/share/omachat/omachat.db` (accounts, pinned certificates,
+per-user volume, muted channels). Sessions: your Secret Service keyring.
+Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
+
+## Server setup
+
+```bash
+omachat-server generate-cert --cert cert.pem --key key.pem --name chat.example.org
+cp packaging/server/server.toml.example server.toml   # edit paths
+omachat-server --config server.toml
+```
+
+Open TCP 6473 and UDP 6474. Full guide: [docs/self-hosting.md](docs/self-hosting.md).
+
+## Development
+
+- Tests: `ctest --test-dir build -L unit|integration|fuzz`. Integration
+  tests run a real TLS server and real daemons in-process (null audio
+  device) and push a synthetic tone through the full voice path.
+- Run isolated daemons: `omachatd --socket /tmp/a.sock --database /tmp/a.db
+  --memory-credentials --null-audio`; point clients at it with
+  `OMACHAT_SOCKET=/tmp/a.sock` or `omachatctl --socket …`.
+- `OMACHAT_LOG_LEVEL=trace|debug|info|warning|error`.
+- `omachat --screenshot out.png` renders the window offscreen
+  (`QT_QPA_PLATFORM=offscreen`) for docs and UI checks.
+- Style: `clang-format` (`.clang-format`), warnings are kept at zero.
+
+## Status: 0.1 (early)
+
+Working and tested (see `ctest`): accounts, sessions and resume, TLS with
+explicit certificate trust, servers, invites, categories, text and voice
+channels, history, edits, deletes, replies, mentions, reactions, search,
+DMs, presence, typing, roles/overrides/kick/ban/server-mute enforced
+server-side, voice (verified end-to-end through the relay with a synthetic
+device clock, and with real PipeWire devices on one machine), mute, deafen,
+VAD, push-to-talk, reconnect after server restart with automatic voice
+rejoin, CLI with JSON, desktop notifications, Omarchy bar widget.
+
+Not done yet — be aware:
+
+- **Voice between two separate machines has not been tested yet**, and
+  mouth-to-ear latency on real hardware has not been measured.
+- **Screen sharing** (portal + PipeWire + H.264) is not implemented; the
+  media protocol reserves a video packet type for it.
+- **File attachments** are not implemented (the composer says so).
+- Group DMs, custom role/permission editing UI (roles work via
+  `omachatctl role …`), server-wide search.
+- One active account at a time in the daemon (several can be saved).
+- No end-to-end encryption (see [docs/security.md](docs/security.md)).
+
+## License
+
+MIT — see [LICENSE](LICENSE).

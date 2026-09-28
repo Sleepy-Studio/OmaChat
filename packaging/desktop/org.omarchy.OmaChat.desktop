@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=OmaChat
+GenericName=Voice and Text Chat
+Comment=Native voice, text and screen chat for self-hosted servers
+Exec=omachat %u
+Icon=org.omarchy.OmaChat
+Terminal=false
+Categories=Network;Chat;InstantMessaging;Qt;
+Keywords=chat;voice;irc;teamspeak;mumble;discord;
+MimeType=x-scheme-handler/omachat;
+StartupWMClass=org.omarchy.OmaChat
+SingleMainWindow=true

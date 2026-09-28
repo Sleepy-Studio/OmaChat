@@ -1,0 +1,33 @@
+[Unit]
+Description=OmaChat Server
+Documentation=https://github.com/Sleepy-Studio/OmaChat/blob/main/docs/self-hosting.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=omachat
+Group=omachat
+ExecStart=/usr/bin/omachat-server --config /etc/omachat/server.toml
+Restart=on-failure
+RestartSec=3
+StateDirectory=omachat
+StateDirectoryMode=0750
+# Hardening: the server only needs its state dir, its config and the network.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/omachat
+
+[Install]
+WantedBy=multi-user.target

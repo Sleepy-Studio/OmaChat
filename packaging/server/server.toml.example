@@ -1,0 +1,38 @@
+# omachat-server configuration. Copy to /etc/omachat/server.toml.
+
+[server]
+name = "OmaChat"
+bind = "0.0.0.0"
+port = 6473              # TCP, TLS 1.3 control/text
+registration_open = true # set false after creating your accounts
+node_id = 1              # 0..1023, unique per server process
+
+[media]
+udp_port = 6474          # UDP voice/media
+voice_bitrate = 40000
+
+[database]
+type = "sqlite"
+path = "/var/lib/omachat/omachat.db"
+
+[tls]
+# Public CA, private CA or self-signed are all fine. Generate a self-signed
+# pair with:
+#   omachat-server generate-cert --cert /var/lib/omachat/cert.pem \
+#       --key /var/lib/omachat/key.pem --name chat.example.org
+certificate = "/var/lib/omachat/cert.pem"
+private_key = "/var/lib/omachat/key.pem"
+
+[files]
+path = "/var/lib/omachat/files"
+max_upload_mb = 50
+
+[auth]
+access_token_minutes = 15
+refresh_token_days = 30
+
+[limits]
+max_connections_per_ip = 16
+
+[log]
+level = "info"

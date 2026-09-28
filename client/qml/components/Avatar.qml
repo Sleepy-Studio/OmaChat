@@ -1,0 +1,49 @@
+import QtQuick
+import OmaChat
+
+// Initials avatar with an optional presence dot and speaking ring.
+Item {
+    id: root
+
+    property string userId
+    property string name
+    property string status: ""
+    property bool speaking: false
+    property real size: Theme.px(32)
+
+    implicitWidth: size
+    implicitHeight: size
+
+    Rectangle {
+        id: circle
+        anchors.fill: parent
+        radius: width / 2
+        color: Theme.userColor(root.userId)
+        border.width: root.speaking ? Math.max(2, Theme.px(2)) : 0
+        border.color: Theme.success
+
+        Text {
+            anchors.centerIn: parent
+            text: {
+                const parts = root.name.trim().split(/\s+/)
+                let s = parts.length > 0 && parts[0].length > 0 ? parts[0][0] : "?"
+                if (parts.length > 1 && parts[1].length > 0)
+                    s += parts[1][0]
+                return s.toUpperCase()
+            }
+            color: Theme.dark ? "#101010" : "#ffffff"
+            font.pixelSize: root.size * 0.4
+            font.bold: true
+        }
+    }
+
+    PresenceDot {
+        visible: root.status.length > 0
+        status: root.status
+        size: Math.max(Theme.px(9), root.size * 0.32)
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.rightMargin: -1
+        anchors.bottomMargin: -1
+    }
+}

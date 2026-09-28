@@ -1,0 +1,101 @@
+#pragma once
+
+#include "storage/Records.hpp"
+
+#include <QSqlDatabase>
+#include <QString>
+#include <QVariant>
+
+#include <optional>
+#include <vector>
+
+namespace omachat::server {
+
+// Persistent storage for omachat-server. All SQL lives here, written against
+// the Qt SQL abstraction in portable SQL wherever practical so that a
+// PostgreSQL driver can be introduced later without touching callers.
+// SQLite-specific pieces (FTS5, PRAGMAs) are confined to migrate()/search().
+//
+// Not thread-safe: use from the server's event-loop thread only.
+class Store {
+public:
+    Store();
+    ~Store();
+    Store(const Store&) = delete;
+    Store& operator=(const Store&) = delete;
+
+    bool open(const QString& path, QString* error);
+    int schemaVersion() const;
+
+    // Groups multi-statement mutations so a failure cannot leave half a
+    // server behind.
+    bool begin() { return m_db.transaction(); }
+    bool commit() { return m_db.commit(); }
+    void rollback() { m_db.rollback(); }
+
+    // ---- users
+    bool insertUser(const UserRecord& user); // false on username conflict
+    std::optional<UserRecord> userByName(const QString& username);
+    std::vector<UserRecord> allUsers();
+    bool updateUserPasswordHash(Id userId, const QString& hash);
+
+    // ---- sessions
+    bool insertSession(const SessionRecord& s);
+    std::optional<SessionRecord> sessionByDigest(const QByteArray& digest);
+    bool rotateSession(Id sessionId, const QByteArray& newDigest, std::int64_t expiresAt);
+    bool deleteSession(Id sessionId);
+    int purgeExpiredSessions(std::int64_t nowMs);
+
+    // ---- servers, roles, members, channels (loaded into memory at startup)
+    struct Snapshot {
+        std::vector<ServerRecord> servers; // with roles, members, bans, channel ids
+        std::vector<ChannelRecord> channels;
+        std::vector<OverrideRecord> overrides;
+    };
+    Snapshot loadSnapshot();
+
+    bool insertServer(const ServerRecord& s, std::int64_t createdAt);
+    bool updateServer(Id id, const QString& name);
+    bool deleteServer(Id id);
+    bool insertRole(const RoleRecord& r);
+    bool updateRole(const RoleRecord& r);
+    bool deleteRole(Id id);
+    bool insertMember(const MemberRecord& m);
+    bool deleteMember(Id serverId, Id userId);
+    bool setMemberRole(Id serverId, Id userId, Id roleId, bool add);
+    bool insertChannel(const ChannelRecord& c, std::int64_t createdAt);
+    bool updateChannel(const ChannelRecord& c);
+    bool deleteChannel(Id id);
+    bool upsertOverride(const OverrideRecord& o);
+    bool deleteOverride(Id channelId, int targetType, Id targetId);
+    bool insertBan(Id serverId, Id userId, Id bannedBy, const QString& reason, std::int64_t at);
+    bool deleteBan(Id serverId, Id userId);
+
+    // ---- invites
+    bool insertInvite(const InviteRecord& i);
+    std::optional<InviteRecord> inviteByToken(const QString& token);
+    bool consumeInvite(const QString& token);
+    std::vector<InviteRecord> invitesForServer(Id serverId);
+
+    // ---- messages
+    bool insertMessage(const MessageRecord& m);
+    std::optional<MessageRecord> message(Id id);
+    bool updateMessage(Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions);
+    bool deleteMessage(Id id);
+    // Newest first, strictly older than `beforeId` (0 = newest). Fetches
+    // limit + 1 rows internally to report has_more.
+    std::vector<MessageRecord> messagePage(Id channelId, Id beforeId, int limit, bool* hasMore);
+    std::vector<MessageRecord> searchMessages(Id channelId, const QString& query, int limit);
+
+    bool setReaction(Id messageId, Id userId, const QString& emoji, bool add);
+    std::vector<ReactionSummary> reactions(Id messageId, Id viewerId);
+
+private:
+    bool exec(const QString& sql, const std::vector<QVariant>& binds = {});
+    bool migrate(QString* error);
+
+    QString m_connectionName;
+    QSqlDatabase m_db;
+};
+
+} // namespace omachat::server

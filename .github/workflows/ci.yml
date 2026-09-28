@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git cmake ninja clang \
+            qt6-base qt6-declarative qt6-svg qt6-wayland qtkeychain-qt6 protobuf abseil-cpp \
+            libsodium opus libpipewire openssl tomlplusplus rnnoise gtest
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOMACHAT_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build
+      - name: Unit and fuzz tests
+        run: ctest --test-dir build -L 'unit|fuzz' --output-on-failure
+      - name: Integration tests (loopback TLS/UDP, null audio)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          XDG_RUNTIME_DIR: /tmp/runtime
+        run: mkdir -p -m 700 /tmp/runtime && ctest --test-dir build -L integration --output-on-failure
+      - name: GUI smoke test (offscreen render)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          XDG_RUNTIME_DIR: /tmp/runtime
+          OMACHAT_SOCKET: /tmp/runtime/none.sock
+          OMACHAT_SCREENSHOT_DELAY_MS: "1500"
+        run: |
+          useradd -m ci || true
+          chown -R ci /tmp/runtime .
+          su ci -c 'build/client/omachat --screenshot /tmp/runtime/gui.png' && test -s /tmp/runtime/gui.png
+
+  format:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - run: pacman -Syu --noconfirm --needed clang git
+      - uses: actions/checkout@v4
+      - name: clang-format
+        run: git ls-files '*.cpp' '*.hpp' | xargs clang-format --dry-run --Werror
+
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Omarchy plugin manifest
+        run: |
+          python3 - <<'PY'
+          import json, os
+          d = "integrations/omarchy/io.github.howieduhzit.omachat"
+          m = json.load(open(f"{d}/manifest.json"))
+          assert m["schemaVersion"] == 1 and "bar-widget" in m["kinds"]
+          assert not m["id"].startswith("omarchy.")
+          for ep in m["entryPoints"].values():
+              assert os.path.isfile(f"{d}/{ep}") and not os.path.islink(f"{d}/{ep}")
+          print("manifest ok")
+          PY

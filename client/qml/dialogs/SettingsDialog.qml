@@ -1,0 +1,288 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import OmaChat
+
+// Settings are applied and persisted by omachatd (config.toml).
+Dialog {
+    id: dialog
+    title: qsTr("Settings")
+    width: Math.min(Theme.px(640), (parent ? parent.width : 800) - Theme.px(40))
+    height: Math.min(Theme.px(560), (parent ? parent.height : 600) - Theme.px(40))
+
+    onAboutToShow: App.refreshAudio()
+
+    component Row2: RowLayout {
+        property alias label: lbl.text
+        Layout.fillWidth: true
+        spacing: Theme.px(12)
+        Text {
+            id: lbl
+            Layout.preferredWidth: Theme.px(170)
+            color: Theme.text
+            font.pixelSize: Theme.px(13)
+            wrapMode: Text.Wrap
+        }
+    }
+
+    component Combo: ComboBox {
+        id: combo
+        Layout.fillWidth: true
+        implicitHeight: Theme.px(32)
+        textRole: "name"
+        valueRole: "id"
+        font.pixelSize: Theme.px(13)
+        palette.button: Theme.surfaceAlt
+        palette.buttonText: Theme.text
+        palette.window: Theme.raised
+        palette.text: Theme.text
+        palette.highlight: Theme.selection
+        palette.highlightedText: Theme.text
+    }
+
+    component Toggle: Switch {
+        font.pixelSize: Theme.px(13)
+        palette.base: Theme.surfaceAlt
+        contentItem: Text {
+            leftPadding: parent.indicator.width + Theme.px(8)
+            text: parent.text
+            color: Theme.text
+            font: parent.font
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    contentItem: ColumnLayout {
+        spacing: Theme.px(10)
+
+        RowLayout {
+            Text { text: dialog.title; color: Theme.text; font.pixelSize: Theme.px(16); font.bold: true; Layout.fillWidth: true }
+            IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: dialog.close() }
+        }
+
+        TabBar {
+            id: tabs
+            Layout.fillWidth: true
+            background: Rectangle { color: "transparent" }
+            Repeater {
+                model: [qsTr("Voice & Audio"), qsTr("Notifications"), qsTr("Account")]
+                delegate: TabButton {
+                    required property string modelData
+                    text: modelData
+                    font.pixelSize: Theme.px(13)
+                    contentItem: Text {
+                        text: parent.text
+                        font: parent.font
+                        color: parent.checked ? Theme.text : Theme.textMuted
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    background: Rectangle {
+                        color: "transparent"
+                        Rectangle {
+                            anchors.bottom: parent.bottom
+                            width: parent.width
+                            height: 2
+                            color: parent.parent.checked ? Theme.accent : Theme.border
+                        }
+                    }
+                }
+            }
+        }
+
+        StackLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            currentIndex: tabs.currentIndex
+
+            // ---------------------------------------------------- audio
+            ScrollView {
+                clip: true
+                ColumnLayout {
+                    width: dialog.availableWidth - Theme.px(12)
+                    spacing: Theme.px(12)
+
+                    Row2 {
+                        label: qsTr("Input device")
+                        Combo {
+                            model: App.inputDevices
+                            currentIndex: Math.max(0, indexOfValue(App.audioSettings.input))
+                            onActivated: App.setAudio("input", currentValue)
+                            Accessible.name: qsTr("Input device")
+                        }
+                    }
+                    Row2 {
+                        label: qsTr("Output device")
+                        Combo {
+                            model: App.outputDevices
+                            currentIndex: Math.max(0, indexOfValue(App.audioSettings.output))
+                            onActivated: App.setAudio("output", currentValue)
+                            Accessible.name: qsTr("Output device")
+                        }
+                    }
+                    Row2 {
+                        label: qsTr("Input mode")
+                        Combo {
+                            model: [
+                                { id: "vad", name: qsTr("Voice activity") },
+                                { id: "ptt", name: qsTr("Push to talk") },
+                                { id: "always", name: qsTr("Always transmit") }
+                            ]
+                            currentIndex: Math.max(0, indexOfValue(App.inputMode))
+                            onActivated: App.setInputMode(currentValue)
+                            Accessible.name: qsTr("Input mode")
+                        }
+                    }
+                    Text {
+                        visible: App.inputMode === "ptt"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.px(11)
+                        text: qsTr("In this window, hold %1. For a system-wide key, add to your Hyprland config:\n"
+                                   + "bind = , F8, exec, omachatctl ptt begin\nbindr = , F8, exec, omachatctl ptt end")
+                              .arg(App.shortcuts["push_to_talk"] || "F8")
+                        textFormat: Text.PlainText
+                        font.family: Theme.monoFamily
+                    }
+                    Row2 {
+                        label: qsTr("Voice activity threshold")
+                        Slider {
+                            id: vad
+                            Layout.fillWidth: true
+                            from: -80
+                            to: -20
+                            stepSize: 1
+                            value: App.audioSettings.vad_threshold_db !== undefined ? App.audioSettings.vad_threshold_db : -50
+                            onMoved: App.setAudio("vad_threshold_db", value)
+                            Accessible.name: qsTr("Voice activity threshold")
+                        }
+                        Text { text: Math.round(vad.value) + " dB"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                    }
+                    Row2 {
+                        label: qsTr("Input volume")
+                        Slider {
+                            id: inVol
+                            Layout.fillWidth: true
+                            from: 0
+                            to: 200
+                            stepSize: 5
+                            value: (App.audioSettings.input_volume !== undefined ? App.audioSettings.input_volume : 1) * 100
+                            onMoved: App.setAudio("input_volume", value / 100)
+                            Accessible.name: qsTr("Input volume")
+                        }
+                        Text { text: Math.round(inVol.value) + "%"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                    }
+                    Row2 {
+                        label: qsTr("Output volume")
+                        Slider {
+                            id: outVol
+                            Layout.fillWidth: true
+                            from: 0
+                            to: 200
+                            stepSize: 5
+                            value: (App.audioSettings.output_volume !== undefined ? App.audioSettings.output_volume : 1) * 100
+                            onMoved: App.setAudio("output_volume", value / 100)
+                            Accessible.name: qsTr("Output volume")
+                        }
+                        Text { text: Math.round(outVol.value) + "%"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                    }
+                    Row2 {
+                        label: qsTr("Voice bitrate")
+                        Combo {
+                            model: [
+                                { id: 24000, name: "24 kbps" }, { id: 32000, name: "32 kbps" },
+                                { id: 40000, name: qsTr("40 kbps (default)") }, { id: 64000, name: "64 kbps" },
+                                { id: 96000, name: "96 kbps" }
+                            ]
+                            currentIndex: Math.max(0, indexOfValue(App.audioSettings.bitrate))
+                            onActivated: App.setAudio("bitrate", currentValue)
+                            Accessible.name: qsTr("Voice bitrate")
+                        }
+                    }
+                    Toggle {
+                        text: App.audioSettings.noise_suppression_available ? qsTr("Noise suppression (RNNoise)")
+                                                                            : qsTr("Noise suppression (not available in this build)")
+                        enabled: App.audioSettings.noise_suppression_available === true
+                        checked: App.audioSettings.noise_suppression === true
+                        onToggled: App.setAudio("noise_suppression", checked)
+                    }
+                    Toggle {
+                        text: qsTr("High-pass filter (removes rumble)")
+                        checked: App.audioSettings.high_pass === true
+                        onToggled: App.setAudio("high_pass", checked)
+                    }
+                    Toggle {
+                        text: qsTr("Automatic gain control")
+                        checked: App.audioSettings.automatic_gain === true
+                        onToggled: App.setAudio("automatic_gain", checked)
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.px(11)
+                        text: qsTr("Echo cancellation: use PipeWire's echo-cancel module and select its source above.")
+                    }
+                }
+            }
+
+            // ------------------------------------------- notifications
+            ColumnLayout {
+                spacing: Theme.px(10)
+                Toggle {
+                    text: qsTr("Direct messages")
+                    checked: App.notificationSettings.messages === true
+                    onToggled: App.setNotification("messages", checked)
+                }
+                Toggle {
+                    text: qsTr("Mentions (@you)")
+                    checked: App.notificationSettings.mentions === true
+                    onToggled: App.setNotification("mentions", checked)
+                }
+                Toggle {
+                    text: qsTr("Someone joins your voice channel")
+                    checked: App.notificationSettings.voice_join === true
+                    onToggled: App.setNotification("voice_join", checked)
+                }
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.px(11)
+                    text: qsTr("Notifications are silenced while your status is Do not disturb, for muted channels, "
+                               + "and for the channel you are currently reading.")
+                }
+                Item { Layout.fillHeight: true }
+            }
+
+            // -------------------------------------------------- account
+            ColumnLayout {
+                spacing: Theme.px(10)
+                Text {
+                    text: qsTr("Signed in as %1 (@%2)").arg(App.selfName).arg(App.selfUsername)
+                    color: Theme.text
+                    font.pixelSize: Theme.px(13)
+                }
+                Text {
+                    text: qsTr("Server: %1:%2 · %3").arg(App.accountHost).arg(App.accountPort).arg(App.instanceName)
+                    color: Theme.textMuted
+                    font.pixelSize: Theme.px(12)
+                }
+                Text {
+                    text: qsTr("OmaChat %1").arg(App.version)
+                    color: Theme.textFaint
+                    font.pixelSize: Theme.px(11)
+                }
+                FlatButton {
+                    danger: true
+                    text: qsTr("Log out")
+                    onClicked: {
+                        dialog.close()
+                        App.logout()
+                    }
+                }
+                Item { Layout.fillHeight: true }
+            }
+        }
+    }
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=OmaChat Communication Service
+Documentation=https://github.com/Sleepy-Studio/OmaChat
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omachatd
+Restart=on-failure
+RestartSec=2
+# The daemon needs the realtime-capable PipeWire client threads it creates;
+# nothing here grants privileges.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
