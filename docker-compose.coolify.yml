@@ -4,8 +4,9 @@
 # Coolify pulls it rather than building source code.
 #
 # OmaChat serves its own TLS over TCP and media over UDP. Neither protocol
-# belongs behind Coolify's HTTP proxy, so expose both ports directly. Coolify's
-# SERVICE_URL_/SERVICE_FQDN_ domain generation and proxy labels do not apply.
+# belongs behind Coolify's HTTP proxy, so expose both ports directly. Coolify
+# generates the hostname below from its server wildcard domain (or sslip.io).
+# Its HTTP proxy route is unused: clients connect to that hostname on TCP 6473.
 services:
   omachat-server:
     image: ghcr.io/sleepy-studio/omachat-server:${OMACHAT_IMAGE_TAG:-latest}
@@ -24,10 +25,11 @@ services:
     volumes:
       - omachat-data:/var/lib/omachat
 
-    # Interpolated values appear in Coolify's Environment Variables panel.
-    # The required hostname is used for the first-run self-signed certificate.
+    # Coolify generates the FQDN for this Compose service and supplies it to
+    # the image for the first-run self-signed certificate. The service name
+    # omachat-server becomes OMACHAT_SERVER in the magic variable.
     environment:
-      OMACHAT_HOSTNAME: ${OMACHAT_HOSTNAME:?Set the public hostname or IP clients will use}
+      OMACHAT_HOSTNAME: ${SERVICE_FQDN_OMACHAT_SERVER}
       OMACHAT_NAME: ${OMACHAT_NAME:-OmaChat}
       OMACHAT_PORT: ${OMACHAT_PORT:-6473}
       OMACHAT_MEDIA_PORT: ${OMACHAT_MEDIA_PORT:-6474}

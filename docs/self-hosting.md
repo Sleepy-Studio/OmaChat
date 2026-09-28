@@ -42,14 +42,22 @@ Create a Git-based **Docker Compose** application from this repository. Set
 Its `OMACHAT_IMAGE_TAG` variable defaults to `latest` and can be set to a
 published version tag for a controlled upgrade.
 
-In Coolify's Environment Variables, set the required `OMACHAT_HOSTNAME` to
-the public DNS name or IP clients will enter. Review the defaults for the
-server name, TCP and UDP ports, registration, node ID, upload limit, and log
-level. Open the selected TCP and UDP ports on the server firewall. The server
-uses its own TLS and UDP transport, so leave the service's HTTP Domains field
-empty; Coolify's HTTP proxy and generated `SERVICE_URL_`/`SERVICE_FQDN_`
-variables do not apply. The Compose health check probes the TLS listener and
-Coolify displays the named data volume under Persistent Storage.
+Coolify automatically generates `SERVICE_FQDN_OMACHAT_SERVER` for this Compose
+service and passes that hostname to OmaChat as `OMACHAT_HOSTNAME`. To use your
+own domain, first configure the server's Wildcard Domain in Coolify and point
+wildcard DNS at the server; Coolify cannot create DNS records from Compose.
+Without a wildcard domain, Coolify can generate an `sslip.io` hostname from
+the server IP. Check that the resulting hostname resolves to the server before
+handing it to clients. A generated Coolify web URL is not an OmaChat endpoint:
+clients connect to the hostname on TCP port 6473 (or your chosen port), while
+media uses UDP port 6474 (or your chosen port). The Coolify HTTP proxy route
+associated with the generated domain is unused and cannot terminate OmaChat's
+TLS or carry its UDP traffic.
+
+Review the environment defaults for server name, TCP and UDP ports,
+registration, node ID, upload limit, and log level. Open the selected TCP and
+UDP ports on the server firewall. The Compose health check probes the TLS
+listener and Coolify displays the named data volume under Persistent Storage.
 
 The image must be public in GHCR for an unauthenticated pull, or the Coolify
 server must have registry credentials. The image was initially published as a
