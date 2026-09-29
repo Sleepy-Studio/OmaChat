@@ -33,12 +33,13 @@ constexpr std::int64_t kKeyframeRetryMs = 500;
 // ============================================================== ScreenShare
 
 ScreenShare::ScreenShare(std::unique_ptr<ScreenSource> source, std::unique_ptr<ScreenAudioSource> audio,
-    const H264Encoder::Settings& settings, voice::VoiceEngine& voice, QObject* parent)
+    const H264Encoder::Settings& settings, voice::VoiceEngine& voice, QString previewPath, QObject* parent)
     : QObject(parent)
     , m_source(std::move(source))
     , m_audio(std::move(audio))
     , m_settings(settings)
     , m_voice(voice)
+    , m_previewPath(std::move(previewPath))
     , m_frameNumber(QRandomGenerator::global()->generate()) // viewers never mistake a new share for old frames
 {
     connect(m_source.get(), &ScreenSource::started, this, &ScreenShare::started);
@@ -54,6 +55,11 @@ ScreenShare::~ScreenShare()
 void ScreenShare::start()
 {
     m_stop = false;
+    if (!m_previewPath.isEmpty()) {
+        QString error;
+        if (!m_previewWriter.create(m_previewPath, &error))
+            OMA_WARN("video", "cannot open the self-preview frame buffer", {"reason", error});
+    }
     m_encoder = std::thread([this] { encoderLoop(); });
     m_source->start([this](const ScreenSource::Frame& f) {
         // Capture thread: copy into the newest-frame slot and wake the encoder.
@@ -66,6 +72,11 @@ void ScreenShare::start()
         m_latestH = f.height;
         m_latestFormat = f.format;
         m_fresh = true;
+        // Best effort, straight from the capture thread: the sharer's own
+        // preview never waits on the encoder and never affects the stream.
+        if (!m_previewPath.isEmpty())
+            m_previewWriter.write(f.data, static_cast<std::uint32_t>(f.width), static_cast<std::uint32_t>(f.height),
+                static_cast<std::uint32_t>(f.stride));
         m_wake.notify_one();
     });
     // Sound is best effort: a share without it still works.
@@ -132,6 +143,7 @@ void ScreenShare::stop()
     m_wake.notify_one();
     if (m_encoder.joinable())
         m_encoder.join();
+    m_previewWriter.close();
 }
 
 void ScreenShare::requestKeyframe()
@@ -397,7 +409,13 @@ void VideoManager::startSharing(std::function<void(bool ok, const QString& error
     std::unique_ptr<ScreenAudioSource> audio;
     if (m_shareAudio)
         audio = m_audioFactory ? m_audioFactory() : makeApplicationAudioSource();
-    m_share = std::make_unique<ScreenShare>(std::move(source), std::move(audio), m_settings, m_voice);
+    QString previewPath;
+    if (paths::ensurePrivateDir(m_frameDir)) {
+        previewPath = QStringLiteral("%1/self-%2.frame")
+                          .arg(m_frameDir)
+                          .arg(QRandomGenerator::global()->generate(), 8, 16, QLatin1Char('0'));
+    }
+    m_share = std::make_unique<ScreenShare>(std::move(source), std::move(audio), m_settings, m_voice, previewPath);
     auto once = std::make_shared<std::function<void(bool, const QString&)>>(std::move(done));
     auto finish = [once](bool ok, const QString& error) {
         if (*once)

@@ -68,7 +68,7 @@ Item {
                 spacing: 0
                 StreamPanel {
                     id: streams
-                    visible: App.watchedStreams.length > 0
+                    visible: App.watchedStreams.length > 0 || App.sharingScreen
                     Layout.fillWidth: true
                     Layout.fillHeight: expanded
                     Layout.preferredHeight: expanded ? -1 : root.height * 0.55

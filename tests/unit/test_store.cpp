@@ -15,12 +15,19 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 4);
+    EXPECT_EQ(store.schemaVersion(), 5);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
     EXPECT_FALSE(store.insertUser(u)) << "duplicate username rejected";
     EXPECT_EQ(store.userByName(QStringLiteral("alice"))->displayName, QStringLiteral("Alice"));
+    EXPECT_TRUE(store.updateUserProfile(1, QStringLiteral("Alice Two"), QStringLiteral("https://example.org/a.png"),
+        QStringLiteral("A short bio")));
+    const auto profile = store.userByName(QStringLiteral("alice"));
+    ASSERT_TRUE(profile.has_value());
+    EXPECT_EQ(profile->displayName, QStringLiteral("Alice Two"));
+    EXPECT_EQ(profile->avatarUrl, QStringLiteral("https://example.org/a.png"));
+    EXPECT_EQ(profile->bio, QStringLiteral("A short bio"));
 
     server::SessionRecord s{7, 1, QByteArray(32, 'k'), 1000};
     EXPECT_TRUE(store.insertSession(s));
@@ -49,6 +56,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE attachments")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE device_keys")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE oauth_identities")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE users DROP COLUMN bio")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN encrypted")));
         ASSERT_TRUE(q.exec(QStringLiteral("PRAGMA user_version=1")));
         q.finish();
@@ -59,7 +67,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 4);
+    EXPECT_EQ(store.schemaVersion(), 5);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 

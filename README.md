@@ -35,6 +35,8 @@ assistants, bots or LLM features.
   instantly; background accounts still notify
 - Presence (online, idle, do not disturb, offline) and desktop notifications
   for DMs and mentions that respect DND and muted channels
+- Profiles with editable display name, bio and HTTPS avatar image; view a
+  member's profile from the member list
 - `omachatd` keeps your session and voice call alive when the window closes
 - `omachatctl` for scripts and compositor keybindings, with stable JSON
 - IRC-style commands: `/join /leave /msg /reply /me /mute /unmute /deafen

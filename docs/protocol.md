@@ -21,7 +21,7 @@ protocol ([media.md](media.md)), and the local IPC protocol.
    Current version: **1.2**. Minor versions negotiate through capability
    strings (`resume`, `voice.opus`, `media.chacha20poly1305`, `search.fts`,
    `attachments`; since 1.2 `search.server`, `dm.group`,
-   `attachments.resume`, `video.h264`, `e2e.v1`). `HelloReply.max_upload_bytes` is 0
+   `attachments.resume`, `video.h264`, `e2e.v1`; `profile.v1` adds editable profiles). `HelloReply.max_upload_bytes` is 0
    when a server takes no attachments. Clients check a capability before
    using the feature, so a 1.2 client works with a 1.1 server.
 3. Unauthenticated connections have 30 s to finish authenticating.
@@ -39,6 +39,7 @@ protocol ([media.md](media.md)), and the local IPC protocol.
 | `OAuthLink{provider, code, code_verifier, redirect_uri}` (authenticated) | `Ok`; attaches that provider identity to the caller's account. `ERROR_CONFLICT` if it is already linked elsewhere |
 | `OAuthUnlink{provider}` (authenticated) | `Ok`; `ERROR_BAD_REQUEST` if it would leave the account with no password and no other linked provider |
 | `ListOAuthIdentities{}` (authenticated) | `OAuthIdentityList` |
+| `UpdateProfile{display_name, avatar_url, bio}` (authenticated) | `Ok`; validates a 1–64 character display name, an optional HTTPS avatar URL, and a bio of at most 300 characters; publishes `user_update` to shared server or DM members |
 
 `AuthResult` = user, access token (in-memory on the server, 15 min),
 refresh token (stored as SHA-256 on the server, 30 days), session id.
@@ -187,6 +188,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | servers | `server.list`, `server.create`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
 | channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
 | messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search {channel \| server, query}`, `message.react`, `typing`, `presence.set` |
+| profile | `profile.update {display_name, avatar_url, bio}` |
 | attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?}` → `{path, cached}`, `transfer.list`, `transfer.cancel {id}` |
 | voice | `voice.join`, `voice.leave`, `voice.mute`, `voice.unmute`, `voice.toggle_mute`, `voice.deafen`, `voice.undeafen`, `voice.toggle_deafen`, `voice.mode`, `voice.stats`, `ptt.begin`, `ptt.end` |
 | encryption | `e2e.status` → `{enabled, ready, device}`, `e2e.safety {user}` → `{number, devices, verified}`, `e2e.verify {user, verified?}` |

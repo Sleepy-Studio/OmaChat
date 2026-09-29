@@ -247,6 +247,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kListOauthIdentities:
         handleListOAuthIdentities(s, rid);
         break;
+    case P::kUpdateProfile:
+        handleUpdateProfile(s, rid, env.update_profile());
+        break;
     case P::kCreateServer:
         handleCreateServer(s, rid, env.create_server());
         break;
@@ -487,6 +490,7 @@ proto::User ChatServer::toProto(const UserRecord& u) const
     p.set_username(u.username.toStdString());
     p.set_display_name(u.displayName.toStdString());
     p.set_avatar_url(u.avatarUrl.toStdString());
+    p.set_bio(u.bio.toStdString());
     p.set_status(statusOf(u.id));
     return p;
 }

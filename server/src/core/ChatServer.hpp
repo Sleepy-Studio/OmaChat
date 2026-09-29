@@ -137,6 +137,7 @@ private:
     void handleOAuthLink(Session& s, std::uint64_t rid, const proto::OAuthLinkRequest& m);
     void handleOAuthUnlink(Session& s, std::uint64_t rid, const proto::OAuthUnlinkRequest& m);
     void handleListOAuthIdentities(Session& s, std::uint64_t rid);
+    void handleUpdateProfile(Session& s, std::uint64_t rid, const proto::UpdateProfileRequest& m);
     QString uniqueUsernameFrom(const QString& suggestion);
 
     // ---- handlers: servers & channels (ServerHandlers.cpp)

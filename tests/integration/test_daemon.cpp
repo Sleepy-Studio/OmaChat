@@ -116,6 +116,26 @@ TEST_F(DaemonFixture, MessagesFlowBetweenDaemonsWithEvents)
     EXPECT_TRUE(pres);
 }
 
+TEST_F(DaemonFixture, ProfileUpdateFlowsThroughIpcAndRefreshesSelf)
+{
+    setupPair();
+    auto result = alice->call(QStringLiteral("profile.update"),
+        {{"display_name", "Alice New"}, {"avatar_url", "https://example.org/alice.png"},
+            {"bio", "Building OmaChat"}});
+    ASSERT_TRUE(result.ok) << result.errorMessage.toStdString();
+    auto event = bob->waitEvent(QStringLiteral("user.updated"), [](const QJsonObject& user) {
+        return user.value("username").toString() == u"alice"
+            && user.value("display_name").toString() == u"Alice New";
+    });
+    ASSERT_TRUE(event.has_value());
+    EXPECT_EQ(event->value("avatar_url").toString(), QStringLiteral("https://example.org/alice.png"));
+    EXPECT_EQ(event->value("bio").toString(), QStringLiteral("Building OmaChat"));
+    ASSERT_TRUE(waitFor([&] {
+        return alice->call(QStringLiteral("daemon.status"))
+                   .result.value("user").toObject().value("display_name").toString() == u"Alice New";
+    }));
+}
+
 TEST_F(DaemonFixture, SessionSurvivesIpcClientDisconnect)
 {
     setupPair();

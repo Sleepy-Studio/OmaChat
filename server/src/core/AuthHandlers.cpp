@@ -3,11 +3,49 @@
 #include "core/ChatServer.hpp"
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
+#include <QUrl>
 #include "omachat/core/Version.hpp"
 
 #include <QThreadPool>
 
 namespace omachat::server {
+
+void ChatServer::handleUpdateProfile(Session& s, std::uint64_t rid, const proto::UpdateProfileRequest& m)
+{
+    if (!limit(s, rid, s.presence))
+        return;
+    const auto name = validation::displayName(QString::fromStdString(m.display_name()));
+    const QString bio = QString::fromStdString(m.bio()).trimmed();
+    const QString avatar = QString::fromStdString(m.avatar_url()).trimmed();
+    bool validBio = bio.size() <= 300;
+    for (QChar c : bio) {
+        if ((c.category() == QChar::Other_Control && c != u'\n') || c.category() == QChar::Other_Format)
+            validBio = false;
+    }
+    const QUrl url(avatar);
+    if (!name || !validBio || avatar.size() > 2048
+        || (!avatar.isEmpty() && (!url.isValid() || url.scheme() != u"https" || url.host().isEmpty()
+            || !url.userInfo().isEmpty()))) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid profile fields"));
+        return;
+    }
+    UserRecord updated = *m_state.user(s.userId);
+    updated.displayName = *name;
+    updated.avatarUrl = avatar;
+    updated.bio = bio;
+    if (!m_store.updateUserProfile(s.userId, *name, avatar, bio)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not save profile"));
+        return;
+    }
+    m_state.putUser(updated);
+    proto::Event event;
+    *event.mutable_user_update() = toProto(updated);
+    const auto audience = m_state.audienceOf(s.userId);
+    std::vector<Id> recipients(audience.begin(), audience.end());
+    recipients.push_back(s.userId);
+    publish(event, recipients);
+    replyOk(s, rid);
+}
 
 namespace {
 
@@ -47,6 +85,7 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("attachments.resume");
     r->add_capabilities("video.h264");
     r->add_capabilities("e2e.v1");
+    r->add_capabilities("profile.v1");
     r->set_instance_name(m_config.instanceName.toStdString());
     r->set_registration_open(m_config.registrationOpen);
     r->set_media_udp_port(mediaPort());

@@ -611,7 +611,7 @@ void AppController::toggleScreenShare()
     emit voiceChanged();
     // The desktop shows its own screen/window picker; no timeout.
     m_link.request(
-        QStringLiteral("stream.start"), {},
+        QStringLiteral("stream.start"), {{"audio", m_videoSettings.value(QStringLiteral("audio"), true).toBool()}},
         [this](const ipc::Reply& r) {
             m_shareStarting = false;
             emit voiceChanged();
@@ -851,6 +851,19 @@ void AppController::ban(const QString& userId, const QString& reason)
 void AppController::setPresence(const QString& status)
 {
     call(QStringLiteral("presence.set"), {{"status", status}});
+}
+
+void AppController::updateProfile(const QString& displayName, const QString& avatarUrl, const QString& bio)
+{
+    call(QStringLiteral("profile.update"),
+        {{"display_name", displayName}, {"avatar_url", avatarUrl}, {"bio", bio}},
+        [this](const QJsonObject&) { showNotice(tr("Profile saved")); }, tr("Could not save profile"));
+}
+
+QVariantMap AppController::userProfile(const QString& userId) const
+{
+    const QJsonObject user = userId == selfId() ? m_self : m_usersById.value(userId);
+    return user.toVariantMap();
 }
 
 // -------------------------------------------------------- quick switcher

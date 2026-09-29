@@ -34,6 +34,7 @@ Rectangle {
                 Avatar {
                     userId: App.selfId
                     name: App.selfName
+                    avatarUrl: App.selfAvatarUrl
                     status: App.selfStatus
                     speaking: App.transmitting
                     size: Theme.px(32)
@@ -113,16 +114,28 @@ Rectangle {
                         elide: Text.ElideRight
                     }
                 }
-                IconButton {
+                Row {
                     visible: App.voiceJoined && App.capabilities.indexOf("video.h264") >= 0
-                    iconName: "monitor"
-                    checkable: true
-                    checked: App.sharingScreen
-                    enabled: App.sharingScreen || (App.canShareScreen && !App.shareStarting)
-                    tip: App.sharingScreen ? qsTr("Stop sharing your screen")
-                       : App.shareStarting ? qsTr("Pick a screen or window…")
-                       : App.canShareScreen ? qsTr("Share your screen") : qsTr("You cannot share your screen here")
-                    onClicked: App.toggleScreenShare()
+                    spacing: 0
+                    IconButton {
+                        iconName: "monitor"
+                        checkable: true
+                        checked: App.sharingScreen
+                        enabled: App.sharingScreen || (App.canShareScreen && !App.shareStarting)
+                        tip: App.sharingScreen ? qsTr("Stop sharing your screen")
+                           : App.shareStarting ? qsTr("Pick a screen or window…")
+                           : App.canShareScreen ? qsTr("Share your screen") : qsTr("You cannot share your screen here")
+                        onClicked: App.toggleScreenShare()
+                    }
+                    IconButton {
+                        visible: !App.sharingScreen
+                        implicitWidth: Theme.px(18)
+                        iconName: "chevron-down"
+                        iconSize: Theme.px(10)
+                        tip: qsTr("Screen share options")
+                        enabled: !App.shareStarting
+                        onClicked: shareOptionsMenu.popup()
+                    }
                 }
                 IconButton {
                     iconName: "hangup"
@@ -164,5 +177,15 @@ Rectangle {
         MenuAction { text: qsTr("Online"); onTriggered: App.setPresence("online") }
         MenuAction { text: qsTr("Idle"); onTriggered: App.setPresence("idle") }
         MenuAction { text: qsTr("Do not disturb"); onTriggered: App.setPresence("dnd") }
+    }
+
+    MenuPopup {
+        id: shareOptionsMenu
+        MenuAction {
+            text: qsTr("Share system audio")
+            checkable: true
+            checked: App.videoSettings.audio !== false
+            onTriggered: App.setVideo("audio", !checked)
+        }
     }
 }

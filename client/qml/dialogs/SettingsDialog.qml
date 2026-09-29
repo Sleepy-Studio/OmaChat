@@ -13,6 +13,9 @@ Dialog {
     onAboutToShow: {
         App.refreshAudio()
         App.refreshOAuthIdentities()
+        profileName.text = App.selfName
+        profileAvatar.text = App.selfAvatarUrl
+        profileBio.text = App.selfBio
     }
 
     component Row2: RowLayout {
@@ -319,8 +322,51 @@ Dialog {
             }
 
             // -------------------------------------------------- account
-            ColumnLayout {
+            ScrollView {
+                clip: true
+                ColumnLayout {
+                width: dialog.availableWidth - Theme.px(12)
                 spacing: Theme.px(10)
+                Text { text: qsTr("Profile"); color: Theme.text; font.pixelSize: Theme.px(14); font.bold: true }
+                RowLayout {
+                    Avatar { userId: App.selfId; name: App.selfName; avatarUrl: App.selfAvatarUrl; size: Theme.px(48) }
+                    Text { text: "@" + App.selfUsername; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                }
+                Field {
+                    id: profileName
+                    Layout.fillWidth: true
+                    label: qsTr("Display name")
+                    input.maximumLength: 64
+                }
+                Field {
+                    id: profileAvatar
+                    Layout.fillWidth: true
+                    label: qsTr("Avatar image URL (HTTPS)")
+                    placeholder: qsTr("https://example.com/avatar.png")
+                    hint: qsTr("External images are loaded from this address by people who can see your profile.")
+                }
+                Text { text: qsTr("Bio"); color: Theme.textMuted; font.pixelSize: Theme.px(11); font.bold: true }
+                TextArea {
+                    id: profileBio
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Theme.px(76)
+                    wrapMode: TextEdit.Wrap
+                    color: Theme.text
+                    font.pixelSize: Theme.px(13)
+                    placeholderText: qsTr("A little about you")
+                    background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: Theme.px(4) }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: profileBio.length + "/300"; color: profileBio.length > 300 ? Theme.danger : Theme.textFaint; font.pixelSize: Theme.px(11); Layout.fillWidth: true }
+                    FlatButton {
+                        text: qsTr("Save profile")
+                        enabled: App.capabilities.indexOf("profile.v1") >= 0
+                                 && profileName.text.trim().length > 0 && profileBio.length <= 300
+                        onClicked: App.updateProfile(profileName.text, profileAvatar.text, profileBio.text)
+                    }
+                }
+                Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
                 Text {
                     text: qsTr("Signed in as %1 (@%2)").arg(App.selfName).arg(App.selfUsername)
                     color: Theme.text
@@ -403,7 +449,7 @@ Dialog {
                         }
                     }
                 }
-                Item { Layout.fillHeight: true }
+                }
             }
         }
     }

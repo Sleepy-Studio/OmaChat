@@ -356,6 +356,8 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
     }
     case proto::Event::kUserUpdate:
         m_users[e.user_update().id()] = e.user_update();
+        if (e.user_update().id() == m_self.id())
+            m_self = e.user_update();
         out.push_back({QStringLiteral("user.updated"), userJson(e.user_update())});
         break;
     case proto::Event::kPermissionsChanged:
@@ -375,7 +377,9 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
 QJsonObject ClientState::userJson(const proto::User& u) const
 {
     return {{"id", idString(u.id())}, {"username", QString::fromStdString(u.username())},
-        {"display_name", QString::fromStdString(u.display_name())}, {"status", statusName(u.status())}};
+        {"display_name", QString::fromStdString(u.display_name())},
+        {"avatar_url", QString::fromStdString(u.avatar_url())}, {"bio", QString::fromStdString(u.bio())},
+        {"status", statusName(u.status())}};
 }
 
 QJsonObject ClientState::serverJson(const proto::Server& s) const

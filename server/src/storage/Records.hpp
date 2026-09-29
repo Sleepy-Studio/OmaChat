@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace omachat::server {
@@ -13,12 +14,25 @@ namespace omachat::server {
 using Id = std::uint64_t;
 
 struct UserRecord {
+    UserRecord() = default;
+    UserRecord(Id userId, QString userName, QString name, QString avatar, QString hash, std::int64_t created,
+        QString biography = {})
+        : id(userId)
+        , username(std::move(userName))
+        , displayName(std::move(name))
+        , avatarUrl(std::move(avatar))
+        , passwordHash(std::move(hash))
+        , createdAt(created)
+        , bio(std::move(biography))
+    {
+    }
     Id id = 0;
     QString username;
     QString displayName;
     QString avatarUrl;
     QString passwordHash;
     std::int64_t createdAt = 0;
+    QString bio;
 };
 
 // A provider identity linked to a local account, keyed by (provider,
