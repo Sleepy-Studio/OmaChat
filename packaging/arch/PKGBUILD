@@ -13,7 +13,7 @@ pkgdesc="Native voice, text and screen chat for Omarchy and Linux (client, daemo
 arch=('x86_64' 'aarch64')
 url="https://github.com/Sleepy-Studio/OmaChat"
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qtkeychain-qt6' 'protobuf' 'abseil-cpp'
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qt6-multimedia' 'qtkeychain-qt6' 'protobuf' 'abseil-cpp'
          'libsodium' 'opus' 'libpipewire' 'openssl' 'tomlplusplus' 'rnnoise' 'ffmpeg' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja' 'git' 'gtest')
 optdepends=('gnome-keyring: store session tokens in the Secret Service keyring'

@@ -96,7 +96,7 @@ For development, or to build for a distribution the install script doesn't
 cover yet. On Arch Linux:
 
 ```bash
-sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland \
+sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia \
     qtkeychain-qt6 protobuf libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
@@ -272,8 +272,9 @@ Not done yet — be aware:
 - **Voice between two separate machines has not been tested yet**, and
   mouth-to-ear latency on real hardware has not been measured.
 - Screen capture through the desktop portal has not been tried by hand
-  yet (the rest of the video path is tested). Shared sound is mono and
-  comes from all other applications, not only the shared window.
+  yet (the rest of the video path is tested). Shared sound is opt-in,
+  mono, and comes from all other applications, not only the shared window.
+  The GUI confirms each share with sound.
 - See [docs/status.md](docs/status.md) for the current list.
 
 ## License

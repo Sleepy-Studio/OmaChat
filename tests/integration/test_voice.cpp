@@ -303,3 +303,14 @@ TEST_F(VoiceFixture, ScreenShareAudioReachesOnlyWatchers)
     listen(20);
     EXPECT_LT(rms(listen(30)), 1e-3) << "unwatching stops it";
 }
+
+TEST_F(VoiceFixture, ScreenShareSoundRequiresExplicitOptIn)
+{
+    // An older config may have saved the former audio-on default. A bare
+    // start request must still be silent; only audio: true opts in.
+    ASSERT_TRUE(alice->call(QStringLiteral("video.set"), {{"audio", true}}).ok);
+    ASSERT_TRUE(alice->call(QStringLiteral("stream.start"), {}, 30000).ok);
+    const auto share = alice->call(QStringLiteral("stream.stats")).result.value("share").toObject();
+    EXPECT_FALSE(share.value("audio").toBool());
+    EXPECT_TRUE(share.value("audio_source").toString().isEmpty());
+}

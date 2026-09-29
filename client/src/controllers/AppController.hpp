@@ -335,6 +335,7 @@ public:
     Q_INVOKABLE void setInputMode(const QString& mode);
     Q_INVOKABLE void setUserVolume(const QString& userId, int percent);
     Q_INVOKABLE void toggleScreenShare();
+    Q_INVOKABLE void startScreenShare(bool audio);
     Q_INVOKABLE void watchStream(const QString& userId);
     Q_INVOKABLE void unwatchStream(const QString& userId);
     // Ephemeral laser pointer while sharing your own screen; x/y normalized
@@ -428,6 +429,7 @@ signals:
     void authChanged();
     void oauthIdentitiesChanged();
     void voiceChanged();
+    void requestScreenAudioConsent();
     void selectionChanged();
     void discordImportChanged();
     void discordImportFinished(bool success);

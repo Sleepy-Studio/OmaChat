@@ -135,7 +135,9 @@ watching. Decoded streams larger than that are scaled down.
 
 **Sound.** Sound is off by default in current source. Opt in with
 `[video] audio = true`, Settings → Screen sharing, or `stream start --audio`.
-A share with sound carries every *other* application's playback.
+The GUI confirms before starting every share with sound. A bare CLI
+`stream start` is always silent, even with an old audio-on config. A share
+with sound carries every *other* application's playback.
 The daemon creates a PipeWire input node that is not auto-connected and
 links each application playback stream (`Stream/Output/Audio`) into its
 single mono port, following streams as they appear and go; PipeWire mixes

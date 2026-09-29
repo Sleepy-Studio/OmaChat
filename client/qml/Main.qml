@@ -105,11 +105,21 @@ ApplicationWindow {
         confirmText: qsTr("Join")
         onConfirmed: App.joinServer(invite)
     }
+    ConfirmDialog {
+        id: screenAudioConfirm
+        title: qsTr("Share other applications' sound?")
+        message: qsTr("Sound from every other application will be shared, even if you select just one window.")
+        confirmText: qsTr("Share screen and sound")
+        onConfirmed: App.startScreenShare(true)
+    }
     Connections {
         target: App
         function onRequestInviteJoin(invite) {
             inviteConfirm.invite = invite
             inviteConfirm.open()
+        }
+        function onRequestScreenAudioConsent() {
+            screenAudioConfirm.open()
         }
     }
 }

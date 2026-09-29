@@ -12,7 +12,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm --needed base-devel git cmake ninja clang \
-            qt6-base qt6-declarative qt6-svg qt6-wayland qtkeychain-qt6 protobuf abseil-cpp \
+            qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia qtkeychain-qt6 protobuf abseil-cpp \
             libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
       - uses: actions/checkout@v4
       - name: Configure

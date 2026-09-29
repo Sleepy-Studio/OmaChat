@@ -86,7 +86,9 @@ Built-in roles on server creation: Guest (default, read + join voice), Member
 - Shared sound is off by default in current source. If you turn it on in
   Settings → Screen sharing or pass `stream start --audio`, it captures
   everything other applications play (not only the shared window; not
-  OmaChat's own sound). An existing explicit `audio = true` setting is kept.
+  OmaChat's own sound). The GUI asks for confirmation each time sound is
+  enabled. A CLI `stream start` without `--audio` stays silent even if an old
+  config file contains `audio = true`.
 - Decoded frames sit in `$XDG_RUNTIME_DIR/omachat/video` (0700 directory,
   0600 files) and are deleted when you stop watching.
 

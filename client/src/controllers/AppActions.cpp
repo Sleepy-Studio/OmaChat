@@ -640,11 +640,22 @@ void AppController::toggleScreenShare()
     }
     if (m_shareStarting)
         return;
+    if (m_videoSettings.value(QStringLiteral("audio"), false).toBool()) {
+        emit requestScreenAudioConsent();
+        return;
+    }
+    startScreenShare(false);
+}
+
+void AppController::startScreenShare(bool audio)
+{
+    if (sharingScreen() || m_shareStarting)
+        return;
     m_shareStarting = true;
     emit voiceChanged();
     // The desktop shows its own screen/window picker; no timeout.
     m_link.request(
-        QStringLiteral("stream.start"), {{"audio", m_videoSettings.value(QStringLiteral("audio"), false).toBool()}},
+        QStringLiteral("stream.start"), {{"audio", audio}},
         [this](const ipc::Reply& r) {
             m_shareStarting = false;
             emit voiceChanged();
