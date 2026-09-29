@@ -270,6 +270,7 @@ message OAuthIdentityList {
 }
 
 message LogoutRequest {}
+message DeleteAccountRequest {}
 
 message AuthResult {
   User user = 1;
@@ -583,6 +584,7 @@ message Envelope {
     RefreshRequest refresh = 14;
     ResumeRequest resume = 15;
     LogoutRequest logout = 16;
+    DeleteAccountRequest delete_account = 136;
     AuthResult auth_result = 17;
     ResumeResult resume_result = 18;
     Ok ok = 19;

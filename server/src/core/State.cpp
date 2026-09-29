@@ -28,6 +28,19 @@ const UserRecord* State::user(Id id) const
     return it == m_users.end() ? nullptr : &it->second;
 }
 
+void State::removeUser(Id id)
+{
+    if (auto it = m_users.find(id); it != m_users.end()) {
+        m_usernames.erase(it->second.username);
+        m_users.erase(it);
+    }
+    for (auto& [serverId, srv] : m_servers)
+        srv.bans.erase(id);
+    for (auto& [channelId, overrides] : m_overrides)
+        std::erase_if(overrides, [id](const OverrideRecord& o) { return o.targetType == 1 && o.targetId == id; });
+    invalidatePermissions();
+}
+
 const ServerRecord* State::server(Id id) const
 {
     auto it = m_servers.find(id);

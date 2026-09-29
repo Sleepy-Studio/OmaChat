@@ -86,6 +86,57 @@ struct Fixture : ::testing::Test {
 
 } // namespace
 
+TEST_F(Fixture, DeletingAccountRemovesServerIdentityAndOwnedServers)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    const auto sid = createServer(*alice, "Temporary");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+
+    proto::Envelope request;
+    request.mutable_delete_account();
+    auto deleted = alice->call(request);
+    ASSERT_TRUE(deleted && deleted->has_ok());
+    EXPECT_TRUE(bob->waitEvent([sid](const proto::Event& e) {
+        return e.has_server_delete() && e.server_delete().server_id() == sid;
+    }));
+
+    auto retry = std::make_unique<RawClient>(server);
+    ASSERT_TRUE(retry->connect());
+    ASSERT_TRUE(retry->hello());
+    EXPECT_FALSE(retry->login("alice", "correct horse"));
+    EXPECT_TRUE(retry->registerUser("alice", "correct horse")) << "deleted username can be registered again";
+}
+
+TEST_F(Fixture, DeletingMemberRemovesMembershipAndPrivateConversation)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    const auto sid = createServer(*alice, "Keep This");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+    const auto aliceId = sync(*alice).self().id();
+    const auto bobId = sync(*bob).self().id();
+    proto::Envelope open;
+    open.mutable_open_dm()->set_user_id(bobId);
+    const auto dm = alice->call(open);
+    ASSERT_TRUE(dm && dm->has_channel());
+    const auto dmId = dm->channel().id();
+
+    proto::Envelope request;
+    request.mutable_delete_account();
+    ASSERT_TRUE(bob->call(request)->has_ok());
+    EXPECT_TRUE(alice->waitEvent([sid, bobId](const proto::Event& e) {
+        return e.has_member_leave() && e.member_leave().server_id() == sid && e.member_leave().user_id() == bobId;
+    }));
+    EXPECT_TRUE(alice->waitEvent([dmId](const proto::Event& e) {
+        return e.has_channel_delete() && e.channel_delete().channel_id() == dmId;
+    }));
+    const auto state = sync(*alice);
+    ASSERT_EQ(state.servers_size(), 1);
+    EXPECT_EQ(state.members_size(), 1);
+    EXPECT_EQ(state.members(0).user_id(), aliceId);
+}
+
 TEST_F(Fixture, ProfileUpdatesAreValidatedAndVisibleToOtherMembers)
 {
     auto alice = client("alice");

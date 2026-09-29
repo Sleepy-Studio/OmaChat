@@ -57,7 +57,7 @@ Accounts
   account login HOST[:PORT] USERNAME      prompts for the password (or --password-stdin)
   account register HOST[:PORT] USERNAME [--display-name NAME]
   account logout
-  account remove ACCOUNT_ID
+  account remove ACCOUNT_ID               permanently delete from server and this device
   connect [ACCOUNT_ID]                    (alias: server connect ACCOUNT_ID)
   disconnect
   trust FINGERPRINT                       trust the server certificate shown in status

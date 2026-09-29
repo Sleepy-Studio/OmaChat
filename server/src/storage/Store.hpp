@@ -35,6 +35,8 @@ public:
 
     // ---- users
     bool insertUser(const UserRecord& user); // false on username conflict
+    // Removes the user, their owned servers, and conversations they participated in atomically.
+    bool deleteUser(Id userId);
     std::optional<UserRecord> userByName(const QString& username);
     std::vector<UserRecord> allUsers();
     bool updateUserPasswordHash(Id userId, const QString& hash);

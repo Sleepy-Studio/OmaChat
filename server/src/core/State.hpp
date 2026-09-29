@@ -40,6 +40,7 @@ public:
 
     // ---- mutation (in-memory only)
     void putUser(const UserRecord& u);
+    void removeUser(Id id);
     void putServer(ServerRecord s);
     void removeServer(Id id);
     void putChannel(ChannelRecord c);

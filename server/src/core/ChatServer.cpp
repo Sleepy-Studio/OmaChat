@@ -238,6 +238,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kLogout:
         handleLogout(s, rid);
         break;
+    case P::kDeleteAccount:
+        handleDeleteAccount(s, rid);
+        break;
     case P::kOauthLink:
         handleOAuthLink(s, rid, env.oauth_link());
         break;

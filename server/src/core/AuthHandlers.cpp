@@ -282,6 +282,78 @@ void ChatServer::handleLogout(Session& s, std::uint64_t rid)
     s.conn->close();
 }
 
+void ChatServer::handleDeleteAccount(Session& s, std::uint64_t rid)
+{
+    const Id userId = s.userId;
+    struct RemovedServer { Id id; std::vector<Id> members; };
+    struct LeftServer { Id id; std::vector<Id> members; };
+    struct RemovedDm { Id id; std::vector<Id> recipients; };
+    std::vector<RemovedServer> owned;
+    std::vector<LeftServer> joined;
+    std::vector<RemovedDm> dms;
+    for (const auto& [id, srv] : m_state.servers()) {
+        if (!srv.members.contains(userId))
+            continue;
+        std::vector<Id> members;
+        for (const auto& [uid, member] : srv.members)
+            members.push_back(uid);
+        if (srv.ownerId == userId)
+            owned.push_back({id, std::move(members)});
+        else
+            joined.push_back({id, std::move(members)});
+    }
+    for (const auto& [id, channel] : m_state.channels()) {
+        if (channel.serverId == 0
+            && std::ranges::find(channel.recipients, userId) != channel.recipients.end())
+            dms.push_back({id, channel.recipients});
+    }
+    if (!m_store.deleteUser(userId)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not delete account"));
+        return;
+    }
+    leaveVoice(userId);
+    for (const auto& item : owned) {
+        m_state.removeServer(item.id);
+        proto::Event event;
+        event.mutable_server_delete()->set_server_id(item.id);
+        publish(std::move(event), item.members);
+    }
+    for (const auto& item : joined) {
+        m_state.removeMember(item.id, userId);
+        proto::Event event;
+        auto* leave = event.mutable_member_leave();
+        leave->set_server_id(item.id);
+        leave->set_user_id(userId);
+        leave->set_reason("account_deleted");
+        publish(std::move(event), item.members);
+    }
+    for (const auto& item : dms) {
+        m_state.removeChannel(item.id);
+        proto::Event event;
+        event.mutable_channel_delete()->set_channel_id(item.id);
+        publish(std::move(event), item.recipients);
+    }
+    m_state.removeUser(userId);
+    for (auto it = m_accessTokens.begin(); it != m_accessTokens.end();) {
+        it = it->userId == userId ? m_accessTokens.erase(it) : std::next(it);
+    }
+    if (auto it = m_offlineTimers.find(userId); it != m_offlineTimers.end()) {
+        delete it->second;
+        m_offlineTimers.erase(it);
+    }
+    m_chosenStatus.erase(userId);
+    collectAttachmentGarbage();
+    replyOk(s, rid);
+    // Close every device after the reply has been placed on the wire.
+    std::vector<quint64> connections;
+    for (auto it = m_userConns.lower_bound(userId); it != m_userConns.upper_bound(userId); ++it)
+        connections.push_back(it->second);
+    for (quint64 connId : connections) {
+        if (Session* peer = sessionFor(connId))
+            peer->conn->close();
+    }
+}
+
 void ChatServer::completeAuth(Session& s, std::uint64_t rid, Id userId, Id sessionId, const QString& refreshToken)
 {
     const QString access = auth::randomToken();

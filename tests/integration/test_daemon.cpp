@@ -467,6 +467,29 @@ TEST_F(DaemonFixture, SeveralAccountsStayConnectedAndSwitchInstantly)
     ASSERT_TRUE(waitFor(
         [&] { return alice->daemon().statusJson().value("account").toObject().value("id").toString() == secondId; }));
     EXPECT_EQ(alice->daemon().statusJson().value("accounts").toArray().size(), 1);
+    RawClient removed(server);
+    ASSERT_TRUE(removed.connect());
+    ASSERT_TRUE(removed.hello());
+    EXPECT_FALSE(removed.login("alice", "alice-password")) << "server account was deleted";
+    EXPECT_FALSE(bob->call(QStringLiteral("server.list")).result.value("servers").toArray().size())
+        << "owned server was deleted for its other members";
+}
+
+TEST_F(DaemonFixture, AccountDeletionRequiresServerConfirmation)
+{
+    ASSERT_TRUE(alice->registerOn(server, QStringLiteral("alice"), QStringLiteral("alice-password")));
+    const auto id = alice->daemon().statusJson().value("account").toObject().value("id").toString();
+    ASSERT_FALSE(id.isEmpty());
+    ASSERT_TRUE(alice->call(QStringLiteral("disconnect")).ok);
+    const auto removal = alice->call(QStringLiteral("account.remove"), {{"account", id}});
+    EXPECT_FALSE(removal.ok);
+    EXPECT_EQ(removal.errorCode, QStringLiteral("NotConnected"));
+    EXPECT_EQ(alice->daemon().statusJson().value("accounts").toArray().size(), 1);
+
+    RawClient stillRegistered(server);
+    ASSERT_TRUE(stillRegistered.connect());
+    ASSERT_TRUE(stillRegistered.hello());
+    EXPECT_TRUE(stillRegistered.login("alice", "alice-password"));
 }
 
 TEST_F(DaemonFixture, ConversationsAreEndToEndEncrypted)

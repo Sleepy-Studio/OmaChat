@@ -418,26 +418,43 @@ void Daemon::registerMethods()
             r.error(e::NotFound, QStringLiteral("no such account"));
             return;
         }
-        if (auto it = m_links.find(id); it != m_links.end()) {
+        auto it = m_links.find(id);
+        if (it == m_links.end() || it->second.conn->state() != ServerConnection::State::Connected) {
+            r.error(e::NotConnected, QStringLiteral("connect this account before deleting it from the server"));
+            return;
+        }
+        proto::Envelope env;
+        env.mutable_delete_account();
+        it->second.conn->request(std::move(env), [this, id, r](const proto::Envelope& reply) {
+            if (reply.has_error()) {
+                r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+                return;
+            }
+            auto removedLink = m_links.find(id);
+            if (removedLink == m_links.end()) {
+                r.error(e::NotConnected, QStringLiteral("account connection was lost"));
+                return;
+            }
             if (id == m_active) {
                 leaveVoice(nullptr);
                 const auto others = m_store.accounts();
                 const auto next = std::ranges::find_if(others, [id](const Account& a) { return a.id != id; });
                 activate(next != others.end() ? next->id : 0);
             }
-            it->second.e2e->forget(); // revoke this device's key before the session ends
-            // The link goes away once the server has forgotten the session.
-            it->second.conn->logout([this, id](bool, const QString&, const QString&) {
-                QTimer::singleShot(0, this, [this, id] {
-                    m_links.erase(id);
-                    scheduleStatus();
-                });
+            removedLink->second.conn->stop();
+            removedLink->second.e2e->forget();
+            m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
+            if (!m_store.removeAccount(id)) {
+                r.error(e::StorageError, QStringLiteral("server account deleted, but local cleanup failed"));
+                return;
+            }
+            QTimer::singleShot(0, this, [this, id] {
+                m_links.erase(id);
+                scheduleStatus();
             });
-        }
-        m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
-        m_store.removeAccount(id);
-        scheduleStatus();
-        r.ok();
+            scheduleStatus();
+            r.ok();
+        });
     };
     auto authMethod = [this, ensureAccount](bool registering) {
         return [this, ensureAccount, registering](const QJsonObject& p, const Responder& r) {

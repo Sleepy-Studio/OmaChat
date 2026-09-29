@@ -452,7 +452,7 @@ Dialog {
                     }
                     FlatButton {
                         danger: true
-                        text: qsTr("Remove this account")
+                        text: qsTr("Delete this account")
                         onClicked: {
                             removeAccountConfirm.open()
                         }
@@ -465,11 +465,11 @@ Dialog {
 
     ConfirmDialog {
         id: removeAccountConfirm
-        title: qsTr("Remove this account?")
-        message: qsTr("%1@%2 will be forgotten on this device, including its saved sign-in. You can add it "
-                      + "again with its password, or by signing in with its linked provider.")
+        title: qsTr("Permanently delete this account?")
+        message: qsTr("%1@%2 will be deleted from the server and this device. Its owned servers and private "
+                      + "conversations will also be deleted. This cannot be undone. You must be connected.")
                       .arg(App.accountUser).arg(App.accountHost)
-        confirmText: qsTr("Remove")
+        confirmText: qsTr("Delete account")
         destructive: true
         onConfirmed: {
             dialog.close()
