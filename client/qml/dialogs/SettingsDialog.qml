@@ -401,26 +401,35 @@ Dialog {
                         {key: "github", label: qsTr("GitHub")},
                     ]
                     delegate: RowLayout {
+                        id: providerRow
                         required property var modelData
-                        readonly property var identity: App.oauthIdentities.find(i => i.provider === modelData.key)
+                        readonly property var identity: App.oauthIdentities.find(i => i.provider === providerRow.modelData.key)
                         Layout.fillWidth: true
                         spacing: Theme.px(8)
                         Text {
                             Layout.fillWidth: true
                             color: Theme.text
                             font.pixelSize: Theme.px(13)
-                            text: identity ? qsTr("%1 — linked as %2").arg(modelData.label).arg(identity.username)
-                                           : modelData.label
+                            text: providerRow.identity ? qsTr("%1 — linked as %2").arg(providerRow.modelData.label).arg(providerRow.identity.username)
+                                           : providerRow.modelData.label
                         }
                         FlatButton {
                             enabled: !App.oauthLinkBusy
-                            danger: !!identity
-                            text: identity ? qsTr("Unlink")
+                            danger: !!providerRow.identity
+                            text: providerRow.identity ? qsTr("Unlink")
                                            : (App.oauthLinkBusy ? qsTr("Waiting on browser…") : qsTr("Link"))
-                            onClicked: identity ? App.unlinkOAuthProvider(modelData.key)
-                                                 : App.linkOAuthProvider(modelData.key)
+                            onClicked: providerRow.identity ? App.unlinkOAuthProvider(providerRow.modelData.key)
+                                                 : App.linkOAuthProvider(providerRow.modelData.key)
                         }
                     }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: App.oauthLinkMessage.length > 0
+                    wrapMode: Text.Wrap
+                    color: App.oauthLinkError ? Theme.danger : Theme.textMuted
+                    font.pixelSize: Theme.px(12)
+                    text: App.oauthLinkMessage
                 }
                 Text {
                     Layout.fillWidth: true

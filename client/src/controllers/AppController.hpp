@@ -49,6 +49,8 @@ class AppController : public QObject {
     // Provider sign-in methods linked to the current account (Settings > Account).
     Q_PROPERTY(QVariantList oauthIdentities READ oauthIdentities NOTIFY oauthIdentitiesChanged)
     Q_PROPERTY(bool oauthLinkBusy READ oauthLinkBusy NOTIFY oauthIdentitiesChanged)
+    Q_PROPERTY(QString oauthLinkMessage READ oauthLinkMessage NOTIFY oauthIdentitiesChanged)
+    Q_PROPERTY(bool oauthLinkError READ oauthLinkError NOTIFY oauthIdentitiesChanged)
 
     // self
     Q_PROPERTY(QString selfId READ selfId NOTIFY statusChanged)
@@ -174,6 +176,8 @@ public:
     QString authError() const { return m_authError; }
     QVariantList oauthIdentities() const { return m_oauthIdentities; }
     bool oauthLinkBusy() const { return m_oauthLinkBusy; }
+    QString oauthLinkMessage() const { return m_oauthLinkMessage; }
+    bool oauthLinkError() const { return m_oauthLinkError; }
     QString selfId() const { return m_self.value(QStringLiteral("id")).toString(); }
     QString selfName() const { return m_self.value(QStringLiteral("display_name")).toString(); }
     QString selfUsername() const { return m_self.value(QStringLiteral("username")).toString(); }
@@ -327,6 +331,9 @@ public:
     Q_INVOKABLE void toggleScreenShare();
     Q_INVOKABLE void watchStream(const QString& userId);
     Q_INVOKABLE void unwatchStream(const QString& userId);
+    // Ephemeral laser pointer while sharing your own screen; x/y normalized
+    // 0..1 over the captured frame. Fire-and-forget, no notice on failure.
+    Q_INVOKABLE void sendPointer(bool active, double x, double y);
     Q_INVOKABLE bool isStreaming(const QString& userId) const;
     Q_INVOKABLE int userVolume(const QString& userId) const;
 
@@ -484,6 +491,8 @@ private:
     QString m_authError;
     QVariantList m_oauthIdentities;
     bool m_oauthLinkBusy = false;
+    QString m_oauthLinkMessage;
+    bool m_oauthLinkError = false;
     QString m_notice;
     bool m_noticeError = false;
     QTimer m_noticeTimer;

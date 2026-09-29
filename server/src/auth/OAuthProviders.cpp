@@ -1,6 +1,7 @@
 #include "auth/OAuthProviders.hpp"
 
 #include "omachat/core/Log.hpp"
+#include "omachat/core/Validation.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,6 +10,9 @@
 #include <QNetworkRequest>
 #include <QUrl>
 #include <QUrlQuery>
+#include <QRegularExpression>
+
+#include <cmath>
 
 namespace omachat::server::auth {
 namespace {
@@ -40,9 +44,33 @@ const OAuthProviderMeta kProviders[] = {
     },
 };
 
-// Reads a provider profile response into the (id, username) pair OmaChat
-// cares about; the three providers disagree on field names and on whether
-// the id is a JSON number or a string.
+bool validBio(const QString& bio)
+{
+    if (bio.size() > 300)
+        return false;
+    for (QChar c : bio) {
+        if ((c.category() == QChar::Other_Control && c != u'\n') || c.category() == QChar::Other_Format)
+            return false;
+    }
+    return true;
+}
+
+std::optional<QString> avatarUrl(const QJsonObject& obj)
+{
+    if (!obj.contains(QStringLiteral("avatar_url")))
+        return std::nullopt;
+    if (obj.value(QStringLiteral("avatar_url")).isNull())
+        return QString();
+    const QString value = obj.value(QStringLiteral("avatar_url")).toString();
+    const QUrl url(value);
+    if (value.size() > 2048 || !url.isValid() || url.scheme() != u"https"
+        || url.host().isEmpty() || !url.userInfo().isEmpty())
+        return std::nullopt;
+    return value;
+}
+
+} // namespace
+
 std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJsonObject& obj)
 {
     OAuthProfile p;
@@ -50,27 +78,53 @@ std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJ
     case proto::OAUTH_PROVIDER_DISCORD:
         p.id = obj.value(QStringLiteral("id")).toString();
         p.username = obj.value(QStringLiteral("username")).toString();
+        p.displayName = obj.value(QStringLiteral("global_name")).toString();
+        if (obj.contains(QStringLiteral("avatar"))) {
+            const QString hash = obj.value(QStringLiteral("avatar")).toString();
+            static const QRegularExpression safeId(QStringLiteral("^[0-9]+$"));
+            static const QRegularExpression safeHash(QStringLiteral("^(a_)?[a-fA-F0-9]+$"));
+            if (hash.isEmpty())
+                p.avatarUrl = QString();
+            else if (safeId.match(p.id).hasMatch() && safeHash.match(hash).hasMatch())
+                p.avatarUrl = QStringLiteral("https://cdn.discordapp.com/avatars/%1/%2.png?size=256")
+                                  .arg(p.id, hash);
+        }
         break;
     case proto::OAUTH_PROVIDER_GITHUB:
         // GitHub's `id` is a JSON number.
-        p.id = QString::number(obj.value(QStringLiteral("id")).toDouble());
+        if (!obj.value(QStringLiteral("id")).isDouble())
+            return std::nullopt;
+        {
+            const double id = obj.value(QStringLiteral("id")).toDouble();
+            if (!std::isfinite(id) || id < 1 || id > 9007199254740991.0 || std::floor(id) != id)
+                return std::nullopt;
+            p.id = QString::number(static_cast<quint64>(id));
+        }
         p.username = obj.value(QStringLiteral("login")).toString();
+        p.displayName = obj.value(QStringLiteral("name")).toString();
+        p.avatarUrl = avatarUrl(obj);
+        if (obj.contains(QStringLiteral("bio"))) {
+            const QString bio = obj.value(QStringLiteral("bio")).toString().trimmed();
+            if (validBio(bio))
+                p.bio = bio;
+        }
         break;
     case proto::OAUTH_PROVIDER_GOOGLE:
         p.id = obj.value(QStringLiteral("sub")).toString();
         p.username = obj.value(QStringLiteral("name")).toString();
         if (p.username.isEmpty())
             p.username = obj.value(QStringLiteral("email")).toString().section(u'@', 0, 0);
+        p.displayName = p.username;
         break;
     default:
         return std::nullopt;
     }
-    if (p.id.isEmpty())
+    if (p.id.isEmpty() || p.username.isEmpty())
         return std::nullopt;
+    p.displayName = validation::displayName(p.displayName)
+                        .value_or(validation::displayName(p.username).value_or(QString()));
     return p;
 }
-
-} // namespace
 
 const OAuthProviderMeta* metaFor(proto::OAuthProvider provider)
 {

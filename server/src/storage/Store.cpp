@@ -402,6 +402,12 @@ std::optional<OAuthIdentityRecord> Store::oauthIdentity(const QString& provider,
         q.value(4).toString(), q.value(5).toLongLong()};
 }
 
+bool Store::updateOAuthIdentityUsername(Id identityId, const QString& providerUsername)
+{
+    return exec(QStringLiteral("UPDATE oauth_identities SET provider_username = ? WHERE id = ?"),
+        {providerUsername, sid(identityId)});
+}
+
 std::vector<OAuthIdentityRecord> Store::oauthIdentitiesForUser(Id userId)
 {
     std::vector<OAuthIdentityRecord> out;

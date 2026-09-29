@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQml
 import OmaChat
 
 // Screens you are watching, above the chat. One tab per stream; the video
@@ -31,6 +32,105 @@ Rectangle {
     // A picture-in-picture of your own share while watching someone else's.
     readonly property bool showSelfPip: selfEntry !== null && !(current && current.self)
 
+    // Refreshed once a second so staleness below can react to wall-clock
+    // time passing, not just new status pushes from the daemon.
+    property double nowMs: Date.now()
+    Timer {
+        interval: 1000
+        repeat: true
+        running: panel.current && !panel.current.self
+        onTriggered: panel.nowMs = Date.now()
+    }
+    // "connecting": nothing ever received. "live": recent frames decoding.
+    // "stalled": packets are still arriving but decoding has stopped, which
+    // in practice is the closest we can tell "video froze, audio may still
+    // be fine" apart without a dedicated audio-activity signal from the
+    // daemon. "lost": nothing has arrived in a while either.
+    readonly property string streamState: {
+        const c = current
+        if (!c || c.self)
+            return "self"
+        if (!c.lastPacketMs)
+            return "connecting"
+        if (nowMs - c.lastPacketMs > 4000)
+            return "lost"
+        if (c.lastDecodedMs && nowMs - c.lastDecodedMs > 3000)
+            return "stalled"
+        return "live"
+    }
+
+    function keyFor(entry) { return entry.self ? "__self__" : entry.userId }
+    function tabForKey(key) {
+        for (const t of tabs)
+            if (panel.keyFor(t) === key)
+                return t
+        return null
+    }
+
+    // For the global keyboard shortcuts in MainView.qml, which act on
+    // whichever stream is currently shown inline.
+    function zoomStep(factor) { video.stepZoom(factor) }
+    function resetVideoZoom() { video.resetZoom() }
+    function popOutCurrent() {
+        if (current)
+            popOut(keyFor(current))
+    }
+
+    // Caps how often pointer moves go over IPC while dragging; a release is
+    // always sent immediately so the dot disappears for viewers promptly.
+    property double lastPointerSendMs: 0
+    function sendPointerThrottled(nx, ny, pressed) {
+        if (!pressed) {
+            App.sendPointer(false, nx, ny)
+            lastPointerSendMs = 0
+            return
+        }
+        const now = Date.now()
+        if (now - lastPointerSendMs < 40)
+            return
+        lastPointerSendMs = now
+        App.sendPointer(true, nx, ny)
+    }
+
+    // Remembered across pop-outs so each new window opens at the size you
+    // last left one, instead of always resetting to the same default.
+    property size poppedOutSize: Qt.size(960, 600)
+
+    // Laser pointer: only meaningful while looking at your own share; also
+    // covers sharing ending, since that clears the self tab and current
+    // moves (or becomes null), tripping this the same way.
+    property bool pointerMode: false
+    onCurrentChanged: if (!current || !current.self) pointerMode = false
+
+    // userId (or "__self__") -> true for every stream popped into its own window.
+    property var poppedOut: ({})
+    function popOut(key) {
+        const next = Object.assign({}, poppedOut)
+        next[key] = true
+        poppedOut = next
+    }
+    function closePopout(key) {
+        if (!(key in poppedOut))
+            return
+        const next = Object.assign({}, poppedOut)
+        delete next[key]
+        poppedOut = next
+    }
+    // Drop pop-outs for streams that stopped being watched (or self-share ended).
+    onTabsChanged: {
+        const live = new Set(tabs.map(panel.keyFor))
+        const next = Object.assign({}, poppedOut)
+        let changed = false
+        for (const k of Object.keys(next)) {
+            if (!live.has(k)) {
+                delete next[k]
+                changed = true
+            }
+        }
+        if (changed)
+            poppedOut = next
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -58,7 +158,7 @@ Rectangle {
                         id: tabArea
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: panel.currentUser = tab.modelData.self ? "__self__" : tab.modelData.userId
+                        onClicked: panel.currentUser = panel.keyFor(tab.modelData)
                     }
                     Row {
                         id: tabRow
@@ -79,11 +179,30 @@ Rectangle {
                                 font.bold: true
                             }
                         }
+                        Rectangle {
+                            visible: !tab.modelData.self && tab.modelData.quality === "poor"
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Theme.px(7)
+                            height: width
+                            radius: width / 2
+                            color: Theme.warning
+                            Accessible.ignored: true
+                        }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: tab.modelData.name
                             color: Theme.text
                             font.pixelSize: Theme.px(12)
+                        }
+                        IconButton {
+                            visible: !panel.poppedOut[panel.keyFor(tab.modelData)]
+                            anchors.verticalCenter: parent.verticalCenter
+                            implicitWidth: Theme.px(18)
+                            implicitHeight: Theme.px(18)
+                            iconSize: Theme.px(11)
+                            iconName: "pop-out"
+                            tip: qsTr("Pop out into its own window")
+                            onClicked: panel.popOut(panel.keyFor(tab.modelData))
                         }
                         IconButton {
                             visible: !tab.modelData.self
@@ -99,6 +218,15 @@ Rectangle {
                 }
             }
             Item { Layout.fillWidth: true }
+            Text {
+                visible: panel.current && !panel.current.self
+                    && (panel.current.quality === "poor" || panel.streamState === "stalled" || panel.streamState === "lost")
+                text: panel.streamState === "lost" ? qsTr("Connection lost")
+                    : panel.streamState === "stalled" ? qsTr("Picture frozen")
+                    : qsTr("Poor connection")
+                color: Theme.warning
+                font.pixelSize: Theme.px(11)
+            }
             IconButton {
                 visible: panel.current && !panel.current.self
                 iconName: "speaker"
@@ -106,9 +234,20 @@ Rectangle {
                 tip: qsTr("Volume for %1's stream").arg(panel.current ? panel.current.name : "")
                 onClicked: streamVolumePopup.popup()
             }
+            IconButton {
+                visible: panel.current && panel.current.self
+                iconName: "pointer"
+                iconSize: Theme.px(14)
+                checkable: true
+                checked: panel.pointerMode
+                iconColor: checked ? Theme.accent : Theme.textMuted
+                tip: panel.pointerMode ? qsTr("Stop pointing") : qsTr("Point at your screen (viewers see a dot where you click)")
+                onClicked: panel.pointerMode = !panel.pointerMode
+            }
             Text {
                 visible: video.hasFrame
                 text: video.frameSize.width + "×" + video.frameSize.height
+                      + (video.zoom > 1.01 ? " · " + Math.round(video.zoom * 100) + "%" : "")
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(11)
             }
@@ -126,23 +265,55 @@ Rectangle {
             color: "black"
             clip: true
 
-            VideoFrameItem {
+            ZoomableVideo {
                 id: video
                 anchors.fill: parent
                 source: panel.current ? panel.current.path : ""
+                onDoubleClicked: panel.toggleExpanded()
+
+                pointerCaptureEnabled: !!(panel.current && panel.current.self && panel.pointerMode)
+                onPointerInput: (nx, ny, pressed) => panel.sendPointerThrottled(nx, ny, pressed)
+
+                pointerVisible: !!(panel.current && !panel.current.self && panel.current.pointerActive
+                                    && panel.nowMs - panel.current.pointerAtMs < 2000)
+                pointerNX: panel.current ? panel.current.pointerX : 0.5
+                pointerNY: panel.current ? panel.current.pointerY : 0.5
             }
             Text {
                 anchors.centerIn: parent
-                visible: !video.hasFrame
-                text: panel.current && panel.current.self
-                    ? qsTr("Setting up your preview…")
-                    : qsTr("Waiting for %1's screen…").arg(panel.current ? panel.current.name : "")
+                visible: !video.hasFrame || panel.streamState === "lost"
+                text: {
+                    const c = panel.current
+                    if (!c)
+                        return ""
+                    if (c.self)
+                        return qsTr("Setting up your preview…")
+                    if (panel.streamState === "lost")
+                        return qsTr("Lost the connection to %1's screen…").arg(c.name)
+                    return qsTr("Waiting for %1's screen…").arg(c.name)
+                }
                 color: "#bbbbbb"
                 font.pixelSize: Theme.px(13)
             }
-            MouseArea {
-                anchors.fill: parent
-                onDoubleClicked: panel.toggleExpanded()
+            // Video decoding stalled but packets are still arriving, which in
+            // practice is the best we can tell apart from a hard drop: the
+            // daemon has no separate signal for "screen audio still flowing".
+            Rectangle {
+                visible: video.hasFrame && panel.streamState === "stalled"
+                anchors.top: parent.top
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.topMargin: Theme.px(10)
+                width: stalledText.implicitWidth + Theme.px(16)
+                height: Theme.px(24)
+                radius: Theme.px(12)
+                color: Qt.rgba(0, 0, 0, 0.6)
+                Text {
+                    id: stalledText
+                    anchors.centerIn: parent
+                    text: qsTr("Picture frozen — reconnecting…")
+                    color: "#eeeeee"
+                    font.pixelSize: Theme.px(11)
+                }
             }
             Accessible.role: Accessible.Graphic
             Accessible.name: qsTr("%1's shared screen").arg(panel.current ? panel.current.name : "")
@@ -249,6 +420,30 @@ Rectangle {
                     Layout.preferredWidth: Theme.px(38)
                 }
             }
+        }
+    }
+
+    // One top-level window per popped-out stream. Instantiator (not
+    // Repeater) because its delegates are Windows, not Items.
+    Instantiator {
+        model: Object.keys(panel.poppedOut)
+        delegate: StreamWindow {
+            id: popout
+            required property string modelData
+            readonly property var entry: panel.tabForKey(modelData)
+            streamName: entry ? entry.name : ""
+            videoPath: entry ? entry.path : ""
+            isSelf: entry ? !!entry.self : false
+            pointerActive: entry ? !!entry.pointerActive : false
+            pointerX: entry ? entry.pointerX : 0.5
+            pointerY: entry ? entry.pointerY : 0.5
+            pointerAtMs: entry ? entry.pointerAtMs : 0
+            width: panel.poppedOutSize.width
+            height: panel.poppedOutSize.height
+            visible: true
+            onWidthChanged: panel.poppedOutSize = Qt.size(width, height)
+            onHeightChanged: panel.poppedOutSize = Qt.size(width, height)
+            onClosed: panel.closePopout(modelData)
         }
     }
 }

@@ -37,6 +37,9 @@ public:
     bool sendVideo(std::uint32_t timestamp, std::span<const std::uint8_t> payload, bool keyframe);
     // Screen-share audio rides the video stream so only watchers receive it.
     bool sendScreenAudio(std::uint32_t timestamp, std::span<const std::uint8_t> payload);
+    // Same idea for an ephemeral laser-pointer position (no queuing, no
+    // sequencing guarantees needed: the newest position always wins).
+    bool sendPointer(std::span<const std::uint8_t> payload);
     void sendControl(media::ControlType type, std::span<const std::uint8_t> extra = {});
 
     struct Stats {

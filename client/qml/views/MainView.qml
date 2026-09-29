@@ -131,6 +131,33 @@ Item {
         sequence: App.shortcuts["command_help"] || "Ctrl+/"
         onActivated: commandHelp.open()
     }
+    // Stream zoom/pop-out: only live while a stream is actually shown, so
+    // bare +/-/0 never fights with typing in the composer elsewhere.
+    Shortcut {
+        sequence: App.shortcuts["stream_zoom_in"] || "+"
+        enabled: streams.visible
+        onActivated: streams.zoomStep(1.2)
+    }
+    Shortcut {
+        sequence: App.shortcuts["stream_zoom_in_alt"] || "="
+        enabled: streams.visible
+        onActivated: streams.zoomStep(1.2)
+    }
+    Shortcut {
+        sequence: App.shortcuts["stream_zoom_out"] || "-"
+        enabled: streams.visible
+        onActivated: streams.zoomStep(1 / 1.2)
+    }
+    Shortcut {
+        sequence: App.shortcuts["stream_zoom_reset"] || "0"
+        enabled: streams.visible
+        onActivated: streams.resetVideoZoom()
+    }
+    Shortcut {
+        sequence: App.shortcuts["stream_pop_out"] || "Ctrl+Shift+P"
+        enabled: streams.visible
+        onActivated: streams.popOutCurrent()
+    }
 
     // --------------------------------------------------------------- dialogs
     QuickSwitcher { id: switcher }

@@ -156,7 +156,7 @@ void OAuthLoginFlow::onLoopbackConnection()
         const QString target = parts.size() >= 2 ? QString::fromLatin1(parts[1]) : QString();
         static const QByteArray kBody
             = "<!doctype html><html><body style=\"font:15px sans-serif;padding:2em\">"
-              "Signed in. You can close this tab and return to OmaChat.</body></html>";
+              "Authorization received. Return to OmaChat to see whether sign-in or linking completed.</body></html>";
         QByteArray response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: "
             + QByteArray::number(kBody.size()) + "\r\nConnection: close\r\n\r\n" + kBody;
         sock->write(response);
@@ -218,7 +218,7 @@ void OAuthLoginFlow::exchangeCode(const QString& code)
             return;
         }
         finish(true, QString(), QString());
-    });
+    }, 30000);
 }
 
 void OAuthLoginFlow::finish(bool ok, const QString& code, const QString& message)

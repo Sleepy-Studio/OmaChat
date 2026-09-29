@@ -11,6 +11,7 @@ add_executable(omachat_unit_tests
     unit/test_media_packet.cpp
     unit/test_rate_limit.cpp
     unit/test_validation.cpp
+    unit/test_oauth_profile.cpp
     unit/test_config.cpp
     unit/test_jitter_buffer.cpp
     unit/test_opus.cpp

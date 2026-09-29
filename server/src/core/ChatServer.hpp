@@ -26,6 +26,8 @@
 
 namespace omachat::server {
 
+namespace auth { struct OAuthProfile; }
+
 class ChatServer : public QObject {
     Q_OBJECT
 public:
@@ -137,6 +139,7 @@ private:
     void handleOAuthLink(Session& s, std::uint64_t rid, const proto::OAuthLinkRequest& m);
     void handleOAuthUnlink(Session& s, std::uint64_t rid, const proto::OAuthUnlinkRequest& m);
     void handleListOAuthIdentities(Session& s, std::uint64_t rid);
+    bool syncOAuthProfile(Id userId, const auth::OAuthProfile& profile);
     void handleUpdateProfile(Session& s, std::uint64_t rid, const proto::UpdateProfileRequest& m);
     QString uniqueUsernameFrom(const QString& suggestion);
 

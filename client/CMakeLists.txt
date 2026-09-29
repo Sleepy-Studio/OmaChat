@@ -45,6 +45,7 @@ qt_add_qml_module(omachat
         qml/components/MenuAction.qml
         qml/components/Check.qml
         qml/components/TriState.qml
+        qml/components/ZoomableVideo.qml
         qml/pages/DaemonPage.qml
         qml/pages/LoginPage.qml
         qml/pages/CertificatePage.qml
@@ -60,6 +61,7 @@ qt_add_qml_module(omachat
         qml/views/BottomBar.qml
         qml/views/StatusBanner.qml
         qml/views/StreamPanel.qml
+        qml/views/StreamWindow.qml
         qml/views/EmptyState.qml
         qml/dialogs/Dialog.qml
         qml/dialogs/QuickSwitcher.qml
@@ -82,7 +84,7 @@ qt_add_qml_module(omachat
         icons/smile.svg icons/link.svg icons/logout.svg icons/bell-off.svg icons/users.svg
         icons/server.svg icons/alert.svg icons/shield.svg icons/crown.svg
         icons/paperclip.svg icons/file.svg icons/download.svg
-        icons/monitor.svg icons/maximize.svg icons/minimize.svg
+        icons/monitor.svg icons/maximize.svg icons/minimize.svg icons/pop-out.svg icons/pointer.svg
 )
 
 omachat_set_warnings(omachat)
