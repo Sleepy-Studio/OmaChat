@@ -347,10 +347,12 @@ Dialog {
                 }
 
                 Repeater {
+                    // Google is temporarily left out here too (see
+                    // LoginPage.qml); add {key: "google", label: qsTr("Google")}
+                    // back once it's re-enabled.
                     model: [
                         {key: "discord", label: qsTr("Discord")},
                         {key: "github", label: qsTr("GitHub")},
-                        {key: "google", label: qsTr("Google")},
                     ]
                     delegate: RowLayout {
                         required property var modelData

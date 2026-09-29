@@ -164,7 +164,11 @@ Rectangle {
                     text: qsTr("Continue with GitHub")
                     onClicked: parent.go("github")
                 }
+                // Google sign-in is temporarily disabled (its setup isn't
+                // ready yet); flip this back to visible: true to bring it
+                // back. Server/daemon support is untouched.
                 FlatButton {
+                    visible: false
                     Layout.fillWidth: true
                     enabled: !App.authBusy
                     text: qsTr("Continue with Google")
