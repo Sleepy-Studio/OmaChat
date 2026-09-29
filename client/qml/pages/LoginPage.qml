@@ -221,7 +221,7 @@ Rectangle {
                         IconButton {
                             iconName: "trash"
                             danger: true
-                            tip: qsTr("Remove this saved account")
+                            tip: qsTr("Delete this account from the server")
                             onClicked: {
                                 removeConfirm.accountId = modelData.id
                                 removeConfirm.accountLabel = modelData.username + "@" + modelData.host
@@ -244,10 +244,10 @@ Rectangle {
         id: removeConfirm
         property string accountId
         property string accountLabel
-        title: qsTr("Remove saved account?")
-        message: qsTr("%1 will be forgotten on this device. You can add it again with its password, "
-                      + "or by signing in with its linked provider.").arg(accountLabel)
-        confirmText: qsTr("Remove")
+        title: qsTr("Permanently delete account?")
+        message: qsTr("%1 will be deleted from the server and this device. Owned servers and private "
+                      + "conversations will also be deleted. This cannot be undone. The account must be connected.").arg(accountLabel)
+        confirmText: qsTr("Delete account")
         destructive: true
         onConfirmed: App.removeAccount(accountId)
     }

@@ -344,6 +344,26 @@ bool Store::insertUser(const UserRecord& u)
         {sid(u.id), u.username, u.displayName, u.avatarUrl, u.passwordHash, qint64(u.createdAt)});
 }
 
+bool Store::deleteUser(Id userId)
+{
+    if (!begin())
+        return false;
+    const auto fail = [this] { rollback(); return false; };
+    // An owner cannot be removed while their servers still reference them.
+    if (!exec(QStringLiteral("DELETE FROM servers WHERE owner_id = ?"), {sid(userId)})
+        || !exec(QStringLiteral("DELETE FROM channels WHERE server_id IS NULL AND id IN "
+                                "(SELECT channel_id FROM dm_recipients WHERE user_id = ?)"), {sid(userId)})
+        || !exec(QStringLiteral("DELETE FROM bans WHERE user_id = ?"), {sid(userId)})
+        || !exec(QStringLiteral("DELETE FROM overrides WHERE target_type = 1 AND target_id = ?"), {sid(userId)})
+        || !exec(QStringLiteral("DELETE FROM reactions WHERE user_id = ?"), {sid(userId)})
+        || !exec(QStringLiteral("DELETE FROM attachments WHERE uploader_id = ? AND message_id IS NULL"), {sid(userId)})
+        || !exec(QStringLiteral("DELETE FROM users WHERE id = ?"), {sid(userId)}))
+        return fail();
+    if (!commit())
+        return fail();
+    return true;
+}
+
 std::optional<UserRecord> Store::userByName(const QString& username)
 {
     QSqlQuery q(m_db);

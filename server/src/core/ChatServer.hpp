@@ -141,6 +141,7 @@ private:
     void handleListOAuthIdentities(Session& s, std::uint64_t rid);
     bool syncOAuthProfile(Id userId, const auth::OAuthProfile& profile);
     void handleUpdateProfile(Session& s, std::uint64_t rid, const proto::UpdateProfileRequest& m);
+    void handleDeleteAccount(Session& s, std::uint64_t rid);
     QString uniqueUsernameFrom(const QString& suggestion);
 
     // ---- handlers: servers & channels (ServerHandlers.cpp)

@@ -35,6 +35,7 @@ protocol ([media.md](media.md)), and the local IPC protocol.
 | `Refresh{refresh_token}` | `AuthResult` with a **rotated** refresh token (old one dies) |
 | `Resume{access_token, session_id, last_sequence}` | `ResumeResult{replayed_events}` then the missed events; `ERROR_RESUME_FAILED` = authenticated but you must `Sync`; `ERROR_AUTHENTICATION` = use your refresh token |
 | `Logout` | deletes the server session |
+| `DeleteAccount` (authenticated) | deletes the signed-in server account, its sessions, owned servers, and private conversations; then closes its connections |
 | `OAuthLogin{provider, code, code_verifier, redirect_uri}` | `AuthResult`; logs in (or registers, on first use) an account tied to that provider identity |
 | `OAuthLink{provider, code, code_verifier, redirect_uri}` (authenticated) | `Ok`; attaches that provider identity to the caller's account. `ERROR_CONFLICT` if it is already linked elsewhere |
 | `OAuthUnlink{provider}` (authenticated) | `Ok`; `ERROR_BAD_REQUEST` if it would leave the account with no password and no other linked provider |
@@ -185,6 +186,8 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 |---|---|
 | daemon | `daemon.status`, `daemon.version`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe` |
 | accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.oauthLogin {host, port, provider: discord\|github\|google}`, `account.oauthLink {provider}` (attaches a provider to the signed-in account), `account.oauthUnlink {provider}`, `account.oauthIdentities` → `{identities: [{provider, username, linked_at}]}`, `account.logout`, `account.remove`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
+
+`account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
 | servers | `server.list`, `server.create`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
 | channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
 | messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search {channel \| server, query}`, `message.react`, `typing`, `presence.set` |
