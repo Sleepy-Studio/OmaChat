@@ -152,6 +152,11 @@ bool MediaTransport::sendScreenAudio(std::uint32_t timestamp, std::span<const st
     return sendPacket(PacketType::Video, FlagScreenAudio, timestamp, payload, m_videoSeq);
 }
 
+bool MediaTransport::sendPointer(std::span<const std::uint8_t> payload)
+{
+    return sendPacket(PacketType::Video, FlagPointer, 0, payload, m_videoSeq);
+}
+
 void MediaTransport::sendControl(ControlType type, std::span<const std::uint8_t> extra)
 {
     std::array<std::uint8_t, 64> payload{};

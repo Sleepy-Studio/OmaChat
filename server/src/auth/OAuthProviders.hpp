@@ -4,6 +4,7 @@
 #include "network.pb.h"
 
 #include <QObject>
+#include <QJsonObject>
 #include <QString>
 
 #include <functional>
@@ -35,7 +36,14 @@ const OAuthProviderMeta* metaByName(const QString& name);
 struct OAuthProfile {
     QString id;
     QString username;
+    QString displayName;
+    std::optional<QString> avatarUrl; // absent means the provider did not supply it
+    std::optional<QString> bio;
 };
+
+// Parse only fields suitable for OmaChat's profile. Missing provider fields
+// stay absent so a sign-in does not erase locally edited values.
+std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJsonObject& obj);
 
 // Exchanges an authorization code for an access token, then fetches the
 // provider profile. Runs entirely over HTTPS via QNetworkAccessManager;

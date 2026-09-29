@@ -89,6 +89,9 @@ public:
     void removeScreenAudio(std::uint64_t userId);
     static constexpr std::uint64_t kScreenAudioKey = std::uint64_t{1} << 63; // user ids never set bit 63
 
+    // Ephemeral laser-pointer position while sharing; see ScreenShare::sendPointer.
+    bool sendPointer(std::span<const std::uint8_t> payload);
+
 signals:
     void speakingChanged(quint64 userId, bool speaking);
     void transmittingChanged(bool transmitting);

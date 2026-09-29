@@ -152,6 +152,20 @@ void ScreenShare::requestKeyframe()
     m_wake.notify_one();
 }
 
+void ScreenShare::sendPointer(bool active, double x, double y)
+{
+    // [active:1][x:2][y:2], x/y fixed-point 0..65535 over 0.0..1.0: plenty
+    // of precision for a cursor dot, and it sidesteps float endianness.
+    const auto fixed = [](double v) {
+        return static_cast<std::uint16_t>(std::clamp(v, 0.0, 1.0) * 65535.0 + 0.5);
+    };
+    const std::uint16_t fx = fixed(x), fy = fixed(y);
+    const std::array<std::uint8_t, 5> payload{active ? std::uint8_t{1} : std::uint8_t{0},
+        static_cast<std::uint8_t>(fx >> 8), static_cast<std::uint8_t>(fx), static_cast<std::uint8_t>(fy >> 8),
+        static_cast<std::uint8_t>(fy)};
+    m_voice.sendPointer(payload);
+}
+
 void ScreenShare::encoderLoop()
 {
     H264Encoder encoder;
@@ -294,6 +308,7 @@ bool StreamViewer::open(QString* error)
 
 void StreamViewer::onPacket(const media::Header& header, std::span<const std::uint8_t> payload)
 {
+    m_lastPacketMs.store(nowMs(), std::memory_order_relaxed);
     m_sourceStream = header.streamId;
     auto frame = m_assembler.add(header, payload);
     if (!frame)
@@ -311,6 +326,16 @@ void StreamViewer::onPacket(const media::Header& header, std::span<const std::ui
     }
     m_queue.push_back(std::move(*frame));
     m_wake.notify_one();
+}
+
+void StreamViewer::onPointer(std::span<const std::uint8_t> payload)
+{
+    if (payload.size() < 5)
+        return;
+    m_pointerActive.store(payload[0] != 0, std::memory_order_relaxed);
+    m_pointerX.store(static_cast<std::uint16_t>((payload[1] << 8) | payload[2]), std::memory_order_relaxed);
+    m_pointerY.store(static_cast<std::uint16_t>((payload[3] << 8) | payload[4]), std::memory_order_relaxed);
+    m_pointerAtMs.store(nowMs(), std::memory_order_relaxed);
 }
 
 bool StreamViewer::wantsKeyframe()
@@ -341,6 +366,7 @@ void StreamViewer::decodeLoop()
             if (m_writer.write(bgra, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h),
                     static_cast<std::uint32_t>(stride))) {
                 m_decoded.fetch_add(1, std::memory_order_relaxed);
+                m_lastDecodedMs.store(nowMs(), std::memory_order_relaxed);
                 m_width = w;
                 m_height = h;
             }
@@ -352,9 +378,23 @@ void StreamViewer::decodeLoop()
 
 QJsonObject StreamViewer::statsJson() const
 {
+    const auto frames = m_frames;
+    const auto lost = m_assembler.lostFrames();
+    // "connecting" until there is enough of a sample to judge; a raw loss
+    // ratio over a handful of frames is noise, not a signal.
+    const double total = static_cast<double>(frames) + static_cast<double>(lost);
+    const QString quality = total < 20.0 ? QStringLiteral("connecting")
+        : (static_cast<double>(lost) / total > 0.08)                    ? QStringLiteral("poor")
+                                                                          : QStringLiteral("good");
     return {{"user_id", QString::number(m_userId)}, {"path", m_path}, {"width", m_width.load()},
-        {"height", m_height.load()}, {"frames", static_cast<double>(m_frames)},
-        {"decoded", static_cast<double>(m_decoded.load())}, {"lost", static_cast<double>(m_assembler.lostFrames())}};
+        {"height", m_height.load()}, {"frames", static_cast<double>(frames)},
+        {"decoded", static_cast<double>(m_decoded.load())}, {"lost", static_cast<double>(lost)}, {"quality", quality},
+        {"last_packet_ms", static_cast<double>(m_lastPacketMs.load(std::memory_order_relaxed))},
+        {"last_decoded_ms", static_cast<double>(m_lastDecodedMs.load(std::memory_order_relaxed))},
+        {"pointer_active", m_pointerActive.load(std::memory_order_relaxed)},
+        {"pointer_x", m_pointerX.load(std::memory_order_relaxed) / 65535.0},
+        {"pointer_y", m_pointerY.load(std::memory_order_relaxed) / 65535.0},
+        {"pointer_at_ms", static_cast<double>(m_pointerAtMs.load(std::memory_order_relaxed))}};
 }
 
 // ============================================================= VideoManager
@@ -371,6 +411,11 @@ VideoManager::VideoManager(voice::VoiceEngine& voice, QObject* parent)
             if (v->wantsKeyframe())
                 m_voice.requestKeyframe(v->sourceStream());
         }
+        // Already ticking while there are viewers: piggyback it to refresh
+        // the connection-quality/staleness fields in watchingJson() without
+        // a second timer.
+        if (!m_viewers.empty())
+            emit changed();
     });
 }
 
@@ -392,6 +437,10 @@ void VideoManager::onVideoPacket(const media::Header& h, std::span<const std::ui
         return;
     if (h.flags & media::FlagScreenAudio) {
         m_voice.pushScreenAudio(h.senderId, h.timestamp, payload);
+        return;
+    }
+    if (h.flags & media::FlagPointer) {
+        it->second->onPointer(payload);
         return;
     }
     it->second->onPacket(h, payload);
@@ -499,9 +548,12 @@ void VideoManager::stopAll()
 
 QJsonArray VideoManager::watchingJson() const
 {
+    // statsJson() already carries user_id/path plus the quality/staleness
+    // fields the GUI needs; broadcasting it here means no separate status
+    // plumbing for the connection-quality indicator.
     QJsonArray out;
     for (const auto& [id, v] : m_viewers)
-        out.append(QJsonObject{{"user_id", QString::number(id)}, {"path", v->path()}});
+        out.append(v->statsJson());
     return out;
 }
 

@@ -339,6 +339,11 @@ void VoiceEngine::removeScreenAudio(std::uint64_t userId)
     m_speakers.erase(userId | kScreenAudioKey);
 }
 
+bool VoiceEngine::sendPointer(std::span<const std::uint8_t> payload)
+{
+    return m_running.load() && m_transport.sendPointer(payload);
+}
+
 void VoiceEngine::requestKeyframe(std::uint32_t sourceStream)
 {
     const std::uint8_t id[4]

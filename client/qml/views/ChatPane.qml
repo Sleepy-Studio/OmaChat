@@ -112,6 +112,41 @@ Rectangle {
             }
         }
 
+        // A persistent reminder that outlives navigating away from the
+        // stream panel or collapsing it — easy to forget you're still
+        // sharing after alt-tabbing to another app.
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: Theme.px(32)
+            visible: App.sharingScreen
+            color: Theme.accent
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.px(16)
+                anchors.rightMargin: Theme.px(8)
+                spacing: Theme.px(8)
+
+                Icon {
+                    name: "monitor"
+                    size: Theme.px(15)
+                    color: Theme.accentText
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("You are sharing your screen")
+                    color: Theme.accentText
+                    font.pixelSize: Theme.px(12)
+                    font.bold: true
+                    elide: Text.ElideRight
+                }
+                FlatButton {
+                    text: qsTr("Stop sharing")
+                    onClicked: App.toggleScreenShare()
+                }
+            }
+        }
+
         // -------------------------------------------------------- messages
         Item {
             Layout.fillWidth: true

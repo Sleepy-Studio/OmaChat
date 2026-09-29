@@ -43,6 +43,7 @@ public:
     // ---- OAuth identities
     bool insertOAuthIdentity(const OAuthIdentityRecord& identity);
     std::optional<OAuthIdentityRecord> oauthIdentity(const QString& provider, const QString& providerUserId);
+    bool updateOAuthIdentityUsername(Id identityId, const QString& providerUsername);
     std::vector<OAuthIdentityRecord> oauthIdentitiesForUser(Id userId);
     bool deleteOAuthIdentity(Id userId, const QString& provider);
     bool hasPassword(Id userId);

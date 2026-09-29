@@ -45,6 +45,33 @@ QString ChatServer::uniqueUsernameFrom(const QString& suggestion)
     return base.left(20) + auth::randomToken().left(10);
 }
 
+bool ChatServer::syncOAuthProfile(Id userId, const auth::OAuthProfile& profile)
+{
+    const auto* current = m_state.user(userId);
+    if (!current)
+        return false;
+    UserRecord updated = *current;
+    if (!profile.displayName.isEmpty())
+        updated.displayName = profile.displayName;
+    if (profile.avatarUrl)
+        updated.avatarUrl = *profile.avatarUrl;
+    if (profile.bio)
+        updated.bio = *profile.bio;
+    if (updated.displayName == current->displayName && updated.avatarUrl == current->avatarUrl
+        && updated.bio == current->bio)
+        return true;
+    if (!m_store.updateUserProfile(userId, updated.displayName, updated.avatarUrl, updated.bio))
+        return false;
+    m_state.putUser(updated);
+    proto::Event event;
+    *event.mutable_user_update() = toProto(updated);
+    const auto audience = m_state.audienceOf(userId);
+    std::vector<Id> recipients(audience.begin(), audience.end());
+    recipients.push_back(userId);
+    publish(event, recipients);
+    return true;
+}
+
 void ChatServer::handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OAuthLoginRequest& m)
 {
     const auto* meta = auth::metaFor(m.provider());
@@ -77,10 +104,12 @@ void ChatServer::handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OA
             }
 
             if (const auto identity = m_store.oauthIdentity(providerName, profile->id)) {
-                if (!m_state.user(identity->userId)) {
-                    replyError(*sp, rid, proto::ERROR_INTERNAL, QStringLiteral("linked account no longer exists"));
+                if (!syncOAuthProfile(identity->userId, *profile)) {
+                    replyError(*sp, rid, proto::ERROR_INTERNAL, QStringLiteral("could not sync your profile"));
                     return;
                 }
+                if (identity->providerUsername != profile->username)
+                    m_store.updateOAuthIdentityUsername(identity->id, profile->username);
                 const QString refresh = auth::randomToken();
                 const SessionRecord session{m_ids.next(), identity->userId, auth::tokenDigest(refresh),
                     now() + std::int64_t(m_config.refreshTokenDays) * 86400000};
@@ -94,9 +123,10 @@ void ChatServer::handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OA
             // The display name comes from the provider profile; the username
             // is derived from it and made unique, since providers don't
             // guarantee OmaChat's stricter charset or uniqueness.
-            const QString displayName = validation::displayName(profile->username).value_or(providerName);
+            const QString displayName = profile->displayName.isEmpty() ? providerName : profile->displayName;
             const QString username = uniqueUsernameFrom(profile->username);
-            UserRecord user{m_ids.next(), username, displayName, QString(), QString(), now()};
+            UserRecord user{m_ids.next(), username, displayName, profile->avatarUrl.value_or(QString()),
+                QString(), now(), profile->bio.value_or(QString())};
             if (!m_store.insertUser(user)) {
                 replyError(*sp, rid, proto::ERROR_CONFLICT, QStringLiteral("could not create an account"));
                 return;
@@ -153,13 +183,23 @@ void ChatServer::handleOAuthLink(Session& s, std::uint64_t rid, const proto::OAu
                             .arg(providerName));
                     return;
                 }
-                replyOk(*sp, rid); // already linked to this same account: nothing to do
+                if (!syncOAuthProfile(userId, *profile)) {
+                    replyError(*sp, rid, proto::ERROR_INTERNAL, QStringLiteral("could not sync your profile"));
+                    return;
+                }
+                if (existing->providerUsername != profile->username)
+                    m_store.updateOAuthIdentityUsername(existing->id, profile->username);
+                replyOk(*sp, rid);
                 return;
             }
             const OAuthIdentityRecord identity{
                 m_ids.next(), userId, providerName, profile->id, profile->username, now()};
             if (!m_store.insertOAuthIdentity(identity)) {
                 replyError(*sp, rid, proto::ERROR_INTERNAL, QStringLiteral("could not link your account"));
+                return;
+            }
+            if (!syncOAuthProfile(userId, *profile)) {
+                replyError(*sp, rid, proto::ERROR_INTERNAL, QStringLiteral("account linked, but profile sync failed"));
                 return;
             }
             OMA_INFO("oauth", "linked", {"provider", providerName}, {"user", userId});

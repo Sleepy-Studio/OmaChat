@@ -42,6 +42,9 @@ public:
     void start();
     void stop();
     void requestKeyframe(); // any thread; rate-limited
+    // Sends (or clears, when `active` is false) an ephemeral pointer
+    // position, normalized to the captured frame; any thread.
+    void sendPointer(bool active, double x, double y);
     QJsonObject statsJson() const;
     const QString& previewPath() const { return m_previewPath; }
 
@@ -95,6 +98,7 @@ public:
 
     bool open(QString* error);
     void onPacket(const media::Header& header, std::span<const std::uint8_t> payload);
+    void onPointer(std::span<const std::uint8_t> payload);
     // True when a keyframe should be requested now (rate-limited).
     bool wantsKeyframe();
     std::uint32_t sourceStream() const { return m_sourceStream; }
@@ -122,6 +126,15 @@ private:
     std::atomic<std::uint64_t> m_decoded{0};
     std::atomic<int> m_width{0}, m_height{0};
     std::thread m_decoder_thread;
+    // Wall-clock milliseconds (QDateTime::currentMSecsSinceEpoch), 0 until
+    // the first event; lets the GUI tell "never connected" from "stalled".
+    std::atomic<std::int64_t> m_lastPacketMs{0};
+    std::atomic<std::int64_t> m_lastDecodedMs{0};
+
+    // Latest ephemeral pointer position from the sharer, 0..65535 over 0..1.
+    std::atomic<bool> m_pointerActive{false};
+    std::atomic<std::uint16_t> m_pointerX{0}, m_pointerY{0};
+    std::atomic<std::int64_t> m_pointerAtMs{0};
 };
 
 // Everything screen sharing for the daemon: at most one outgoing share and
@@ -149,6 +162,12 @@ public:
     // The frame file carrying the sharer's own picture-in-picture preview;
     // empty until sharing starts.
     QString selfPreviewPath() const { return m_share ? m_share->previewPath() : QString(); }
+    // No-op when not currently sharing (nothing to point at).
+    void sendPointer(bool active, double x, double y)
+    {
+        if (m_share)
+            m_share->sendPointer(active, x, y);
+    }
 
     // Returns the frame file the GUI should map.
     std::optional<QString> watch(std::uint64_t userId, QString* error);

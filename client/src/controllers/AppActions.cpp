@@ -14,6 +14,12 @@
 
 namespace omachat::client {
 
+namespace {
+// The daemon waits up to five minutes for the browser callback, then needs
+// time to exchange the code and fetch the provider profile.
+constexpr int kOAuthFlowTimeoutMs = 6 * 60 * 1000;
+}
+
 // ------------------------------------------------------------ connection
 
 void AppController::retryDaemon()
@@ -86,14 +92,18 @@ void AppController::loginWithOAuth(const QString& host, int port, const QString&
             m_authBusy = false;
             m_authError = r.ok || r.errorCode == u"CertificateError" ? QString() : r.errorMessage;
             emit authChanged();
-        });
+        }, kOAuthFlowTimeoutMs);
 }
 
 void AppController::refreshOAuthIdentities()
 {
     m_link.request(QStringLiteral("account.oauthIdentities"), {}, [this](const ipc::Reply& r) {
-        if (!r.ok)
+        if (!r.ok) {
+            m_oauthLinkMessage = r.errorMessage.isEmpty() ? tr("Could not refresh linked accounts") : r.errorMessage;
+            m_oauthLinkError = true;
+            emit oauthIdentitiesChanged();
             return;
+        }
         QVariantList list;
         for (const auto& v : r.result.value(QStringLiteral("identities")).toArray())
             list.append(v.toObject().toVariantMap());
@@ -107,17 +117,22 @@ void AppController::linkOAuthProvider(const QString& provider)
     if (m_oauthLinkBusy)
         return;
     m_oauthLinkBusy = true;
+    m_oauthLinkMessage.clear();
+    m_oauthLinkError = false;
     emit oauthIdentitiesChanged();
     // Opens the user's browser; the daemon reports back once the flow (or a
     // timeout) finishes.
     m_link.request(QStringLiteral("account.oauthLink"), {{"provider", provider}}, [this](const ipc::Reply& r) {
         m_oauthLinkBusy = false;
-        if (r.ok)
+        if (r.ok) {
+            m_oauthLinkMessage = tr("Account linked. Your profile was updated from this provider.");
             refreshOAuthIdentities();
-        else
-            showNotice(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage, true);
+        } else {
+            m_oauthLinkMessage = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
+            m_oauthLinkError = true;
+        }
         emit oauthIdentitiesChanged();
-    });
+    }, kOAuthFlowTimeoutMs);
 }
 
 void AppController::unlinkOAuthProvider(const QString& provider)
@@ -594,7 +609,17 @@ QVariantList AppController::watchedStreams() const
     for (const auto& v : voice().value(QStringLiteral("watching")).toArray()) {
         const QJsonObject w = v.toObject();
         const QString uid = w.value(QStringLiteral("user_id")).toString();
-        out.append(QVariantMap{{"userId", uid}, {"name", userName(uid)}, {"path", w.value(QStringLiteral("path"))}});
+        // last_packet_ms/last_decoded_ms are epoch ms from the daemon; 0 means
+        // "never happened yet" rather than "just now", so leave them raw and
+        // let the QML side compare against Date.now().
+        out.append(QVariantMap{{"userId", uid}, {"name", userName(uid)}, {"path", w.value(QStringLiteral("path"))},
+            {"quality", w.value(QStringLiteral("quality")).toString(QStringLiteral("connecting"))},
+            {"lastPacketMs", w.value(QStringLiteral("last_packet_ms")).toDouble()},
+            {"lastDecodedMs", w.value(QStringLiteral("last_decoded_ms")).toDouble()},
+            {"pointerActive", w.value(QStringLiteral("pointer_active")).toBool()},
+            {"pointerX", w.value(QStringLiteral("pointer_x")).toDouble()},
+            {"pointerY", w.value(QStringLiteral("pointer_y")).toDouble()},
+            {"pointerAtMs", w.value(QStringLiteral("pointer_at_ms")).toDouble()}});
     }
     return out;
 }
@@ -629,6 +654,11 @@ void AppController::watchStream(const QString& userId)
 void AppController::unwatchStream(const QString& userId)
 {
     call(QStringLiteral("stream.unwatch"), {{"user", userId}});
+}
+
+void AppController::sendPointer(bool active, double x, double y)
+{
+    m_link.request(QStringLiteral("stream.pointer"), {{"active", active}, {"x", x}, {"y", y}});
 }
 
 void AppController::setUserVolume(const QString& userId, int percent)

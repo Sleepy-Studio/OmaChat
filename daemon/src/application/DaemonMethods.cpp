@@ -1182,6 +1182,17 @@ void Daemon::registerMethods()
         r.ok();
     };
     m[QStringLiteral("stream.stats")] = [this](const QJsonObject&, const Responder& r) { r.ok(m_video->statsJson()); };
+    // Fire-and-forget: the GUI sends these continuously while pointing, so
+    // there is nothing useful to report back beyond an error.
+    m[QStringLiteral("stream.pointer")] = [this](const QJsonObject& p, const Responder& r) {
+        if (!m_video->sharing()) {
+            r.error(e::BadRequest, QStringLiteral("not sharing your screen"));
+            return;
+        }
+        m_video->sendPointer(p.value(QStringLiteral("active")).toBool(),
+            p.value(QStringLiteral("x")).toDouble(), p.value(QStringLiteral("y")).toDouble());
+        r.ok();
+    };
     m[QStringLiteral("voice.mode")] = [this](const QJsonObject& p, const Responder& r) {
         const QString mode = p.value(QStringLiteral("mode")).toString();
         if (mode != u"vad" && mode != u"ptt" && mode != u"always") {
