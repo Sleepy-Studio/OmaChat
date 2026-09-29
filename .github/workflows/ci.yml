@@ -38,7 +38,7 @@ jobs:
         run: |
           useradd -m ci || true
           chown -R ci /tmp/runtime .
-          su ci -c 'xvfb-run -a -s "-screen 0 1280x800x24" build/client/omachat --screenshot /tmp/runtime/gui.png' && test -s /tmp/runtime/gui.png
+          su ci -c 'TMPDIR=/tmp/runtime xvfb-run -a -s "-screen 0 1280x800x24" build/client/omachat --screenshot /tmp/runtime/gui.png' && test -s /tmp/runtime/gui.png
 
   format:
     runs-on: ubuntu-latest
