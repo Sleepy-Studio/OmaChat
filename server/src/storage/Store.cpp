@@ -11,7 +11,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 6;
+constexpr int kSchemaVersion = 7;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -183,6 +183,20 @@ const char* const kSchemaV6[] = {
         PRIMARY KEY(server_id, message_id)))",
 };
 
+// v7: custom per-server emoji. The image itself is an ordinary attachment
+// (reuses the existing upload pipeline); this table just names it.
+const char* const kSchemaV7[] = {
+    R"(CREATE TABLE emoji(
+        id INTEGER PRIMARY KEY,
+        server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        attachment_id INTEGER NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+        uploader_id INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(server_id, name)))",
+    "CREATE INDEX emoji_by_server ON emoji(server_id)",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -320,6 +334,8 @@ bool Store::migrate(QString* error)
     if (current < 5 && !apply(kSchemaV5))
         return false;
     if (current < 6 && !apply(kSchemaV6))
+        return false;
+    if (current < 7 && !apply(kSchemaV7))
         return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
@@ -1020,7 +1036,8 @@ std::vector<AttachmentRecord> Store::attachmentsFor(Id messageId)
 int Store::pendingAttachmentCount(Id uploaderId)
 {
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT COUNT(*) FROM attachments WHERE uploader_id = ? AND message_id IS NULL"));
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM attachments WHERE uploader_id = ? AND message_id IS NULL "
+                             "AND id NOT IN (SELECT attachment_id FROM emoji)"));
     q.addBindValue(sid(uploaderId));
     if (!q.exec() || !q.next())
         return 0;
@@ -1031,7 +1048,10 @@ std::vector<Id> Store::purgePendingAttachments(std::int64_t cutoffMs)
 {
     std::vector<Id> ids;
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT id FROM attachments WHERE message_id IS NULL AND created_at < ?"));
+    // Attachments backing a custom emoji stay message_id NULL forever, so
+    // they're excluded here rather than counted as an abandoned upload.
+    q.prepare(QStringLiteral("SELECT id FROM attachments WHERE message_id IS NULL AND created_at < ? "
+                             "AND id NOT IN (SELECT attachment_id FROM emoji)"));
     q.addBindValue(qint64(cutoffMs));
     q.exec();
     while (q.next())
@@ -1077,6 +1097,56 @@ std::vector<ReactionSummary> Store::reactions(Id messageId, Id viewerId)
     while (q.next())
         out.push_back(ReactionSummary{q.value(0).toString(), q.value(1).toUInt(), q.value(2).toBool()});
     return out;
+}
+
+bool Store::insertEmoji(const EmojiRecord& e)
+{
+    return exec(
+        QStringLiteral(
+            "INSERT INTO emoji(id, server_id, name, attachment_id, uploader_id, created_at) VALUES(?,?,?,?,?,?)"),
+        {sid(e.id), sid(e.serverId), e.name, sid(e.attachmentId), sid(e.uploaderId), qint64(e.createdAt)});
+}
+
+bool Store::deleteEmoji(Id id)
+{
+    return exec(QStringLiteral("DELETE FROM emoji WHERE id = ?"), {sid(id)});
+}
+
+std::optional<EmojiRecord> Store::emoji(Id id)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, server_id, name, attachment_id, uploader_id, created_at "
+                             "FROM emoji WHERE id = ?"));
+    q.addBindValue(sid(id));
+    q.exec();
+    if (!q.next())
+        return std::nullopt;
+    return EmojiRecord{uid(q.value(0)), uid(q.value(1)), q.value(2).toString(), uid(q.value(3)), uid(q.value(4)),
+        q.value(5).toLongLong()};
+}
+
+std::vector<EmojiRecord> Store::emojiFor(Id serverId)
+{
+    std::vector<EmojiRecord> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, server_id, name, attachment_id, uploader_id, created_at "
+                             "FROM emoji WHERE server_id = ? ORDER BY name"));
+    q.addBindValue(sid(serverId));
+    q.exec();
+    while (q.next()) {
+        out.push_back(EmojiRecord{uid(q.value(0)), uid(q.value(1)), q.value(2).toString(), uid(q.value(3)),
+            uid(q.value(4)), q.value(5).toLongLong()});
+    }
+    return out;
+}
+
+int Store::emojiCount(Id serverId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM emoji WHERE server_id = ?"));
+    q.addBindValue(sid(serverId));
+    q.exec();
+    return q.next() ? q.value(0).toInt() : 0;
 }
 
 } // namespace omachat::server

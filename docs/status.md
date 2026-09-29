@@ -1,21 +1,31 @@
 # Development status
 
 Handoff notes for whoever picks this up next (human or agent). Last updated
-2026-09-28.
+2026-09-29. "Current source" below means the working tree, including the
+unreleased CI and screen-audio changes; the latest tagged release is older.
 
 ## Where things are
 
 - Remote: `github.com/Sleepy-Studio/OmaChat` (**public** as of 2026-09-28), branch `main`.
-- Released **0.2.0** (tag `v0.2.0`). Protocol **1.2** (capabilities
+- Latest tagged release: **0.2.0** (`v0.2.0`). The current source adds OAuth,
+  profiles, server-side account deletion, and Discord channel history import
+  after that tag. These changes need a new release; do not infer their presence
+  from the installed package version `0.2.0-1` alone.
+- Protocol **1.2** (capabilities
   `search.server`, `dm.group`, `attachments.resume`, `video.h264`,
   `e2e.v1`; a 1.2 client still works with a 1.1 server). Server schema
-  **v3**, daemon local schema **v2**; both migrate forward on start.
-- 152 CTest tests pass (unit, integration, fuzz smoke), also inside the Arch
-  package's `check()`. Zero compiler warnings in `build/`. `clang-format`
-  is clean except `client/src/application/DaemonLink.hpp`, which predates
-  this work.
-- The manual test pass below was done in the sandbox on 2026-09-28 and
-  everything worked; voice between two machines is still untested.
+  **v6**, daemon local schema **v2**; both migrate forward on start. A database
+  migrated to v6 cannot be opened by the v0.2.0 server.
+- On 2026-09-29, the current source built without changes needed and all
+  **167 CTest tests passed**: 112 unit, 49 integration, 6 fuzz smoke.
+  Integration tests require permission to bind loopback TCP/UDP sockets.
+- The latest GitHub CI run for `43a145e` passed build, format, unit, fuzz,
+  integration and plugin jobs but failed its offscreen GUI screenshot step.
+  The working tree now sets a software renderer, avoids daemon startup in
+  screenshot mode, and reports image-save failures; a local offscreen run
+  produced a valid 1200×760 PNG. The CI fix is not yet verified on GitHub.
+- The manual test pass below was last done in the sandbox on 2026-09-28;
+  newer OAuth, profile, account deletion, and import paths need live checks.
 - A real `omachat-server` was also stood up on this machine (systemd,
   self-signed cert, `/var/lib/omachat`) and a real client connected,
   registered and sent a message through it — the first non-sandbox,
@@ -27,8 +37,11 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
   end to end (clean clone/build/install; container generates its cert and
   config, a real client registered and sent a message through it). AUR
   publishing needs a one-time manual step only the repo owner can do — see
-  `docs/aur-publishing.md`; the PKGBUILD itself is already verified working
-  against the real `v0.2.0` GitHub tag.
+  `docs/aur-publishing.md`; the AUR package was published for v0.2.0.
+- Project notes dated 2026-09-29 report that `43a145e` was locally installed
+  and the Coolify server redeployed (server schema 5→6, daemon connected).
+  No live Discord history has been imported. Deployment health is volatile;
+  recheck it before relying on it.
 
 ## Build, test, try it
 
@@ -72,6 +85,16 @@ VAD/PTT), reconnect/resume, CLI, Omarchy bar widget, Arch packaging, and:
   with key-change warnings and safety numbers (lock icon; CLI `e2e …`).
   Limits are in `docs/security.md`.
 - `omachatctl dm USER TEXT` works (its `dm.send` daemon method was missing).
+- OAuth sign-in and account linking for configured Discord and GitHub
+  providers, profile sync, editable member profiles, and server-side account
+  deletion. Google sign-in is temporarily hidden in the GUI.
+- DiscordChatExporter JSON channel history import in Add Server and an
+  offline operator tool for existing servers. Both preserve historical dates
+  and avoid duplicating already imported Discord message IDs. See
+  `docs/discord-migration.md` for data and format limits.
+- Screen sound is off by default in the current working tree. The GUI
+  setting and CLI `stream start --audio` explicitly opt into capturing
+  every other application's playback; this is not per-window audio.
 
 ## Needs a human (the one-shot test pass)
 
@@ -86,7 +109,7 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
    screen, then a window. Stop it from the button and from the desktop's own
    "stop sharing" control. Watching your share needs a second account in
    voice (another machine, or a second GUI instance as bob).
-3. **Watching**: `bob voice join General`, `bob stream start`; join General
+3. **Watching**: `bob voice join General`, `bob stream start --audio`; join General
    in the GUI, click bob's LIVE badge → the pattern appears above the chat
    and a 440 Hz tone plays (bob's synthetic "application sound"); maximize,
    close → the tone stops.
@@ -116,29 +139,40 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
     repeat a few of the above on the installed build. (Done 2026-09-28 for
     0.2.0: `makepkg -si` installed clean, `check()` passed, real daemon
     served a real login through a real self-hosted server.)
-11. **Make the GHCR image public** (confirmed needed 2026-09-28: the image
-    built and pushed fine, but `docker pull` unauthenticated got
-    `unauthorized` — GHCR packages under an org default to private
-    regardless of the repo's own visibility, and changing it needs your own
-    GitHub login, either flow works):
-    - Web: https://github.com/orgs/Sleepy-Studio/packages/container/omachat-server/settings
-      → Danger Zone → Change visibility → Public.
-    - CLI: `gh auth refresh -s read:packages,write:packages` (opens a
-      browser device-code prompt only you can approve), then
-      `gh api -X PATCH /orgs/Sleepy-Studio/packages/container/omachat-server -f visibility=public`.
-    - Verify: `docker logout ghcr.io && docker pull ghcr.io/sleepy-studio/omachat-server:latest`
-      should succeed with no login.
+11. **GHCR pull:** Coolify deployed the published image according to the
+    2026-09-29 project notes. An unauthenticated fresh pull has not been
+    rechecked in this status pass; do that before advertising the Docker
+    command to new hosts.
 12. ~~**AUR**~~ — done 2026-09-28: https://aur.archlinux.org/packages/omachat
     is live (`omachat 0.2.0`). Future releases: see "Every future release"
     in `docs/aur-publishing.md`.
+13. **New paths:** verify Discord and GitHub OAuth linking and profile
+    refresh against a live provider; import a representative Discord export
+    into a new server and inspect channels, replies, authors, dates and
+    attachments; delete a disposable server account and inspect remote data.
 
-## Next
+## Next release plan
 
-- Forward secrecy for encrypted conversations (a ratchet); end-to-end voice
-  and screen sharing (would need group media keys).
-- Stereo screen-share sound, and only the shared window's sound; DMA-BUF
-  capture and VAAPI encoding.
-- Test voice and screen sharing between two machines on a real network.
+**0.3.0 candidate (current feature set):** land and verify the GUI smoke
+fix on GitHub; rerun the clean package check; perform the new-path live tests
+above plus a two-machine voice/screen-share pass; update the README and
+protocol/security/media docs to describe the shipped source; tag only after
+the checks pass. Build and publish the matching Docker image and AUR update,
+then verify fresh installs. No tag, image release, or AUR update is claimed
+for this working tree.
+
+**Security/media protocol release after 0.3.0:** forward secrecy for direct
+and group conversations and end-to-end voice/screen sharing remain open.
+Use a reviewed group key protocol and authenticated frame encryption;
+key epochs, membership changes, multi-device history, downgrade prevention,
+and server visibility all need tests before claiming these properties.
+`docs/security-roadmap.md` records the design and acceptance gates. Stereo
+screen sound and selecting one application's sound also remain open. The
+ScreenCast portal does not identify the application behind a selected window,
+so per-window sound cannot be inferred from the video choice.
+
+**Other media work:** DMA-BUF capture and VAAPI/QSV encoding, after the
+two-machine baseline is measured.
 
 ## Decisions to keep
 

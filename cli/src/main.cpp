@@ -109,8 +109,8 @@ End-to-end encryption (direct and group conversations)
   e2e verify USER | unverify USER
 
 Screen sharing (in a voice channel)
-  stream start [--no-audio]               pick a screen or window in the desktop's dialog;
-                                          other applications' sound is shared unless --no-audio
+  stream start [--audio|--no-audio]       pick a screen or window in the desktop's dialog;
+                                          --audio shares all other applications' sound
   stream stop | stats
   stream watch USER | unwatch USER        watching is shown in the GUI
 
@@ -740,9 +740,14 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
     } else if (cmd == u"stream") {
         if (sub == u"start") {
             const bool silent = takeFlag(args, QStringLiteral("--no-audio"));
+            const bool audio = takeFlag(args, QStringLiteral("--audio"));
+            if (silent && audio) {
+                usageError = QStringLiteral("choose either --audio or --no-audio");
+                return std::nullopt;
+            }
             inv.method = QStringLiteral("stream.start");
-            if (silent)
-                inv.params = {{"audio", false}};
+            if (silent || audio)
+                inv.params = {{"audio", audio}};
             inv.timeoutMs = 0; // the desktop's picker waits for the user
             inv.print = [](const QJsonObject&) { out() << "sharing your screen\n"; };
         } else if (sub == u"stop") {

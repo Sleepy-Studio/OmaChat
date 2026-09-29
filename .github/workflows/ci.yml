@@ -29,6 +29,8 @@ jobs:
       - name: GUI smoke test (offscreen render)
         env:
           QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORMTHEME: ""
+          QT_QUICK_BACKEND: software
           XDG_RUNTIME_DIR: /tmp/runtime
           OMACHAT_SOCKET: /tmp/runtime/none.sock
           OMACHAT_SCREENSHOT_DELAY_MS: "1500"

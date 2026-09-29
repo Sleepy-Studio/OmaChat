@@ -42,7 +42,7 @@ struct ClientConfig {
         int maxHeight = 1080; // 360..1440; width follows the aspect ratio
         int bitrateKbps = 4000; // 500..20000
         QString encoder = QStringLiteral("auto"); // auto | nvenc | amf | x264
-        bool audio = true; // share what other applications play (never OmaChat's own sound)
+        bool audio = false; // opt in: this captures every other application's playback
     } video;
 
     struct Notifications {

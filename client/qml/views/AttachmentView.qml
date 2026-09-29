@@ -12,10 +12,13 @@ Item {
 
     readonly property bool isImage: String(attachment.mime_type).startsWith("image/")
                                     && attachment.size <= 10 * 1024 * 1024
+    readonly property bool isAudio: String(attachment.mime_type).startsWith("audio/")
+    readonly property bool isVideo: String(attachment.mime_type).startsWith("video/")
+    readonly property bool isMedia: isAudio || isVideo
     readonly property string previewUrl: App.previews[attachment.id] || ""
 
-    implicitWidth: isImage ? imageBox.width : card.width
-    implicitHeight: isImage ? imageBox.height : card.height
+    implicitWidth: isImage ? imageBox.width : (isMedia ? mediaPlayer.implicitWidth : card.width)
+    implicitHeight: isImage ? imageBox.height : (isMedia ? mediaPlayer.implicitHeight : card.height)
 
     Component.onCompleted: if (isImage) App.requestPreview(attachment.id, attachment.filename, attachment.size)
 
@@ -71,10 +74,20 @@ Item {
         HoverHandler { id: imageHover }
     }
 
+    // ---------------------------------------------------------------- media
+    MediaPlayer {
+        id: mediaPlayer
+        visible: root.isMedia
+        isVideo: root.isVideo
+        source: root.previewUrl
+        maxWidth: root.maxWidth
+        onPlayRequested: App.requestMedia(root.attachment.id, root.attachment.filename)
+    }
+
     // ----------------------------------------------------------------- file
     Rectangle {
         id: card
-        visible: !root.isImage
+        visible: !root.isImage && !root.isMedia
         width: Math.min(Theme.px(360), root.maxWidth)
         height: Theme.px(52)
         radius: Theme.px(6)

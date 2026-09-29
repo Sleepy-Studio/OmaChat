@@ -492,6 +492,14 @@ QVariantMap AppController::complete(const QString& textBeforeCursor) const
             if (info.name.startsWith(token.mid(1).toLower()))
                 candidates << u'/' + info.name;
         }
+    } else if (token.startsWith(u':') && token.size() > 1) {
+        const QString prefix = token.mid(1).toLower();
+        for (const auto& v : emojiCatalog()) {
+            const QVariantMap entry = v.toMap();
+            const QString shortcode = entry.value(QStringLiteral("shortcode")).toString();
+            if (shortcode.startsWith(prefix))
+                candidates << entry.value(QStringLiteral("glyph")).toString();
+        }
     }
     candidates.sort(Qt::CaseInsensitive);
     candidates.removeDuplicates();
@@ -636,7 +644,7 @@ void AppController::toggleScreenShare()
     emit voiceChanged();
     // The desktop shows its own screen/window picker; no timeout.
     m_link.request(
-        QStringLiteral("stream.start"), {{"audio", m_videoSettings.value(QStringLiteral("audio"), true).toBool()}},
+        QStringLiteral("stream.start"), {{"audio", m_videoSettings.value(QStringLiteral("audio"), false).toBool()}},
         [this](const ipc::Reply& r) {
             m_shareStarting = false;
             emit voiceChanged();

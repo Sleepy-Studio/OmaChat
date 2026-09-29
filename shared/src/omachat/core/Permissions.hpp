@@ -30,17 +30,18 @@ enum Permission : Bits {
     PrioritySpeaker = Bits{1} << 16,
     AttachFiles = Bits{1} << 17,
     AddReactions = Bits{1} << 18,
+    ManageEmoji = Bits{1} << 19,
     Administrator = Bits{1} << 40,
 };
 
-inline constexpr Bits kAll = ((Bits{1} << 19) - 1) | Administrator;
+inline constexpr Bits kAll = ((Bits{1} << 20) - 1) | Administrator;
 
 // Built-in role presets created with every new server.
 inline constexpr Bits kGuestDefaults = ViewChannel | ReadHistory | ConnectVoice;
 inline constexpr Bits kMemberDefaults = ViewChannel | SendMessages | ReadHistory | ConnectVoice | Speak | Stream
     | CreateInvites | AttachFiles | AddReactions;
-inline constexpr Bits kModeratorDefaults
-    = kMemberDefaults | ManageMessages | KickMembers | BanMembers | MuteMembers | MoveMembers | PrioritySpeaker;
+inline constexpr Bits kModeratorDefaults = kMemberDefaults | ManageMessages | KickMembers | BanMembers | MuteMembers
+    | MoveMembers | PrioritySpeaker | ManageEmoji;
 inline constexpr Bits kAdminDefaults
     = kModeratorDefaults | Administrator | CreateChannel | ManageChannel | ManageRoles | ManageServer;
 

@@ -124,6 +124,12 @@ public:
     bool setReaction(Id messageId, Id userId, const QString& emoji, bool add);
     std::vector<ReactionSummary> reactions(Id messageId, Id viewerId);
 
+    bool insertEmoji(const EmojiRecord& e);
+    bool deleteEmoji(Id id);
+    std::optional<EmojiRecord> emoji(Id id);
+    std::vector<EmojiRecord> emojiFor(Id serverId);
+    int emojiCount(Id serverId);
+
 private:
     bool exec(const QString& sql, const std::vector<QVariant>& binds = {});
     bool migrate(QString* error);

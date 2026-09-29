@@ -153,4 +153,13 @@ struct ReactionSummary {
     bool me = false;
 };
 
+struct EmojiRecord {
+    Id id = 0;
+    Id serverId = 0;
+    QString name;
+    Id attachmentId = 0;
+    Id uploaderId = 0;
+    std::int64_t createdAt = 0;
+};
+
 } // namespace omachat::server
