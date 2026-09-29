@@ -1,4 +1,5 @@
 #include "storage/Store.hpp"
+#include "omachat/core/Snowflake.hpp"
 
 #include "omachat/core/Log.hpp"
 
@@ -10,7 +11,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 5;
+constexpr int kSchemaVersion = 6;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -162,6 +163,26 @@ const char* const kSchemaV5[] = {
     "ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''",
 };
 
+const char* const kSchemaV6[] = {
+    "ALTER TABLE messages ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0",
+    // Existing message ids encode their creation time. Imported history can
+    // predate the OmaChat snowflake epoch, so its time must live separately.
+    "UPDATE messages SET created_at = 1735689600000 + (id >> 22)",
+    "CREATE INDEX messages_by_channel_time ON messages(channel_id, created_at DESC, id DESC)",
+    R"(CREATE TABLE discord_import_map(
+        server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        discord_id TEXT NOT NULL,
+        local_id INTEGER NOT NULL,
+        PRIMARY KEY(server_id, kind, discord_id),
+        UNIQUE(server_id, kind, local_id)))",
+    R"(CREATE TABLE discord_import_replies(
+        server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        discord_reply_id TEXT NOT NULL,
+        PRIMARY KEY(server_id, message_id)))",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -200,6 +221,7 @@ MessageRecord readMessage(const QSqlQuery& q)
     m.isAction = q.value(6).toBool();
     m.mentions = splitIds(q.value(7).toString());
     m.encrypted = q.value(8).toByteArray();
+    m.createdAt = q.value(9).toLongLong();
     return m;
 }
 
@@ -222,7 +244,7 @@ constexpr const char* kAttachmentColumns
     = "id, channel_id, uploader_id, message_id, filename, mime_type, size, sha256, created_at";
 
 constexpr const char* kMessageColumns
-    = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions, encrypted";
+    = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions, encrypted, created_at";
 
 } // namespace
 
@@ -296,6 +318,8 @@ bool Store::migrate(QString* error)
     if (current < 4 && !apply(kSchemaV4))
         return false;
     if (current < 5 && !apply(kSchemaV5))
+        return false;
+    if (current < 6 && !apply(kSchemaV6))
         return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
@@ -775,15 +799,52 @@ std::vector<InviteRecord> Store::invitesForServer(Id serverId)
 
 // ------------------------------------------------------------- messages
 
-bool Store::insertMessage(const MessageRecord& m)
+std::optional<Id> Store::discordImportId(Id serverId, const QString& kind, const QString& discordId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT local_id FROM discord_import_map WHERE server_id=? AND kind=? AND discord_id=?"));
+    q.addBindValue(sid(serverId));
+    q.addBindValue(kind);
+    q.addBindValue(discordId);
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return uid(q.value(0));
+}
+
+bool Store::rememberDiscordImport(Id serverId, const QString& kind, const QString& discordId, Id localId)
+{
+    return exec(QStringLiteral("INSERT INTO discord_import_map(server_id,kind,discord_id,local_id) "
+                               "VALUES(?,?,?,?)"), {sid(serverId), kind, discordId, sid(localId)});
+}
+
+bool Store::rememberDiscordReply(Id serverId, Id messageId, const QString& replyDiscordId)
+{
+    return exec(QStringLiteral("INSERT OR REPLACE INTO discord_import_replies(server_id,message_id,discord_reply_id) "
+                               "VALUES(?,?,?)"), {sid(serverId), sid(messageId), replyDiscordId});
+}
+
+bool Store::resolveDiscordReplies(Id serverId)
+{
+    // Keep unresolved references for a later channel batch.
+    return exec(QStringLiteral("UPDATE messages SET reply_to = "
+                               "(SELECT m.local_id FROM discord_import_replies r "
+                               "JOIN discord_import_map m ON m.server_id=r.server_id AND m.kind='message' "
+                               "AND m.discord_id=r.discord_reply_id WHERE r.message_id=messages.id) "
+                               "WHERE id IN (SELECT r.message_id FROM discord_import_replies r "
+                               "JOIN discord_import_map m ON m.server_id=r.server_id AND m.kind='message' "
+                               "AND m.discord_id=r.discord_reply_id WHERE r.server_id=?)"), {sid(serverId)});
+}
+
+bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QString& discordId)
 {
     if (!begin())
         return false;
     bool ok = exec(QStringLiteral("INSERT INTO messages(id, channel_id, author_id, content, reply_to, edited_at, "
-                                  "is_action, mentions, encrypted) VALUES(?,?,?,?,?,?,?,?,?)"),
+                                  "is_action, mentions, encrypted, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)"),
         {sid(m.id), sid(m.channelId), sid(m.authorId), m.content, sid(m.replyTo), qint64(m.editedAt),
             m.isAction ? 1 : 0, joinIds(m.mentions),
-            m.encrypted.isEmpty() ? QVariant(QMetaType(QMetaType::QByteArray)) : QVariant(m.encrypted)});
+            m.encrypted.isEmpty() ? QVariant(QMetaType(QMetaType::QByteArray)) : QVariant(m.encrypted),
+            qint64(m.createdAt ? m.createdAt : decodeSnowflake(m.id).unixMs)});
     for (const auto& a : m.attachments) {
         if (!ok)
             break;
@@ -797,6 +858,8 @@ bool Store::insertMessage(const MessageRecord& m)
         q.addBindValue(sid(m.channelId));
         ok = q.exec() && q.numRowsAffected() == 1;
     }
+    if (ok && importServerId)
+        ok = rememberDiscordImport(importServerId, QStringLiteral("message"), discordId, m.id);
     if (!ok) {
         rollback();
         return false;
@@ -863,12 +926,15 @@ std::vector<MessageRecord> Store::messagePage(Id channelId, Id beforeId, int lim
     QSqlQuery q(m_db);
     const QString cols = QLatin1StringView(kMessageColumns);
     if (beforeId) {
-        q.prepare(QStringLiteral("SELECT %1 FROM messages WHERE channel_id = ? AND id < ? ORDER BY id DESC LIMIT ?")
+        q.prepare(QStringLiteral("SELECT %1 FROM messages WHERE channel_id = ? AND (created_at, id) < "
+                                 "(SELECT created_at, id FROM messages WHERE id = ?) "
+                                 "ORDER BY created_at DESC, id DESC LIMIT ?")
                 .arg(cols));
         q.addBindValue(sid(channelId));
         q.addBindValue(sid(beforeId));
     } else {
-        q.prepare(QStringLiteral("SELECT %1 FROM messages WHERE channel_id = ? ORDER BY id DESC LIMIT ?").arg(cols));
+        q.prepare(QStringLiteral("SELECT %1 FROM messages WHERE channel_id = ? "
+                                 "ORDER BY created_at DESC, id DESC LIMIT ?").arg(cols));
         q.addBindValue(sid(channelId));
     }
     q.addBindValue(limit + 1);
@@ -902,8 +968,9 @@ std::vector<MessageRecord> Store::searchMessages(const std::vector<Id>& channelI
     QSqlQuery q(m_db);
     q.prepare(
         QStringLiteral("SELECT m.id, m.channel_id, m.author_id, m.content, m.reply_to, m.edited_at, "
-                       "m.is_action, m.mentions, m.encrypted FROM messages_fts f JOIN messages m ON m.id = f.rowid "
-                       "WHERE messages_fts MATCH ? AND m.channel_id IN (%1) ORDER BY m.id DESC LIMIT ?")
+                       "m.is_action, m.mentions, m.encrypted, m.created_at FROM messages_fts f "
+                       "JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ? "
+                       "AND m.channel_id IN (%1) ORDER BY m.created_at DESC, m.id DESC LIMIT ?")
             .arg(placeholders.join(u',')));
     q.addBindValue(terms.join(u' '));
     for (Id id : channelIds)

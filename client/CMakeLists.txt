@@ -67,6 +67,7 @@ qt_add_qml_module(omachat
         qml/dialogs/QuickSwitcher.qml
         qml/dialogs/SettingsDialog.qml
         qml/dialogs/TextPromptDialog.qml
+        qml/dialogs/CreateServerDialog.qml
         qml/dialogs/CreateChannelDialog.qml
         qml/dialogs/CommandHelp.qml
         qml/dialogs/SearchPanel.qml

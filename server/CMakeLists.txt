@@ -10,6 +10,7 @@ add_library(omachat_server_core STATIC
     src/core/AuthHandlers.cpp
     src/core/OAuthHandlers.cpp
     src/core/ServerHandlers.cpp
+    src/core/DiscordImport.cpp
     src/core/MessageHandlers.cpp
     src/core/VoiceHandlers.cpp
     src/core/ModerationHandlers.cpp

@@ -688,6 +688,39 @@ void AppController::createServer(const QString& name)
         tr("Cannot create server"));
 }
 
+void AppController::createServerFromDiscord(const QString& name, const QVariantList& files)
+{
+    if (m_discordImportBusy || files.isEmpty())
+        return;
+    QJsonArray paths;
+    for (const auto& item : files)
+        paths.append(item.toUrl().toString());
+    m_discordImportBusy = true;
+    m_discordImportStatus = tr("Checking Discord exports…");
+    emit discordImportChanged();
+    m_link.request(QStringLiteral("server.create_from_discord"), {{"name", name}, {"files", paths}},
+        [this](const ipc::Reply& r) {
+            m_discordImportBusy = false;
+            if (!r.ok) {
+                m_discordImportStatus = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
+                emit discordImportChanged();
+                emit discordImportFinished(false);
+                return;
+            }
+            const QJsonObject s = r.result;
+            const QString id = s.value(QStringLiteral("id")).toString();
+            m_discordImportStatus = tr("Imported %1 messages").arg(s.value(QStringLiteral("imported")).toInt());
+            emit discordImportChanged();
+            m_serversById.insert(id, s);
+            loadSnapshot();
+            QTimer::singleShot(200, this, [this, id] { selectServer(id); });
+            showNotice(tr("Created %1 with %2 imported messages")
+                .arg(s.value(QStringLiteral("name")).toString())
+                .arg(s.value(QStringLiteral("imported")).toInt()));
+            emit discordImportFinished(true);
+        }, 10 * 60 * 1000);
+}
+
 void AppController::joinServer(const QString& invite)
 {
     call(

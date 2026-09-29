@@ -91,7 +91,11 @@ public:
 
     // ---- messages
     // Also claims m.attachments (by id) for the message, atomically.
-    bool insertMessage(const MessageRecord& m);
+    bool insertMessage(const MessageRecord& m, Id importServerId = 0, const QString& discordId = {});
+    std::optional<Id> discordImportId(Id serverId, const QString& kind, const QString& discordId);
+    bool rememberDiscordImport(Id serverId, const QString& kind, const QString& discordId, Id localId);
+    bool rememberDiscordReply(Id serverId, Id messageId, const QString& replyDiscordId);
+    bool resolveDiscordReplies(Id serverId);
     std::optional<MessageRecord> message(Id id);
     bool updateMessage(Id id, const QString& content, std::int64_t editedAt, const std::vector<Id>& mentions,
         const QByteArray& encrypted = {});

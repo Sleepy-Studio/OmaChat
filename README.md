@@ -18,6 +18,8 @@ assistants, bots or LLM features.
 - Persistent history (paged, 50 at a time), edits, deletes, replies,
   @mentions, reactions, typing indicators, full-text search of a channel
   or a whole server
+- [Discord channel import](docs/discord-migration.md) from JSON exports in Add Server,
+  with an offline operator tool for existing servers
 - File attachments: picker, drag and drop, pasted images, inline previews;
   transfers continue after a dropped connection
 - Markdown subset (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,

@@ -14,6 +14,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonParseError>
 #include <QMimeDatabase>
 #include <QRandomGenerator>
 #include <QStandardPaths>
@@ -59,6 +61,189 @@ QString inviteTokenFrom(QString text)
     if (url.scheme() == u"omachat" && url.host() == u"invite")
         return url.path().mid(1);
     return text;
+}
+
+QString discordStringId(const QJsonValue& value)
+{
+    const QString id = value.toString();
+    if (id.isEmpty() || id.size() > 20 || id == u"0")
+        return {};
+    for (QChar ch : id)
+        if (!ch.isDigit())
+            return {};
+    return id;
+}
+
+// Only files included beside the selected export can be read. Remote URLs
+// stay as links in the message, never as untrusted download instructions.
+QString discordLocalAsset(const QFileInfo& exportFile, const QString& url)
+{
+    const QUrl parsed(url);
+    if (!parsed.isRelative() || url.startsWith(u'/') || url.startsWith(u'\\'))
+        return {};
+    const QString root = exportFile.absoluteDir().canonicalPath();
+    const QFileInfo asset(exportFile.absoluteDir().filePath(QUrl::fromPercentEncoding(parsed.path().toUtf8())));
+    const QString path = asset.canonicalFilePath();
+    if (path.isEmpty() || !asset.isFile() || !path.startsWith(root + u'/'))
+        return {};
+    return path;
+}
+
+struct DiscordImportPlan {
+    QString guildId;
+    std::vector<proto::ImportDiscordBatchRequest> batches;
+    int messages = 0;
+};
+
+std::optional<DiscordImportPlan> prepareDiscordImport(const QJsonArray& paths, QString* error)
+{
+    DiscordImportPlan plan;
+    if (paths.isEmpty() || paths.size() > 100) {
+        *error = QStringLiteral("choose 1–100 Discord JSON export files");
+        return std::nullopt;
+    }
+    QMimeDatabase mime;
+    qint64 totalBytes = 0;
+    for (const auto& value : paths) {
+        const QString path = QUrl(value.toString()).toLocalFile();
+        const QFileInfo info(path);
+        if (!info.isFile() || info.size() > 128 * 1024 * 1024 || info.size() < 2) {
+            *error = QStringLiteral("could not read export file: %1").arg(value.toString());
+            return std::nullopt;
+        }
+        totalBytes += info.size();
+        if (totalBytes > 256 * 1024 * 1024) {
+            *error = QStringLiteral("select fewer export files at once (256 MB limit)");
+            return std::nullopt;
+        }
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            *error = QStringLiteral("could not open export file: %1").arg(path);
+            return std::nullopt;
+        }
+        QJsonParseError parseError;
+        const auto doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+        const QJsonObject data = doc.object();
+        const QJsonObject channel = data.value(QStringLiteral("channel")).toObject();
+        const QString guild = discordStringId(data.value(QStringLiteral("guild")).toObject().value(QStringLiteral("id")));
+        const QString channelId = discordStringId(channel.value(QStringLiteral("id")));
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject() || !data.value(QStringLiteral("messages")).isArray()
+            || guild.isEmpty() || channelId.isEmpty() || (!plan.guildId.isEmpty() && plan.guildId != guild)) {
+            *error = QStringLiteral("invalid or mixed-guild Discord JSON exports: %1").arg(path);
+            return std::nullopt;
+        }
+        plan.guildId = guild;
+        const auto startBatch = [&] {
+            proto::ImportDiscordBatchRequest batch;
+            batch.set_guild_id(guild.toStdString());
+            batch.set_channel_id(channelId.toStdString());
+            batch.set_channel_name(channel.value(QStringLiteral("name")).toString().toStdString());
+            batch.set_channel_topic(channel.value(QStringLiteral("topic")).toString().left(512).toStdString());
+            batch.set_category_id(discordStringId(channel.value(QStringLiteral("categoryId"))).toStdString());
+            batch.set_category_name(channel.value(QStringLiteral("category")).toString().toStdString());
+            return batch;
+        };
+        auto batch = startBatch();
+        for (const auto& item : data.value(QStringLiteral("messages")).toArray()) {
+            const QJsonObject message = item.toObject();
+            const QJsonObject author = message.value(QStringLiteral("author")).toObject();
+            const QString messageId = discordStringId(message.value(QStringLiteral("id")));
+            const QString authorId = discordStringId(author.value(QStringLiteral("id")));
+            const QDateTime date = QDateTime::fromString(message.value(QStringLiteral("timestamp")).toString(), Qt::ISODateWithMs);
+            if (messageId.isEmpty() || authorId.isEmpty() || !date.isValid()) {
+                *error = QStringLiteral("message has an invalid ID or timestamp in %1").arg(path);
+                return std::nullopt;
+            }
+            auto* imported = batch.add_messages();
+            imported->set_discord_id(messageId.toStdString());
+            imported->set_author_id(authorId.toStdString());
+            imported->set_author_name(author.value(QStringLiteral("nickname")).toString(
+                author.value(QStringLiteral("name")).toString()).toStdString());
+            imported->set_timestamp(date.toMSecsSinceEpoch());
+            const QDateTime edited = QDateTime::fromString(message.value(QStringLiteral("timestampEdited")).toString(), Qt::ISODateWithMs);
+            if (edited.isValid())
+                imported->set_edited_at(edited.toMSecsSinceEpoch());
+            const QString reply = discordStringId(message.value(QStringLiteral("reference")).toObject().value(QStringLiteral("messageId")));
+            imported->set_reply_discord_id(reply.toStdString());
+            QString content = message.value(QStringLiteral("content")).toString();
+            for (const auto& attachmentValue : message.value(QStringLiteral("attachments")).toArray()) {
+                const QJsonObject attachment = attachmentValue.toObject();
+                const QString url = attachment.value(QStringLiteral("url")).toString();
+                const QString local = discordLocalAsset(info, url);
+                const QFileInfo assetInfo(local);
+                if (!url.isEmpty() && QUrl(url).isRelative()
+                    && (local.isEmpty() || assetInfo.size() > 4 * 1024 * 1024 || imported->assets_size() >= 10)) {
+                    *error = QStringLiteral("local attachment is missing, over 4 MB, or exceeds 10 files: %1").arg(url);
+                    return std::nullopt;
+                }
+                if (!local.isEmpty()) {
+                    QFile asset(local);
+                    if (asset.open(QIODevice::ReadOnly)) {
+                        auto* a = imported->add_assets();
+                        a->set_filename(attachment.value(QStringLiteral("fileName")).toString(assetInfo.fileName()).toStdString());
+                        a->set_mime_type(mime.mimeTypeForFile(assetInfo).name().toStdString());
+                        a->set_data(asset.readAll().toStdString());
+                        continue;
+                    }
+                    *error = QStringLiteral("cannot read local attachment: %1").arg(local);
+                    return std::nullopt;
+                }
+                if (!url.isEmpty())
+                    content += u'\n' + url;
+            }
+            for (const auto& embedValue : message.value(QStringLiteral("embeds")).toArray()) {
+                const QJsonObject embed = embedValue.toObject();
+                for (const char* key : {"url", "description"}) {
+                    const QString embedText = embed.value(QLatin1StringView(key)).toString();
+                    if (!embedText.isEmpty() && !content.contains(embedText))
+                        content += u'\n' + embedText;
+                }
+            }
+            for (const auto& stickerValue : message.value(QStringLiteral("stickers")).toArray()) {
+                const QString url = stickerValue.toObject().value(QStringLiteral("sourceUrl")).toString();
+                if (!url.isEmpty())
+                    content += u'\n' + url;
+            }
+            for (const auto& mentionValue : message.value(QStringLiteral("mentions")).toArray()) {
+                const QJsonObject mention = mentionValue.toObject();
+                const QString id = discordStringId(mention.value(QStringLiteral("id")));
+                if (!id.isEmpty()) {
+                    auto* person = imported->add_mentions();
+                    person->set_id(id.toStdString());
+                    person->set_name(mention.value(QStringLiteral("nickname")).toString(
+                        mention.value(QStringLiteral("name")).toString()).toStdString());
+                }
+            }
+            for (const auto& reactionValue : message.value(QStringLiteral("reactions")).toArray()) {
+                const QJsonObject reaction = reactionValue.toObject();
+                const QJsonObject emoji = reaction.value(QStringLiteral("emoji")).toObject();
+                const QString symbol = emoji.value(QStringLiteral("code")).toString(
+                    emoji.value(QStringLiteral("name")).toString());
+                if (symbol.isEmpty())
+                    continue;
+                auto* importedReaction = imported->add_reactions();
+                importedReaction->set_emoji(symbol.toStdString());
+                for (const auto& userValue : reaction.value(QStringLiteral("users")).toArray()) {
+                    const QJsonObject user = userValue.toObject();
+                    const QString id = discordStringId(user.value(QStringLiteral("id")));
+                    if (!id.isEmpty()) {
+                        auto* person = importedReaction->add_users();
+                        person->set_id(id.toStdString());
+                        person->set_name(user.value(QStringLiteral("name")).toString().toStdString());
+                    }
+                }
+            }
+            imported->set_content(content.toStdString());
+            ++plan.messages;
+            if (batch.messages_size() >= 25 || batch.ByteSizeLong() >= 4 * 1024 * 1024) {
+                plan.batches.push_back(std::move(batch));
+                batch = startBatch();
+            }
+        }
+        if (batch.messages_size() || data.value(QStringLiteral("messages")).toArray().isEmpty())
+            plan.batches.push_back(std::move(batch));
+    }
+    return plan;
 }
 
 } // namespace
@@ -675,6 +860,81 @@ void Daemon::registerMethods()
         proto::Envelope env;
         env.mutable_create_server()->set_name(p.value(QStringLiteral("name")).toString().toStdString());
         createOrJoin(std::move(env), r);
+    };
+    m[QStringLiteral("server.create_from_discord")] = [this, model](const QJsonObject& p, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("discord.import"))) {
+            r.error(e::BadRequest, QStringLiteral("this OmaChat server does not support Discord imports yet"));
+            return;
+        }
+        const auto name = validation::serverName(p.value(QStringLiteral("name")).toString());
+        if (!name) {
+            r.error(e::BadRequest, QStringLiteral("enter a server name"));
+            return;
+        }
+        QString error;
+        auto prepared = prepareDiscordImport(p.value(QStringLiteral("files")).toArray(), &error);
+        if (!prepared) {
+            r.error(e::BadRequest, error);
+            return;
+        }
+        auto plan = std::make_shared<DiscordImportPlan>(std::move(*prepared));
+        proto::Envelope env;
+        env.mutable_create_server()->set_name(name->toStdString());
+        m_conn->request(std::move(env), [this, r, model, plan](const proto::Envelope& created) {
+            if (created.has_error()) {
+                r.error(ipcErrorCode(created.error().code()), QString::fromStdString(created.error().message()));
+                return;
+            }
+            if (!created.has_server()) {
+                r.error(e::Internal, QStringLiteral("server creation returned no server"));
+                return;
+            }
+            const proto::Server server = created.server();
+            auto index = std::make_shared<size_t>(0);
+            auto imported = std::make_shared<int>(0);
+            auto next = std::make_shared<std::function<void()>>();
+            const std::weak_ptr<std::function<void()>> weakNext = next;
+            *next = [this, r, model, plan, server, index, imported, weakNext]() {
+                if (*index == plan->batches.size()) {
+                    m_conn->resync([this, r, model, server, imported](bool ok) {
+                        if (!ok) {
+                            r.error(e::NotConnected, QStringLiteral("import finished, but refresh failed; reconnect to see it"));
+                            return;
+                        }
+                        const auto* synced = model->server(server.id());
+                        QJsonObject result = model->serverJson(synced ? *synced : server);
+                        result.insert(QStringLiteral("imported"), *imported);
+                        r.ok(result);
+                    });
+                    return;
+                }
+                proto::Envelope batch;
+                auto* request = batch.mutable_import_discord_batch();
+                *request = plan->batches[*index];
+                request->set_server_id(server.id());
+                auto continuation = weakNext.lock();
+                m_conn->request(std::move(batch), [this, r, index, imported, continuation, server, plan](const proto::Envelope& reply) {
+                    if (reply.has_error() || !reply.has_import_discord_result()) {
+                        m_conn->resync([](bool) {});
+                        const QString detail = reply.has_error() ? QString::fromStdString(reply.error().message())
+                                                               : QStringLiteral("invalid import reply");
+                        r.error(e::Internal, QStringLiteral("Server was created, but Discord import stopped: %1. "
+                            "You can retry the export into this server with the offline importer. (Server ID %2)")
+                            .arg(detail, QString::number(server.id())));
+                        return;
+                    }
+                    *imported += static_cast<int>(reply.import_discord_result().imported());
+                    ++*index;
+                    m_ipc.broadcast(QStringLiteral("discord.import_progress"),
+                        {{"completed", static_cast<int>(*index)}, {"total", static_cast<int>(plan->batches.size())},
+                         {"messages", *imported}});
+                    (*continuation)();
+                }, 60000);
+            };
+            (*next)();
+        });
     };
     m[QStringLiteral("server.join")] = [createOrJoin](const QJsonObject& p, const Responder& r) {
         proto::Envelope env;

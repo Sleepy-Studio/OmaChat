@@ -177,13 +177,8 @@ Item {
     ChannelPermissionsDialog { id: channelPermissions }
     CreateChannelDialog { id: createChannelDialog }
 
-    TextPromptDialog {
+    CreateServerDialog {
         id: createServerDialog
-        title: qsTr("Create a server")
-        label: qsTr("Server name")
-        placeholder: qsTr("Sleepy Studio")
-        acceptText: qsTr("Create")
-        onAccepted: value => App.createServer(value)
     }
 
     TextPromptDialog {

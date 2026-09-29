@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 5);
+    EXPECT_EQ(store.schemaVersion(), 6);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -56,7 +56,11 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE attachments")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE device_keys")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE oauth_identities")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE discord_import_map")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE discord_import_replies")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE users DROP COLUMN bio")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP INDEX messages_by_channel_time")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN created_at")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN encrypted")));
         ASSERT_TRUE(q.exec(QStringLiteral("PRAGMA user_version=1")));
         q.finish();
@@ -67,7 +71,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 5);
+    EXPECT_EQ(store.schemaVersion(), 6);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 
@@ -193,6 +197,39 @@ TEST(ServerStore, MessagesPagingEditDeleteSearch)
     EXPECT_TRUE(store.deleteMessage(1050));
     EXPECT_TRUE(store.searchMessages({20}, QStringLiteral("unicorn"), 10).empty()) << "FTS index follows deletes";
     EXPECT_TRUE(store.reactions(1050, 1).empty());
+}
+
+TEST(ServerStore, ImportedHistoryUsesOriginalTimeForPagingAndSearch)
+{
+    QTemporaryDir dir;
+    server::Store store;
+    QString error;
+    ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error));
+    ASSERT_TRUE(store.insertUser({1, QStringLiteral("a"), QStringLiteral("A"), {}, {}, 0}));
+    server::ServerRecord srv;
+    srv.id = 10;
+    srv.name = QStringLiteral("S");
+    srv.ownerId = 1;
+    ASSERT_TRUE(store.insertServer(srv, 0));
+    ASSERT_TRUE(store.insertChannel({20, 10, QStringLiteral("general"), server::ChannelKind::Text, 0, 0, {}, {}}, 0));
+    server::MessageRecord recent{100, 20, 1, QStringLiteral("unicorn today"), 0, 0, false, {}, {}, {}};
+    recent.createdAt = 1800000000000;
+    server::MessageRecord old{200, 20, 1, QStringLiteral("unicorn past"), 0, 0, false, {}, {}, {}};
+    old.createdAt = 1577836800000; // 2020, before the snowflake epoch
+    ASSERT_TRUE(store.insertMessage(recent));
+    ASSERT_TRUE(store.insertMessage(old));
+    bool more = false;
+    auto first = store.messagePage(20, 0, 1, &more);
+    ASSERT_EQ(first.size(), 1u);
+    EXPECT_EQ(first[0].id, 100u);
+    EXPECT_TRUE(more);
+    auto second = store.messagePage(20, first[0].id, 1, &more);
+    ASSERT_EQ(second.size(), 1u);
+    EXPECT_EQ(second[0].createdAt, 1577836800000);
+    EXPECT_FALSE(more);
+    auto hits = store.searchMessages({20}, QStringLiteral("unicorn"), 2);
+    ASSERT_EQ(hits.size(), 2u);
+    EXPECT_EQ(hits[0].id, 100u);
 }
 
 TEST(ServerStore, InviteConsumptionRespectsLimit)
