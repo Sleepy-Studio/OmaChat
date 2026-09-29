@@ -62,16 +62,26 @@ level = "$OMACHAT_LOG_LEVEL"
 EOF
 fi
 
-# Appends an [oauth.PROVIDER] section the first time credentials for it are
-# supplied, even to a config.toml left over from before this existed or from
-# an earlier run without them set — but never touches one already there, so
-# hand edits (or rotating just the secret by editing the file directly)
-# survive a restart.
+# Keeps [oauth.PROVIDER] in sync with the env vars on every start, even
+# against a config.toml left over from before this existed. Unlike the rest
+# of server.toml (generated once, then yours to hand-edit), OAuth credentials
+# need to be rotatable by just changing the env var and restarting — so any
+# existing section for this provider is replaced, not left alone.
 add_oauth_section() {
     local provider="$1" client_id="$2" client_secret="$3"
     [[ -z "$client_id" || -z "$client_secret" ]] && return 0
-    grep -q "^\[oauth\.$provider\]" "$CONFIG_PATH" && return 0
-    echo "omachat-entrypoint: enabling OAuth sign-in for $provider"
+    if grep -q "^\[oauth\.$provider\]" "$CONFIG_PATH"; then
+        awk -v section="[oauth.$provider]" '
+            $0 == section { skip = 1; next }
+            skip && $0 == "" { skip = 0; next }
+            skip { next }
+            { print }
+        ' "$CONFIG_PATH" > "$CONFIG_PATH.tmp"
+        mv "$CONFIG_PATH.tmp" "$CONFIG_PATH"
+        echo "omachat-entrypoint: refreshing OAuth credentials for $provider"
+    else
+        echo "omachat-entrypoint: enabling OAuth sign-in for $provider"
+    fi
     cat >>"$CONFIG_PATH" <<EOF
 
 [oauth.$provider]
