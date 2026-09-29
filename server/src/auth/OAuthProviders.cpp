@@ -116,7 +116,15 @@ void exchangeAndFetchProfile(QNetworkAccessManager& net, const OAuthProviderMeta
     QObject::connect(tokenReply, &QNetworkReply::finished, tokenReply, [&net, &meta, tokenReply, done] {
         tokenReply->deleteLater();
         if (tokenReply->error() != QNetworkReply::NoError) {
-            OMA_WARN("oauth", "token exchange failed", {"provider", meta.name}, {"error", tokenReply->errorString()});
+            // An HTTP-level error (4xx/5xx) still has a body worth logging;
+            // only a genuine transport failure (DNS, TLS, connection
+            // refused) won't. Providers put the real reason here
+            // (invalid_client, invalid_grant, ...), which Qt's generic
+            // errorString() never captures.
+            const auto httpStatus = tokenReply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+            const QString responseBody = QString::fromUtf8(tokenReply->readAll());
+            OMA_WARN("oauth", "token exchange failed", {"provider", meta.name}, {"error", tokenReply->errorString()},
+                {"http_status", httpStatus.isValid() ? httpStatus.toInt() : -1}, {"body", responseBody.left(500)});
             done(std::nullopt, QStringLiteral("could not reach %1").arg(meta.name));
             return;
         }
