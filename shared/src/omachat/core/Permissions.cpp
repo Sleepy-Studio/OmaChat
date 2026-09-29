@@ -6,7 +6,7 @@
 namespace omachat::permissions {
 namespace {
 
-constexpr std::array<std::pair<Bits, std::string_view>, 20> kNames{{
+constexpr std::array<std::pair<Bits, std::string_view>, 21> kNames{{
     {ViewChannel, "VIEW_CHANNEL"},
     {SendMessages, "SEND_MESSAGES"},
     {ManageMessages, "MANAGE_MESSAGES"},
@@ -26,6 +26,7 @@ constexpr std::array<std::pair<Bits, std::string_view>, 20> kNames{{
     {PrioritySpeaker, "PRIORITY_SPEAKER"},
     {AttachFiles, "ATTACH_FILES"},
     {AddReactions, "ADD_REACTIONS"},
+    {ManageEmoji, "MANAGE_EMOJI"},
     {Administrator, "ADMINISTRATOR"},
 }};
 

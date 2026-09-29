@@ -14,6 +14,7 @@ TEST(ClientConfig, MissingFileYieldsDefaults)
     EXPECT_TRUE(error.isEmpty());
     EXPECT_EQ(cfg.audio.bitrate, 40000);
     EXPECT_EQ(cfg.audio.mode, InputMode::VoiceActivity);
+    EXPECT_FALSE(cfg.video.audio);
     EXPECT_EQ(cfg.shortcuts.value(QStringLiteral("quick_switcher")), QStringLiteral("Ctrl+K"));
 }
 

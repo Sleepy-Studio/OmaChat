@@ -1228,6 +1228,45 @@ void Daemon::registerMethods()
         re->set_add(p.value(QStringLiteral("add")).toBool(true));
         forward(std::move(env), r);
     };
+    // ------------------------------------------------------------- emoji
+    m[QStringLiteral("emoji.create")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id sid = serverParam(p, r);
+        if (!sid)
+            return;
+        const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
+        if (!cid)
+            return;
+        const QString name = p.value(QStringLiteral("name")).toString();
+        const QString path = p.value(QStringLiteral("file")).toString();
+        if (!requireConnected(r))
+            return;
+        uploadAll(cid, {path}, {},
+            [this, model, sid, name, r](bool ok, const QString& code, const QString& message,
+                const std::vector<proto::Attachment>& attachments) {
+                if (!ok || attachments.empty()) {
+                    r.error(ok ? e::Internal : code, ok ? QStringLiteral("upload failed") : message);
+                    return;
+                }
+                proto::Envelope env;
+                auto* ce = env.mutable_create_emoji();
+                ce->set_server_id(sid);
+                ce->set_name(name.toStdString());
+                ce->set_attachment_id(attachments.front().id());
+                forward(std::move(env), r,
+                    [model](const proto::Envelope& reply) { return model->emojiJson(reply.custom_emoji()); });
+            });
+    };
+    m[QStringLiteral("emoji.delete")] = [this](const QJsonObject& p, const Responder& r) {
+        const Id sid = serverParam(p, r);
+        if (!sid)
+            return;
+        proto::Envelope env;
+        auto* de = env.mutable_delete_emoji();
+        de->set_server_id(sid);
+        de->set_emoji_id(idFromJson(p.value(QStringLiteral("emoji"))));
+        forward(std::move(env), r);
+    };
+
     // -------------------------------------------------------- attachments
     m[QStringLiteral("attachment.download")] = [this](const QJsonObject& p, const Responder& r) {
         const Id aid = idFromJson(p.value(QStringLiteral("attachment")));

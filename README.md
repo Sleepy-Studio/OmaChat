@@ -148,7 +148,8 @@ omachatctl group create alice bob --name "Weekend"
 omachatctl voice join General
 omachatctl mute | unmute | deafen | undeafen
 omachatctl ptt begin | ptt end
-omachatctl stream start      # opens the desktop's screen/window picker
+omachatctl stream start      # opens the desktop's screen/window picker; silent by default
+omachatctl stream start --audio # opt in to all other applications' sound
 omachatctl e2e safety alice  # compare with Alice to verify encryption
 omachatctl account list      # * marks the active account; all stay connected
 omachatctl account switch 2
@@ -211,7 +212,7 @@ fps = 30                   # 5 - 60
 max_height = 1080          # 360 - 1440
 bitrate_kbps = 4000        # 500 - 20000
 encoder = "auto"           # auto | nvenc | amf | x264
-audio = true               # share other applications' sound
+audio = false              # opt in: shares all other applications' sound
 
 [notifications]
 messages = true            # direct messages
@@ -247,6 +248,10 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
 - Style: `clang-format` (`.clang-format`), warnings are kept at zero.
 
 ## Status: 0.2 (early)
+
+`v0.2.0` is the latest tag. Current `main` also contains OAuth, profiles,
+server-side account deletion and Discord history import; see
+[the development status](docs/status.md) for its verification and release plan.
 
 Working and tested (see `ctest`): accounts, sessions and resume, TLS with
 explicit certificate trust, servers, invites, categories, text and voice

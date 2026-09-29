@@ -37,6 +37,8 @@ void ChatServer::handleSync(Session& s, std::uint64_t rid)
         st->add_server_permissions(m_state.serverPermissions(sid, s.userId));
         for (const auto& [rid2, role] : srv->roles)
             *st->add_roles() = toProto(role);
+        for (const auto& e : m_store.emojiFor(sid))
+            *st->add_emoji() = toProto(e);
         for (const auto& [uid, member] : srv->members) {
             *st->add_members() = toProto(member);
             users.insert(uid);

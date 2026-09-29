@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import OmaChat
 
@@ -103,7 +104,7 @@ Dialog {
             Layout.fillWidth: true
             background: Rectangle { color: "transparent" }
             Repeater {
-                model: [qsTr("Roles"), qsTr("Members")]
+                model: [qsTr("Roles"), qsTr("Members"), qsTr("Emoji")]
                 delegate: Tab {}
             }
         }
@@ -403,6 +404,89 @@ Dialog {
                             }
                         }
                     }
+                }
+            }
+
+            // ------------------------------------------------------ emoji
+            ColumnLayout {
+                spacing: Theme.px(10)
+
+                RowLayout {
+                    visible: App.canManageEmoji
+                    Layout.fillWidth: true
+                    spacing: Theme.px(8)
+                    Field {
+                        id: newEmojiName
+                        Layout.fillWidth: true
+                        placeholder: qsTr("Emoji name (letters, numbers, underscore)")
+                    }
+                    FlatButton {
+                        text: newEmojiFile.selectedFile ? qsTr("Image chosen") : qsTr("Choose image…")
+                        onClicked: newEmojiFile.open()
+                    }
+                    FlatButton {
+                        primary: true
+                        text: qsTr("Upload")
+                        enabled: newEmojiName.text.trim().length >= 2 && String(newEmojiFile.selectedFile).length > 0
+                        onClicked: {
+                            App.createServerEmoji(newEmojiName.text.trim(), newEmojiFile.selectedFile)
+                            newEmojiName.text = ""
+                            newEmojiFile.selectedFile = undefined
+                        }
+                    }
+                }
+
+                FileDialog {
+                    id: newEmojiFile
+                    title: qsTr("Choose an emoji image")
+                    nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.gif *.webp)")]
+                }
+
+                GridView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    cellWidth: Theme.px(96)
+                    cellHeight: Theme.px(96)
+                    model: App.serverEmoji
+                    delegate: Column {
+                        id: emojiCell
+                        required property var modelData
+                        width: Theme.px(90)
+                        height: Theme.px(90)
+                        spacing: Theme.px(4)
+                        Component.onCompleted: App.requestMedia(modelData.attachment_id, modelData.name)
+                        Image {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: Theme.px(40)
+                            height: Theme.px(40)
+                            fillMode: Image.PreserveAspectFit
+                            source: App.previews[emojiCell.modelData.attachment_id] || ""
+                        }
+                        Text {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideMiddle
+                            color: Theme.textMuted
+                            font.pixelSize: Theme.px(11)
+                            text: ":" + emojiCell.modelData.name + ":"
+                        }
+                        FlatButton {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            visible: App.canManageEmoji
+                            danger: true
+                            text: qsTr("Delete")
+                            onClicked: App.deleteServerEmoji(emojiCell.modelData.id)
+                        }
+                    }
+                }
+
+                Text {
+                    visible: App.serverEmoji.length === 0
+                    Layout.fillWidth: true
+                    text: qsTr("No custom emoji yet")
+                    color: Theme.textFaint
+                    horizontalAlignment: Text.AlignHCenter
                 }
             }
         }

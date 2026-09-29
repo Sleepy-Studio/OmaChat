@@ -66,6 +66,7 @@ public:
     QJsonObject serverJson(const proto::Server& s) const;
     QJsonObject channelJson(const proto::Channel& c) const;
     QJsonObject roleJson(const proto::Role& r) const;
+    QJsonObject emojiJson(const proto::CustomEmoji& e) const;
     QJsonObject memberJson(const proto::Member& m) const;
     QJsonObject voiceStateJson(const proto::VoiceState& v) const;
     QJsonObject messageJson(const proto::ChatMessage& m) const;
@@ -88,6 +89,7 @@ private:
     std::map<Id, proto::Server> m_servers;
     std::map<Id, proto::Channel> m_channels;
     std::map<Id, proto::Role> m_roles;
+    std::map<Id, proto::CustomEmoji> m_emoji;
     std::map<std::pair<Id, Id>, proto::Member> m_members; // (server, user)
     std::map<Id, proto::User> m_users;
     Decryptor m_decryptor;

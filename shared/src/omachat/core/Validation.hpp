@@ -48,5 +48,6 @@ QString mimeType(const QString& input);
 
 // Short reaction token: 1..32 chars, no whitespace or control chars.
 std::optional<QString> reaction(const QString& input);
+std::optional<QString> emojiName(const QString& input); // custom emoji shortcode, e.g. "party_parrot"
 
 } // namespace omachat::validation

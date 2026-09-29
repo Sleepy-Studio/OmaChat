@@ -277,7 +277,7 @@ Dialog {
                 }
                 Toggle {
                     text: qsTr("Share sound from other applications")
-                    checked: App.videoSettings.audio !== false
+                    checked: App.videoSettings.audio === true
                     onToggled: App.setVideo("audio", checked)
                 }
                 Text {
@@ -285,7 +285,7 @@ Dialog {
                     wrapMode: Text.Wrap
                     color: Theme.textFaint
                     font.pixelSize: Theme.px(11)
-                    text: qsTr("Sound comes from every other program's playback, never from OmaChat itself, so the "
+                    text: qsTr("Opt in to share sound. It captures every other program's playback, even when you share one window; never OmaChat itself, so the "
                                + "call is not echoed back. Changes apply the next time you share. Automatic tries your GPU first and falls back to the CPU. "
                                + "Only the people in your voice channel who choose to watch receive your screen.")
                 }

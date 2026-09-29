@@ -62,6 +62,16 @@ QString AppController::formatSize(double bytes) const
     return tr("%1 MB").arg(bytes / (1024 * 1024), 0, 'f', 1);
 }
 
+QString AppController::formatDuration(qint64 ms) const
+{
+    if (ms < 0)
+        ms = 0;
+    const qint64 totalSeconds = ms / 1000;
+    const qint64 minutes = totalSeconds / 60;
+    const qint64 seconds = totalSeconds % 60;
+    return QStringLiteral("%1:%2").arg(minutes).arg(seconds, 2, 10, QLatin1Char('0'));
+}
+
 QVariantList AppController::uploads() const
 {
     QVariantList out;
@@ -185,6 +195,27 @@ void AppController::requestPreview(const QString& attachmentId, const QString& f
         [this, attachmentId](const ipc::Reply& r) {
             if (!r.ok)
                 return;
+            m_previews.insert(attachmentId, QUrl::fromLocalFile(r.result.value(QStringLiteral("path")).toString()));
+            emit previewsChanged();
+        },
+        0);
+}
+
+// Unlike requestPreview, this is only ever called from a deliberate tap on a
+// media attachment's play button, so it skips the eager-preview size cap.
+void AppController::requestMedia(const QString& attachmentId, const QString& filename)
+{
+    if (m_previews.contains(attachmentId) || m_previewRequests.contains(attachmentId))
+        return;
+    m_previewRequests.insert(attachmentId);
+    m_link.request(
+        QStringLiteral("attachment.download"),
+        {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}},
+        [this, attachmentId](const ipc::Reply& r) {
+            if (!r.ok) {
+                m_previewRequests.remove(attachmentId);
+                return;
+            }
             m_previews.insert(attachmentId, QUrl::fromLocalFile(r.result.value(QStringLiteral("path")).toString()));
             emit previewsChanged();
         },

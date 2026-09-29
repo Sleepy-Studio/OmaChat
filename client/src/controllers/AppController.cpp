@@ -203,6 +203,7 @@ void AppController::applySnapshot(const QJsonObject& snap)
         m_usersById.clear();
         m_membersByServer.clear();
         m_rolesById.clear();
+        m_emojiById.clear();
         m_voiceByUser.clear();
         rebuildServers();
         rebuildChannels();
@@ -225,6 +226,8 @@ void AppController::applySnapshot(const QJsonObject& snap)
     ++m_profilesRevision;
     emit profilesChanged();
     index("roles", m_rolesById);
+    index("emoji", m_emojiById);
+    emit emojiListChanged();
     m_membersByServer.clear();
     for (const auto& v : snap.value(QStringLiteral("members")).toArray()) {
         const QJsonObject m = v.toObject();
@@ -399,6 +402,16 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
     if (name == u"role.deleted") {
         m_rolesById.remove(id("role_id"));
         rebuildMembers();
+        return;
+    }
+    if (name == u"emoji.added") {
+        m_emojiById.insert(id("id"), data);
+        emit emojiListChanged();
+        return;
+    }
+    if (name == u"emoji.removed") {
+        m_emojiById.remove(id("emoji_id"));
+        emit emojiListChanged();
         return;
     }
     if (name == u"voice.state") {

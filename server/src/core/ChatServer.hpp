@@ -119,6 +119,7 @@ private:
     proto::User toProto(const UserRecord& u) const;
     proto::Channel toProto(const ChannelRecord& c, Id viewer) const;
     proto::Role toProto(const RoleRecord& r) const;
+    proto::CustomEmoji toProto(const EmojiRecord& e) const;
     proto::Member toProto(const MemberRecord& m) const;
     proto::ChatMessage toProto(const MessageRecord& m, Id viewer);
     proto::VoiceState toProto(Id userId, const VoiceRec& v) const;
@@ -187,6 +188,11 @@ private:
     void handleDownload(Session& s, std::uint64_t rid, const proto::DownloadRequest& m);
     Upload* uploadFor(Session& s, std::uint64_t rid, Id attachmentId);
     void abortUpload(Id uploadId);
+
+    // ---- handlers: custom emoji (EmojiHandlers.cpp)
+    void handleCreateEmoji(Session& s, std::uint64_t rid, const proto::CreateEmojiRequest& m);
+    void handleDeleteEmoji(Session& s, std::uint64_t rid, const proto::DeleteEmojiRequest& m);
+    void handleListEmoji(Session& s, std::uint64_t rid, const proto::ListEmojiRequest& m);
     void detachUploadsOf(quint64 connId);
     void removeAttachmentFiles(const std::vector<Id>& ids);
     void collectAttachmentGarbage();

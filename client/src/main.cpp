@@ -95,7 +95,10 @@ int main(int argc, char** argv)
                 }
             });
 
-    controller.start();
+    // The screenshot mode is a self-contained render smoke test. It must not
+    // start a user service or depend on a running daemon in CI.
+    if (!parser.isSet(screenshot))
+        controller.start();
 
     if (parser.isSet(screenshot) && window) {
         const QString path = parser.value(screenshot);
@@ -103,7 +106,12 @@ int main(int argc, char** argv)
                 ? qEnvironmentVariableIntValue("OMACHAT_SCREENSHOT_DELAY_MS")
                 : 2500,
             window, [window, path] {
-                window->grabWindow().save(path);
+                const QImage frame = window->grabWindow();
+                if (frame.isNull() || !frame.save(path)) {
+                    std::fprintf(stderr, "omachat: could not save GUI screenshot\n");
+                    QCoreApplication::exit(1);
+                    return;
+                }
                 QCoreApplication::quit();
             });
     }

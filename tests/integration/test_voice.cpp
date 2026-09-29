@@ -268,7 +268,7 @@ TEST_F(VoiceFixture, ScreenShareAudioReachesOnlyWatchers)
 {
     // Alice shares (synthetic screen + a 440 Hz tone as "application audio");
     // she does not speak, so anything Bob hears is the share.
-    ASSERT_TRUE(alice->call(QStringLiteral("stream.start"), {}, 30000).ok);
+    ASSERT_TRUE(alice->call(QStringLiteral("stream.start"), {{"audio", true}}, 30000).ok);
     ASSERT_TRUE(waitFor([&] {
         return alice->call(QStringLiteral("stream.stats"))
                    .result.value("share")

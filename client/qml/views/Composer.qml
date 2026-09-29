@@ -280,6 +280,28 @@ Item {
             }
 
             IconButton {
+                id: emojiButton
+                anchors.right: attachButton.left
+                anchors.bottom: parent.bottom
+                anchors.margins: Theme.px(4)
+                iconName: "smile"
+                tip: qsTr("Insert emoji")
+                enabled: App.canSend
+                onClicked: composerEmojiPicker.open()
+
+                EmojiPicker {
+                    id: composerEmojiPicker
+                    x: parent.width - width
+                    y: -height - Theme.px(4)
+                    onEmojiSelected: glyph => {
+                        input.insert(input.cursorPosition, glyph)
+                        input.forceActiveFocus()
+                    }
+                }
+            }
+
+            IconButton {
+                id: attachButton
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: Theme.px(4)

@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 6);
+    EXPECT_EQ(store.schemaVersion(), 7);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -53,6 +53,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         db.setDatabaseName(path);
         ASSERT_TRUE(db.open());
         QSqlQuery q(db);
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE emoji")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE attachments")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE device_keys")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE oauth_identities")));
@@ -71,7 +72,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 6);
+    EXPECT_EQ(store.schemaVersion(), 7);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 

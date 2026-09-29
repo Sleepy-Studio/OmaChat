@@ -232,18 +232,37 @@ Item {
                             Repeater {
                                 model: root.reactions
                                 delegate: Rectangle {
+                                    id: pill
                                     required property var modelData
+                                    readonly property bool isCustom: modelData.emoji.length > 2
+                                        && modelData.emoji.startsWith(":") && modelData.emoji.endsWith(":")
+                                    readonly property var custom: isCustom
+                                        ? App.customEmojiByName(modelData.emoji.slice(1, -1)) : ({})
+                                    readonly property bool hasCustomImage: isCustom && custom && custom.attachment_id
                                     implicitHeight: Theme.px(24)
-                                    implicitWidth: rlabel.implicitWidth + Theme.px(14)
+                                    implicitWidth: rrow.implicitWidth + Theme.px(14)
                                     radius: Theme.px(6)
                                     color: modelData.me ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18) : Theme.surface
                                     border.color: modelData.me ? Theme.accent : Theme.border
-                                    Text {
-                                        id: rlabel
+                                    Component.onCompleted: if (hasCustomImage) App.requestMedia(custom.attachment_id, custom.name)
+                                    Row {
+                                        id: rrow
                                         anchors.centerIn: parent
-                                        text: parent.modelData.emoji + " " + parent.modelData.count
-                                        color: Theme.text
-                                        font.pixelSize: Theme.px(12)
+                                        spacing: Theme.px(4)
+                                        Image {
+                                            visible: pill.hasCustomImage
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: Theme.px(16)
+                                            height: Theme.px(16)
+                                            fillMode: Image.PreserveAspectFit
+                                            source: pill.hasCustomImage ? (App.previews[pill.custom.attachment_id] || "") : ""
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: (pill.hasCustomImage ? "" : pill.modelData.emoji + " ") + pill.modelData.count
+                                            color: Theme.text
+                                            font.pixelSize: Theme.px(12)
+                                        }
                                     }
                                     MouseArea {
                                         anchors.fill: parent
@@ -278,7 +297,11 @@ Item {
                 Row {
                     id: actionRow
                     anchors.centerIn: parent
-                    IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "smile"; tip: qsTr("React 👍"); onClicked: App.toggleReaction(root.messageId, "👍") }
+                    IconButton {
+                        implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15)
+                        iconName: "smile"; tip: qsTr("Add reaction")
+                        onClicked: reactionPicker.open()
+                    }
                     IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "reply"; tip: qsTr("Reply"); visible: App.canSend; onClicked: App.startReply(root.messageId) }
                     IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "edit"; tip: qsTr("Edit"); visible: root.isOwn; onClicked: root.editRequested(root.messageId) }
                     IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "copy"; tip: qsTr("Copy text"); onClicked: App.copyText(root.content) }
@@ -291,6 +314,13 @@ Item {
                 acceptedButtons: Qt.RightButton
                 z: -1
                 onClicked: root.ListView.view.openMenu(root)
+            }
+
+            EmojiPicker {
+                id: reactionPicker
+                x: parent.width - width
+                y: -height - Theme.px(4)
+                onEmojiSelected: glyph => App.toggleReaction(root.messageId, glyph)
             }
         }
     }

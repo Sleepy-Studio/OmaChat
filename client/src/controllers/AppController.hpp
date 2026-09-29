@@ -107,6 +107,8 @@ class AppController : public QObject {
     // roles of the selected server, highest first (RoleActions.cpp)
     Q_PROPERTY(QVariantList serverRoles READ serverRoles NOTIFY rolesChanged)
     Q_PROPERTY(QVariantList serverMembers READ serverMembers NOTIFY rolesChanged)
+    Q_PROPERTY(QVariantList serverEmoji READ serverEmoji NOTIFY emojiListChanged)
+    Q_PROPERTY(bool canManageEmoji READ canManageEmoji NOTIFY rolesChanged)
     Q_PROPERTY(QVariantList channelOverrides READ channelOverrides NOTIFY overridesChanged)
     Q_PROPERTY(QVariantList safetyNumbers READ safetyNumbers NOTIFY safetyChanged)
     Q_PROPERTY(QVariantList permissionCatalog READ permissionCatalog CONSTANT)
@@ -386,10 +388,22 @@ public:
     Q_INVOKABLE bool pasteAttachment();
     Q_INVOKABLE void removePendingFile(int index);
     Q_INVOKABLE void requestPreview(const QString& attachmentId, const QString& filename, double size);
+    Q_INVOKABLE void requestMedia(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void saveAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void openAttachment(const QString& attachmentId, const QString& filename, double size);
     Q_INVOKABLE void cancelTransfer(const QString& transferId);
     Q_INVOKABLE QString formatSize(double bytes) const;
+    Q_INVOKABLE QString formatDuration(qint64 ms) const;
+
+    // emoji
+    Q_INVOKABLE QVariantList emojiCatalog() const;
+    Q_INVOKABLE QVariantList recentEmoji() const;
+    Q_INVOKABLE void noteEmojiUsed(const QString& glyph);
+    QVariantList serverEmoji() const;
+    bool canManageEmoji() const;
+    Q_INVOKABLE void createServerEmoji(const QString& name, const QUrl& fileUrl);
+    Q_INVOKABLE void deleteServerEmoji(const QString& emojiId);
+    Q_INVOKABLE QVariantMap customEmojiByName(const QString& name) const; // {} if unknown on this server
 
     // ---- roles and channel permissions (RoleActions.cpp)
     Q_INVOKABLE void createRole(const QString& name);
@@ -425,6 +439,7 @@ signals:
     void attachmentsChanged();
     void previewsChanged();
     void rolesChanged();
+    void emojiListChanged();
     void safetyChanged();
     void overridesChanged();
     // QML hooks
@@ -477,6 +492,7 @@ private:
     QHash<QString, QJsonObject> m_channelsById;
     QHash<QString, QJsonObject> m_usersById;
     QHash<QString, QJsonObject> m_rolesById;
+    QHash<QString, QJsonObject> m_emojiById;
     QVariantList m_channelOverrides;
     QVariantList m_safetyNumbers;
     bool m_addingAccount = false;
@@ -488,6 +504,8 @@ private:
     QHash<QString, int> m_unread;
     QHash<QString, int> m_mentions;
     QSet<QString> m_mutedChannels;
+    mutable QVariantList m_emojiCatalog; // lazily loaded from the bundled resource, then cached
+    QStringList m_recentEmoji; // most-recently-used first, session-local only
     QSet<QString> m_collapsed;
     QHash<QString, double> m_userVolumes;
     QHash<QString, QString> m_lastChannelForServer;

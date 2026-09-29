@@ -110,6 +110,18 @@ std::optional<QString> reaction(const QString& input)
     return s;
 }
 
+std::optional<QString> emojiName(const QString& input)
+{
+    const QString s = input.trimmed().toLower();
+    if (s.size() < 2 || s.size() > 32)
+        return std::nullopt;
+    for (QChar c : s) {
+        if (!(c.isLetterOrNumber() && c.unicode() < 128) && c != u'_')
+            return std::nullopt;
+    }
+    return s;
+}
+
 std::optional<QString> filename(const QString& input)
 {
     QString out;

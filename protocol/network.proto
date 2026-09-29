@@ -93,6 +93,19 @@ message Reaction {
   bool me = 3;
 }
 
+// A server's custom emoji. `emoji` fields elsewhere (Reaction.emoji,
+// ReactionRequest.emoji, ReactionEvent.emoji) reference these by
+// ":name:" instead of a Unicode glyph; the client resolves the name against
+// the server's synced CustomEmoji list to render the image.
+message CustomEmoji {
+  uint64 id = 1;
+  uint64 server_id = 2;
+  string name = 3;
+  uint64 attachment_id = 4;
+  uint64 uploader_id = 5;
+  int64 created_at = 6;
+}
+
 message ChatMessage {
   uint64 id = 1;
   uint64 channel_id = 2;
@@ -299,6 +312,7 @@ message SyncState {
   uint64 last_sequence = 8;
   repeated uint64 server_permissions_server_ids = 9;
   repeated uint64 server_permissions = 10;  // parallel to the field above
+  repeated CustomEmoji emoji = 11;
 }
 
 // --------------------------------------------------------- server/guilds
@@ -459,6 +473,28 @@ message ReactionRequest {
   bool add = 3;
 }
 
+// -------------------------------------------------------- custom emoji
+//
+// Creation reuses an attachment already uploaded via the normal upload flow
+// (begin_upload/upload_chunk/finish_upload); this message only registers it
+// as a named emoji for the server.
+message CreateEmojiRequest {
+  uint64 server_id = 1;
+  string name = 2;
+  uint64 attachment_id = 3;
+}
+message DeleteEmojiRequest {
+  uint64 server_id = 1;
+  uint64 emoji_id = 2;
+}
+message ListEmojiRequest {
+  uint64 server_id = 1;
+}
+message EmojiList {
+  uint64 server_id = 1;
+  repeated CustomEmoji emoji = 2;
+}
+
 // ------------------------------------------------------------- attachments
 //
 // Files travel over the control connection in chunks of at most
@@ -574,6 +610,7 @@ message ServerDeleteEvent { uint64 server_id = 1; }
 message RoleDeleteEvent { uint64 server_id = 1; uint64 role_id = 2; }
 message PresenceEvent { uint64 user_id = 1; UserStatus status = 2; }
 message ReactionEvent { uint64 channel_id = 1; uint64 message_id = 2; string emoji = 3; uint64 user_id = 4; bool add = 5; }
+message EmojiEvent { uint64 server_id = 1; CustomEmoji emoji = 2; bool added = 3; }
 message PermissionsChangedEvent { uint64 server_id = 1; }
 message DeviceKeysChangedEvent { uint64 user_id = 1; }
 
@@ -601,6 +638,7 @@ message Event {
     User user_update = 28;
     PermissionsChangedEvent permissions_changed = 29;
     DeviceKeysChangedEvent device_keys_changed = 30;
+    EmojiEvent emoji_changed = 31;
   }
 }
 
@@ -711,5 +749,12 @@ message Envelope {
     RevokeDeviceKeyRequest revoke_device_key = 121;
     GetDeviceKeysRequest get_device_keys = 122;
     DeviceKeyList device_key_list = 123;
+
+    // custom emoji
+    CreateEmojiRequest create_emoji = 140;
+    DeleteEmojiRequest delete_emoji = 141;
+    ListEmojiRequest list_emoji = 142;
+    EmojiList emoji_list = 143;
+    CustomEmoji custom_emoji = 144;
   }
 }

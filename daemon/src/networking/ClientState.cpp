@@ -89,6 +89,8 @@ void ClientState::reset(const proto::SyncState& sync)
         m_channels[c.id()] = c;
     for (const auto& r : sync.roles())
         m_roles[r.id()] = r;
+    for (const auto& e : sync.emoji())
+        m_emoji[e.id()] = e;
     for (const auto& m : sync.members())
         m_members[{m.server_id(), m.user_id()}] = m;
     for (const auto& u : sync.users())
@@ -286,6 +288,7 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
             std::erase_if(m_channels, [&](const auto& kv) { return kv.second.server_id() == l.server_id(); });
             std::erase_if(m_members, [&](const auto& kv) { return kv.first.first == l.server_id(); });
             std::erase_if(m_roles, [&](const auto& kv) { return kv.second.server_id() == l.server_id(); });
+            std::erase_if(m_emoji, [&](const auto& kv) { return kv.second.server_id() == l.server_id(); });
             out.push_back({QStringLiteral("server.removed"),
                 {{"server_id", idString(l.server_id())}, {"reason", QString::fromStdString(l.reason())}}});
         } else {
@@ -333,6 +336,18 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
         out.push_back({QStringLiteral("role.deleted"),
             {{"server_id", idString(e.role_delete().server_id())}, {"role_id", idString(e.role_delete().role_id())}}});
         break;
+    case proto::Event::kEmojiChanged: {
+        const auto& ee = e.emoji_changed();
+        if (ee.added()) {
+            m_emoji[ee.emoji().id()] = ee.emoji();
+            out.push_back({QStringLiteral("emoji.added"), emojiJson(ee.emoji())});
+        } else {
+            m_emoji.erase(ee.emoji().id());
+            out.push_back({QStringLiteral("emoji.removed"),
+                {{"server_id", idString(ee.server_id())}, {"emoji_id", idString(ee.emoji().id())}}});
+        }
+        break;
+    }
     case proto::Event::kTyping:
         out.push_back({QStringLiteral("typing"),
             {{"channel_id", idString(e.typing().channel_id())}, {"user_id", idString(e.typing().user_id())}}});
@@ -351,6 +366,7 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
         std::erase_if(m_channels, [&](const auto& kv) { return kv.second.server_id() == sid; });
         std::erase_if(m_members, [&](const auto& kv) { return kv.first.first == sid; });
         std::erase_if(m_roles, [&](const auto& kv) { return kv.second.server_id() == sid; });
+        std::erase_if(m_emoji, [&](const auto& kv) { return kv.second.server_id() == sid; });
         out.push_back({QStringLiteral("server.removed"), {{"server_id", idString(sid)}, {"reason", "deleted"}}});
         break;
     }
@@ -429,6 +445,13 @@ QJsonObject ClientState::channelJson(const proto::Channel& c) const
             c.type() == proto::CHANNEL_TYPE_TEXT        ? !permissions::has(p, permissions::SendMessages)
                 : c.type() == proto::CHANNEL_TYPE_VOICE ? !permissions::has(p, permissions::ConnectVoice)
                                                         : false}};
+}
+
+QJsonObject ClientState::emojiJson(const proto::CustomEmoji& e) const
+{
+    return {{"id", idString(e.id())}, {"server_id", idString(e.server_id())},
+        {"name", QString::fromStdString(e.name())}, {"attachment_id", idString(e.attachment_id())},
+        {"uploader_id", idString(e.uploader_id())}};
 }
 
 QJsonObject ClientState::roleJson(const proto::Role& r) const
@@ -520,13 +543,15 @@ QJsonObject ClientState::messageJson(const proto::ChatMessage& m) const
 
 QJsonObject ClientState::snapshotJson() const
 {
-    QJsonArray servers, channels, roles, members, users, voice;
+    QJsonArray servers, channels, roles, members, users, voice, emoji;
     for (const auto& [id, s] : m_servers)
         servers.append(serverJson(s));
     for (const auto& [id, c] : m_channels)
         channels.append(channelJson(c));
     for (const auto& [id, r] : m_roles)
         roles.append(roleJson(r));
+    for (const auto& [id, e] : m_emoji)
+        emoji.append(emojiJson(e));
     for (const auto& [key, m] : m_members)
         members.append(memberJson(m));
     for (const auto& [id, u] : m_users)
@@ -534,7 +559,8 @@ QJsonObject ClientState::snapshotJson() const
     for (const auto& [id, v] : m_voice)
         voice.append(voiceStateJson(v));
     return {{"valid", m_valid}, {"self", m_valid ? userJson(m_self) : QJsonObject{}}, {"servers", servers},
-        {"channels", channels}, {"roles", roles}, {"members", members}, {"users", users}, {"voice_states", voice}};
+        {"channels", channels}, {"roles", roles}, {"emoji", emoji}, {"members", members}, {"users", users},
+        {"voice_states", voice}};
 }
 
 } // namespace omachat::daemon

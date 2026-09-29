@@ -322,6 +322,15 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kReaction:
         handleReaction(s, rid, env.reaction());
         break;
+    case P::kCreateEmoji:
+        handleCreateEmoji(s, rid, env.create_emoji());
+        break;
+    case P::kDeleteEmoji:
+        handleDeleteEmoji(s, rid, env.delete_emoji());
+        break;
+    case P::kListEmoji:
+        handleListEmoji(s, rid, env.list_emoji());
+        break;
     case P::kTyping:
         handleTyping(s, rid, env.typing());
         break;
@@ -528,6 +537,18 @@ proto::Role ChatServer::toProto(const RoleRecord& r) const
     p.set_position(r.position);
     p.set_color(r.color);
     p.set_is_default(r.isDefault);
+    return p;
+}
+
+proto::CustomEmoji ChatServer::toProto(const EmojiRecord& e) const
+{
+    proto::CustomEmoji p;
+    p.set_id(e.id);
+    p.set_server_id(e.serverId);
+    p.set_name(e.name.toStdString());
+    p.set_attachment_id(e.attachmentId);
+    p.set_uploader_id(e.uploaderId);
+    p.set_created_at(e.createdAt);
     return p;
 }
 

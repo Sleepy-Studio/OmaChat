@@ -189,7 +189,7 @@ private:
     H264Encoder::Settings m_settings;
     SourceFactory m_factory;
     AudioFactory m_audioFactory;
-    bool m_shareAudio = true;
+    bool m_shareAudio = false;
     QString m_frameDir;
     std::unique_ptr<ScreenShare> m_share;
     bool m_shareLive = false;

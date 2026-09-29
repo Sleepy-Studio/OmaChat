@@ -133,8 +133,9 @@ up to 2560×1600 BGRA pixels. The daemon writes; the GUI copies the newest
 complete frame at display rate. The file is deleted when you stop
 watching. Decoded streams larger than that are scaled down.
 
-**Sound.** A share carries the sound of every *other* application
-(`[video] audio`, Settings → Screen sharing, `stream start --no-audio`).
+**Sound.** Sound is off by default in current source. Opt in with
+`[video] audio = true`, Settings → Screen sharing, or `stream start --audio`.
+A share with sound carries every *other* application's playback.
 The daemon creates a PipeWire input node that is not auto-connected and
 links each application playback stream (`Stream/Output/Audio`) into its
 single mono port, following streams as they appear and go; PipeWire mixes
@@ -149,4 +150,5 @@ shows as speaking, and deafen silences it.
 
 **Not yet:** stereo, sound of only the shared window (the portal does not
 say which program owns it), DMA-BUF (zero-copy) capture, VAAPI/QSV
-encoding.
+encoding. `docs/security-roadmap.md` records the media encryption and sound
+privacy plan.

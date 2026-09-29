@@ -1,4 +1,4 @@
-find_package(Qt6 REQUIRED COMPONENTS Gui Qml Quick QuickControls2 DBus Svg)
+find_package(Qt6 REQUIRED COMPONENTS Gui Qml Quick QuickControls2 DBus Svg Multimedia)
 
 # Pure composer logic (markdown sanitizer, command parser, paste handling),
 # unit tested.
@@ -25,6 +25,7 @@ qt_add_qml_module(omachat
         src/controllers/AppController.hpp src/controllers/AppController.cpp
         src/controllers/AppActions.cpp
         src/controllers/AttachmentActions.cpp
+        src/controllers/EmojiActions.cpp
         src/controllers/RoleActions.cpp
         src/models/RowListModel.hpp src/models/RowListModel.cpp
         src/models/MessageListModel.hpp src/models/MessageListModel.cpp
@@ -46,6 +47,8 @@ qt_add_qml_module(omachat
         qml/components/Check.qml
         qml/components/TriState.qml
         qml/components/ZoomableVideo.qml
+        qml/components/MediaPlayer.qml
+        qml/components/EmojiPicker.qml
         qml/pages/DaemonPage.qml
         qml/pages/LoginPage.qml
         qml/pages/CertificatePage.qml
@@ -86,6 +89,8 @@ qt_add_qml_module(omachat
         icons/server.svg icons/alert.svg icons/shield.svg icons/crown.svg
         icons/paperclip.svg icons/file.svg icons/download.svg
         icons/monitor.svg icons/maximize.svg icons/minimize.svg icons/pop-out.svg icons/pointer.svg
+        icons/play.svg icons/pause.svg
+        data/emoji.json
 )
 
 omachat_set_warnings(omachat)
@@ -93,7 +98,7 @@ omachat_set_warnings(omachat)
 target_include_directories(omachat PRIVATE src src/controllers src/platform src/models src/views)
 target_link_libraries(omachat PRIVATE
     omachat_shared omachat_client_text
-    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Svg
+    Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Svg Qt6::Multimedia
     tomlplusplus::tomlplusplus)
 set_target_properties(omachat PROPERTIES WIN32_EXECUTABLE OFF MACOSX_BUNDLE OFF)
 install(TARGETS omachat RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

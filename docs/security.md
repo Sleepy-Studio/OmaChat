@@ -83,9 +83,10 @@ Built-in roles on server creation: Guest (default, read + join voice), Member
   permission change that removes `STREAM` ends the share.
 - What is shared is chosen in the desktop's own portal dialog; OmaChat never
   captures the screen without it.
-- Shared sound is everything other applications play while you share (not
-  only the shared window; not OmaChat's own sound). Turn it off in
-  Settings → Screen sharing or with `stream start --no-audio`.
+- Shared sound is off by default in current source. If you turn it on in
+  Settings → Screen sharing or pass `stream start --audio`, it captures
+  everything other applications play (not only the shared window; not
+  OmaChat's own sound). An existing explicit `audio = true` setting is kept.
 - Decoded frames sit in `$XDG_RUNTIME_DIR/omachat/video` (0700 directory,
   0600 files) and are deleted when you stop watching.
 
@@ -140,7 +141,7 @@ Limits, stated plainly:
 
 - **No forward secrecy.** Device keys are long-lived; someone who steals a
   device key can read every message that was ever sent to that device.
-  (A ratchet is future work.)
+  The migration plan is in `docs/security-roadmap.md`.
 - A device added later cannot read messages sent before it existed.
   Removing an account from a device revokes its key.
 - Trust on first use: the very first key the server hands you for a
@@ -154,3 +155,7 @@ Limits, stated plainly:
   above): the server can read server channels and, because it re-seals media
   per recipient, could decode voice and video. Self-host a server you trust.
 - Account recovery, 2FA, OIDC/passkeys.
+
+Forward secrecy and end-to-end media are future protocol work, not properties
+of the current build. The threat model and acceptance gates are in
+`docs/security-roadmap.md`.
