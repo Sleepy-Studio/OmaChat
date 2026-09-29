@@ -256,6 +256,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kCreateServer:
         handleCreateServer(s, rid, env.create_server());
         break;
+    case P::kImportDiscordBatch:
+        handleImportDiscordBatch(s, rid, env.import_discord_batch());
+        break;
     case P::kLeaveServer:
         handleLeaveServer(s, rid, env.leave_server());
         break;
@@ -545,7 +548,7 @@ proto::ChatMessage ChatServer::toProto(const MessageRecord& m, Id viewer)
     p.set_id(m.id);
     p.set_channel_id(m.channelId);
     p.set_author_id(m.authorId);
-    p.set_timestamp(decodeSnowflake(m.id).unixMs);
+    p.set_timestamp(m.createdAt ? m.createdAt : decodeSnowflake(m.id).unixMs);
     p.set_content(m.content.toStdString());
     p.set_reply_to(m.replyTo);
     p.set_edited_at(m.editedAt);

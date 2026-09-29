@@ -147,6 +147,7 @@ private:
     // ---- handlers: servers & channels (ServerHandlers.cpp)
     void handleSync(Session& s, std::uint64_t rid);
     void handleCreateServer(Session& s, std::uint64_t rid, const proto::CreateServerRequest& m);
+    void handleImportDiscordBatch(Session& s, std::uint64_t rid, const proto::ImportDiscordBatchRequest& m);
     void handleLeaveServer(Session& s, std::uint64_t rid, const proto::LeaveServerRequest& m);
     void handleDeleteServer(Session& s, std::uint64_t rid, const proto::DeleteServerRequest& m);
     void handleCreateInvite(Session& s, std::uint64_t rid, const proto::CreateInviteRequest& m);

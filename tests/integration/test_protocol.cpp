@@ -362,6 +362,76 @@ TEST_F(Fixture, HistoryIsPaginated)
     EXPECT_FALSE(older->message_page().has_more());
 }
 
+TEST_F(Fixture, DiscordImportPreservesHistoryAndRequiresOwner)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    const auto serverId = createServer(*alice, "Imported place");
+    ASSERT_TRUE(join(*bob, invite(*alice, serverId)).has_server());
+    proto::Envelope request;
+    auto* batch = request.mutable_import_discord_batch();
+    batch->set_server_id(serverId);
+    batch->set_guild_id("999");
+    batch->set_channel_id("888");
+    batch->set_channel_name("old-chat");
+    batch->set_category_id("777");
+    batch->set_category_name("Archive");
+    auto* first = batch->add_messages();
+    first->set_discord_id("100");
+    first->set_author_id("111");
+    first->set_author_name("Old Alice");
+    first->set_timestamp(1577836800000); // 2020
+    first->set_content("first from Discord");
+    auto* asset = first->add_assets();
+    asset->set_filename("photo.png");
+    asset->set_mime_type("image/png");
+    asset->set_data("image bytes");
+    auto* second = batch->add_messages();
+    second->set_discord_id("101");
+    second->set_author_id("111");
+    second->set_author_name("Old Alice");
+    second->set_timestamp(1577836801000);
+    second->set_content("reply from Discord");
+    second->set_reply_discord_id("100");
+    auto* mention = second->add_mentions();
+    mention->set_id("222");
+    mention->set_name("Mentioned user");
+    auto* reaction = second->add_reactions();
+    reaction->set_emoji("👍");
+    auto* reactor = reaction->add_users();
+    reactor->set_id("222");
+    reactor->set_name("Mentioned user");
+
+    auto denied = bob->call(request);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+    auto imported = alice->call(request);
+    ASSERT_TRUE(imported && imported->has_import_discord_result()) << (imported ? imported->DebugString() : "no reply");
+    const auto channelId = imported->import_discord_result().channel_id();
+    EXPECT_EQ(imported->import_discord_result().imported(), 2u);
+    auto again = alice->call(request);
+    ASSERT_TRUE(again && again->has_import_discord_result());
+    EXPECT_EQ(again->import_discord_result().imported(), 0u);
+
+    const auto state = sync(*bob);
+    EXPECT_EQ(channelNamed(state, "old-chat", proto::CHANNEL_TYPE_TEXT), channelId);
+    proto::Envelope history;
+    history.mutable_get_messages()->set_channel_id(channelId);
+    auto page = bob->call(history);
+    ASSERT_TRUE(page && page->has_message_page());
+    ASSERT_EQ(page->message_page().messages_size(), 2);
+    const auto& newest = page->message_page().messages(0);
+    const auto& oldest = page->message_page().messages(1);
+    EXPECT_EQ(newest.timestamp(), 1577836801000);
+    EXPECT_EQ(newest.reply_to(), oldest.id());
+    EXPECT_EQ(newest.mention_ids_size(), 1);
+    ASSERT_EQ(newest.reactions_size(), 1);
+    EXPECT_EQ(newest.reactions(0).count(), 1u);
+    EXPECT_EQ(oldest.timestamp(), 1577836800000);
+    ASSERT_EQ(oldest.attachments_size(), 1);
+    EXPECT_EQ(oldest.attachments(0).filename(), "photo.png");
+}
+
 TEST_F(Fixture, PermissionsAreEnforcedServerSide)
 {
     auto alice = client("alice");

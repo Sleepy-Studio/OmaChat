@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 
 #include <gtest/gtest.h>
@@ -114,6 +115,61 @@ TEST_F(DaemonFixture, MessagesFlowBetweenDaemonsWithEvents)
     auto pres = bob->waitEvent(
         QStringLiteral("presence"), [](const QJsonObject& p) { return p.value("status").toString() == u"dnd"; });
     EXPECT_TRUE(pres);
+}
+
+TEST_F(DaemonFixture, CreateServerFromDiscordExport)
+{
+    ASSERT_TRUE(alice->registerOn(server, QStringLiteral("alice"), QStringLiteral("alice-password")));
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString assetPath = dir.filePath(QStringLiteral("photo.txt"));
+    QFile asset(assetPath);
+    ASSERT_TRUE(asset.open(QIODevice::WriteOnly));
+    ASSERT_EQ(asset.write("archived attachment"), 19);
+    asset.close();
+    const QString exportPath = dir.filePath(QStringLiteral("channel.json"));
+    QJsonObject message{{"id", "100"}, {"timestamp", "2020-01-01T00:00:00.000Z"},
+        {"content", "old message"}, {"author", QJsonObject{{"id", "111"}, {"name", "Former member"}}},
+        {"attachments", QJsonArray{QJsonObject{{"url", "photo.txt"}, {"fileName", "photo.txt"}}}}};
+    QJsonObject data{{"guild", QJsonObject{{"id", "999"}}},
+        {"channel", QJsonObject{{"id", "888"}, {"name", "old-chat"}}},
+        {"messages", QJsonArray{message}}};
+    QFile exportFile(exportPath);
+    ASSERT_TRUE(exportFile.open(QIODevice::WriteOnly));
+    QJsonObject missingMessage = message;
+    missingMessage.insert("attachments", QJsonArray{QJsonObject{{"url", "missing.txt"}, {"fileName", "missing.txt"}}});
+    data["messages"] = QJsonArray{missingMessage};
+    exportFile.write(QJsonDocument(data).toJson());
+    exportFile.close();
+    const QJsonObject params{{"name", "Imported place"},
+        {"files", QJsonArray{QUrl::fromLocalFile(exportPath).toString()}}};
+    const auto refused = alice->call(QStringLiteral("server.create_from_discord"), params);
+    EXPECT_FALSE(refused.ok);
+    EXPECT_TRUE(alice->call(QStringLiteral("server.list")).result.value("servers").toArray().isEmpty());
+
+    ASSERT_TRUE(exportFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    data["messages"] = QJsonArray{message};
+    exportFile.write(QJsonDocument(data).toJson());
+    exportFile.close();
+
+    const auto created = alice->call(QStringLiteral("server.create_from_discord"), params, 30000);
+    ASSERT_TRUE(created.ok) << created.errorMessage.toStdString();
+    EXPECT_EQ(created.result.value("imported").toInt(), 1);
+    const auto channels = alice->call(QStringLiteral("channel.list"), {{"server", created.result.value("id")}});
+    ASSERT_TRUE(channels.ok);
+    QString importedId;
+    for (const auto& value : channels.result.value("channels").toArray()) {
+        const auto channel = value.toObject();
+        if (channel.value("name").toString() == u"old-chat")
+            importedId = channel.value("id").toString();
+    }
+    ASSERT_FALSE(importedId.isEmpty());
+    const auto history = alice->call(QStringLiteral("message.history"), {{"channel", importedId}});
+    ASSERT_TRUE(history.ok);
+    const auto messages = history.result.value("messages").toArray();
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_EQ(messages[0].toObject().value("timestamp").toDouble(), 1577836800000.0);
+    EXPECT_EQ(messages[0].toObject().value("attachments").toArray().size(), 1);
 }
 
 TEST_F(DaemonFixture, ProfileUpdateFlowsThroughIpcAndRefreshesSelf)

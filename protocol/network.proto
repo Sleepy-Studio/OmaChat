@@ -304,6 +304,44 @@ message SyncState {
 // --------------------------------------------------------- server/guilds
 
 message CreateServerRequest { string name = 1; }
+// Owner-only, repeat-safe import from DiscordChatExporter JSON. One request
+// carries one bounded batch so even a large channel stays below frame limits.
+message DiscordImportAsset {
+  string filename = 1;
+  string mime_type = 2;
+  bytes data = 3;
+}
+message DiscordImportPerson { string id = 1; string name = 2; }
+message DiscordImportReaction {
+  string emoji = 1;
+  repeated DiscordImportPerson users = 2;
+}
+message DiscordImportMessage {
+  string discord_id = 1;
+  string author_id = 2;
+  string author_name = 3;
+  int64 timestamp = 4;
+  int64 edited_at = 5;
+  string content = 6;
+  string reply_discord_id = 7;
+  repeated DiscordImportAsset assets = 8;
+  repeated DiscordImportPerson mentions = 9;
+  repeated DiscordImportReaction reactions = 10;
+}
+message ImportDiscordBatchRequest {
+  uint64 server_id = 1;
+  string guild_id = 2;
+  string channel_id = 3;
+  string channel_name = 4;
+  string channel_topic = 5;
+  string category_id = 6;
+  string category_name = 7;
+  repeated DiscordImportMessage messages = 8;
+}
+message ImportDiscordBatchResult {
+  uint64 channel_id = 1;
+  uint32 imported = 2;
+}
 message LeaveServerRequest { uint64 server_id = 1; }
 message DeleteServerRequest { uint64 server_id = 1; }
 message CreateInviteRequest {
@@ -601,6 +639,8 @@ message Envelope {
 
     // servers / channels
     CreateServerRequest create_server = 30;
+    ImportDiscordBatchRequest import_discord_batch = 47;
+    ImportDiscordBatchResult import_discord_result = 48;
     LeaveServerRequest leave_server = 31;
     DeleteServerRequest delete_server = 32;
     CreateInviteRequest create_invite = 33;

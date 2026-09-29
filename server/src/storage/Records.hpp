@@ -138,6 +138,7 @@ struct MessageRecord {
     std::vector<Id> mentions;
     std::vector<AttachmentRecord> attachments; // declared last: aggregate init keeps working
     QByteArray encrypted; // end-to-end payload (DMs); content is empty then
+    std::int64_t createdAt = 0; // 0 for legacy callers; Store derives it from the id
 };
 
 struct DeviceKeyRecord {

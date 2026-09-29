@@ -86,6 +86,7 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("video.h264");
     r->add_capabilities("e2e.v1");
     r->add_capabilities("profile.v1");
+    r->add_capabilities("discord.import");
     r->set_instance_name(m_config.instanceName.toStdString());
     r->set_registration_open(m_config.registrationOpen);
     r->set_media_udp_port(mediaPort());

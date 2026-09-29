@@ -21,7 +21,8 @@ protocol ([media.md](media.md)), and the local IPC protocol.
    Current version: **1.2**. Minor versions negotiate through capability
    strings (`resume`, `voice.opus`, `media.chacha20poly1305`, `search.fts`,
    `attachments`; since 1.2 `search.server`, `dm.group`,
-   `attachments.resume`, `video.h264`, `e2e.v1`; `profile.v1` adds editable profiles). `HelloReply.max_upload_bytes` is 0
+   `attachments.resume`, `video.h264`, `e2e.v1`; `profile.v1` adds editable profiles;
+   `discord.import` enables owner-only channel history import). `HelloReply.max_upload_bytes` is 0
    when a server takes no attachments. Clients check a capability before
    using the feature, so a 1.2 client works with a 1.1 server.
 3. Unauthenticated connections have 30 s to finish authenticating.
@@ -74,6 +75,14 @@ Ids sort by creation time. In JSON (IPC) ids are **decimal strings**,
 because JavaScript numbers cannot hold 64-bit integers.
 
 ### Message history
+
+`ImportDiscordBatch{server_id, guild_id, channel_id, channel_name,
+category_id, messages}` is owner-only and returns `ImportDiscordBatchResult`.
+Each batch has at most 50 messages; the source Discord IDs make retries
+idempotent. Imported timestamps are stored separately from OmaChat IDs, so
+history and search order remain correct for messages before 2025. The local
+`server.create_from_discord` IPC method reads selected DiscordChatExporter JSON
+files, creates a server, and streams bounded batches to this request.
 
 `GetMessages{channel_id, before_message_id, limit}` → newest-first page,
 default 50, max 100, with `has_more`. `SearchMessages` uses SQLite FTS5;
@@ -187,8 +196,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | daemon | `daemon.status`, `daemon.version`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe` |
 | accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.oauthLogin {host, port, provider: discord\|github\|google}`, `account.oauthLink {provider}` (attaches a provider to the signed-in account), `account.oauthUnlink {provider}`, `account.oauthIdentities` → `{identities: [{provider, username, linked_at}]}`, `account.logout`, `account.remove`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
 
-`account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
-| servers | `server.list`, `server.create`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
+| servers | `server.list`, `server.create`, `server.create_from_discord {name, files}`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
 | channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
 | messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search {channel \| server, query}`, `message.react`, `typing`, `presence.set` |
 | profile | `profile.update {display_name, avatar_url, bio}` |
@@ -199,6 +207,8 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | audio | `audio.devices`, `audio.settings`, `audio.set`, `audio.user_volume` |
 | moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update` (fields left out are kept), `role.delete`, `role.assign`, `override.set {channel, role \| user, allow, deny, remove?}`, `override.list` |
 | ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.reload` |
+
+`account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
 
 Push-to-talk held by a client is released automatically if that client
 disconnects.

@@ -85,6 +85,8 @@ class AppController : public QObject {
 
     // navigation
     Q_PROPERTY(QString selectedServerId READ selectedServerId NOTIFY selectionChanged)
+    Q_PROPERTY(bool discordImportBusy READ discordImportBusy NOTIFY discordImportChanged)
+    Q_PROPERTY(QString discordImportStatus READ discordImportStatus NOTIFY discordImportChanged)
     Q_PROPERTY(QString selectedServerName READ selectedServerName NOTIFY selectionChanged)
     Q_PROPERTY(bool homeSelected READ homeSelected NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelId READ selectedChannelId NOTIFY selectionChanged)
@@ -208,6 +210,8 @@ public:
     }
 
     QString selectedServerId() const { return m_selectedServer; }
+    bool discordImportBusy() const { return m_discordImportBusy; }
+    QString discordImportStatus() const { return m_discordImportStatus; }
     QString selectedServerName() const;
     bool homeSelected() const { return m_selectedServer == u"home"; }
     QString selectedChannelId() const { return m_selectedChannel; }
@@ -338,6 +342,7 @@ public:
     Q_INVOKABLE int userVolume(const QString& userId) const;
 
     Q_INVOKABLE void createServer(const QString& name);
+    Q_INVOKABLE void createServerFromDiscord(const QString& name, const QVariantList& files);
     Q_INVOKABLE void joinServer(const QString& invite);
     Q_INVOKABLE void createInvite();
     Q_INVOKABLE void leaveServer(const QString& id);
@@ -410,6 +415,8 @@ signals:
     void oauthIdentitiesChanged();
     void voiceChanged();
     void selectionChanged();
+    void discordImportChanged();
+    void discordImportFinished(bool success);
     void replyChanged();
     void typingChanged();
     void noticeChanged();
@@ -458,6 +465,8 @@ private:
     void persistSelection();
 
     config::ClientConfig m_config;
+    bool m_discordImportBusy = false;
+    QString m_discordImportStatus;
     DaemonLink m_link;
     MarkdownRenderer m_markdown;
 

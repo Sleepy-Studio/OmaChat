@@ -274,6 +274,14 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         onTransferProgress(data);
         return;
     }
+    if (name == u"discord.import_progress") {
+        m_discordImportStatus = tr("Importing Discord history: %1 of %2 batches, %3 messages")
+                                    .arg(data.value(QStringLiteral("completed")).toInt())
+                                    .arg(data.value(QStringLiteral("total")).toInt())
+                                    .arg(data.value(QStringLiteral("messages")).toInt());
+        emit discordImportChanged();
+        return;
+    }
     if (name == u"state.reset") {
         loadSnapshot();
         return;
