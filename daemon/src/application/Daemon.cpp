@@ -458,6 +458,7 @@ QJsonObject Daemon::statusJson() const
         {"ptt", m_voice && m_voice->pushToTalk()}, {"transmitting", m_voice && m_voice->transmitting()},
         {"registered", m_voice && m_voice->active() && m_voice->statsJson().value("registered").toBool()},
         {"participants", participants}, {"count", participants.size()}, {"streaming", m_video && m_video->sharing()},
+        {"self_preview", m_video ? m_video->selfPreviewPath() : QString()},
         {"watching", m_video ? m_video->watchingJson() : QJsonArray()}};
     status.insert(QStringLiteral("voice"), voice);
     status.insert(QStringLiteral("audio"),

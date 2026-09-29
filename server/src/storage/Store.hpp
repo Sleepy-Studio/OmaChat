@@ -38,6 +38,7 @@ public:
     std::optional<UserRecord> userByName(const QString& username);
     std::vector<UserRecord> allUsers();
     bool updateUserPasswordHash(Id userId, const QString& hash);
+    bool updateUserProfile(Id userId, const QString& displayName, const QString& avatarUrl, const QString& bio);
 
     // ---- OAuth identities
     bool insertOAuthIdentity(const OAuthIdentityRecord& identity);

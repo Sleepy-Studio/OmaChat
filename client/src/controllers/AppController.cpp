@@ -40,7 +40,7 @@ AppController::AppController(const config::ClientConfig& config, QObject* parent
           "collapsed", "speaking", "userMuted", "userDeafened", "userId", "presence", "voiceCount", "topic",
           "streaming"})
     , m_members(
-          {"key", "userId", "name", "username", "status", "nameColor", "section", "isOwner", "inVoice", "speaking"})
+          {"key", "userId", "name", "username", "avatarUrl", "status", "nameColor", "section", "isOwner", "inVoice", "speaking"})
     , m_switcher({"key", "kind", "itemId", "label", "detail"})
     , m_searchResults({"key", "itemId", "channelId", "channel", "author", "preview", "time"})
 {
@@ -222,6 +222,8 @@ void AppController::applySnapshot(const QJsonObject& snap)
     index("servers", m_serversById);
     index("channels", m_channelsById);
     index("users", m_usersById);
+    ++m_profilesRevision;
+    emit profilesChanged();
     index("roles", m_rolesById);
     m_membersByServer.clear();
     for (const auto& v : snap.value(QStringLiteral("members")).toArray()) {
@@ -358,8 +360,15 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
     }
     if (name == u"user.updated") {
         m_usersById.insert(id("id"), data);
+        ++m_profilesRevision;
+        emit profilesChanged();
+        if (id("id") == selfId()) {
+            m_self = data;
+            emit statusChanged();
+        }
         rebuildMembers();
         rebuildChannels();
+        m_messages.refreshRendering();
         return;
     }
     if (name == u"presence") {
@@ -878,6 +887,7 @@ void AppController::rebuildMembers()
         const bool isOnline = st != u"offline";
         rows.append({{"key", uid}, {"userId", uid}, {"name", userName(uid)},
             {"username", m_usersById.value(uid).value(QStringLiteral("username")).toString()}, {"status", st},
+            {"avatarUrl", m_usersById.value(uid).value(QStringLiteral("avatar_url")).toString()},
             {"nameColor", userColor(uid)},
             {"section", isOnline ? tr("Online — %1").arg(online) : tr("Offline — %1").arg(userIds.size() - online)},
             {"isOwner", uid == ownerId}, {"inVoice", m_voiceByUser.contains(uid)},

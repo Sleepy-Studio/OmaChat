@@ -36,6 +36,7 @@ Rectangle {
             required property string userId
             required property string name
             required property string username
+            required property string avatarUrl
             required property string status
             required property string nameColor
             required property bool isOwner
@@ -64,6 +65,7 @@ Rectangle {
                 Avatar {
                     userId: row.userId
                     name: row.name
+                    avatarUrl: row.avatarUrl
                     status: row.status
                     speaking: row.speaking
                     size: Theme.px(30)
@@ -98,8 +100,8 @@ Rectangle {
 
         Keys.onReturnPressed: {
             const r = model.get(currentIndex)
-            if (r.userId !== App.selfId)
-                App.openDm(r.userId)
+            profileDialog.userId = r.userId
+            profileDialog.open()
         }
     }
 
@@ -109,6 +111,7 @@ Rectangle {
         property string userName
         property bool isOwner
         readonly property bool isSelf: userId === App.selfId
+        MenuAction { text: qsTr("View profile"); onTriggered: { profileDialog.userId = memberMenu.userId; profileDialog.open() } }
         MenuAction { text: qsTr("Message"); enabled: !memberMenu.isSelf; onTriggered: App.openDm(memberMenu.userId) }
         MenuAction { text: qsTr("Mention"); onTriggered: App.copyText("@" + App.members.get(App.members.indexOf("userId", memberMenu.userId)).username) }
         MenuAction { text: qsTr("Copy user ID"); onTriggered: App.copyText(memberMenu.userId) }
@@ -123,6 +126,70 @@ Rectangle {
             danger: true
             enabled: App.canBan && !memberMenu.isSelf && !memberMenu.isOwner
             onTriggered: { modConfirm.action = "ban"; modConfirm.open() }
+        }
+    }
+
+    Dialog {
+        id: profileDialog
+        property string userId
+        readonly property var profile: {
+            App.profilesRevision
+            return App.userProfile(userId)
+        }
+        title: qsTr("Profile")
+        width: Math.min(Theme.px(380), (parent ? parent.width : 420) - Theme.px(32))
+        contentItem: ColumnLayout {
+            spacing: Theme.px(12)
+            RowLayout {
+                Layout.fillWidth: true
+                Text { text: profileDialog.title; color: Theme.text; font.bold: true; font.pixelSize: Theme.px(16); Layout.fillWidth: true }
+                IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: profileDialog.close() }
+            }
+            Avatar {
+                Layout.alignment: Qt.AlignHCenter
+                userId: profileDialog.userId
+                name: profileDialog.profile.display_name || ""
+                avatarUrl: profileDialog.profile.avatar_url || ""
+                size: Theme.px(72)
+            }
+            Text {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: profileDialog.profile.display_name || ""
+                color: Theme.text
+                font.bold: true
+                font.pixelSize: Theme.px(17)
+            }
+            Text {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: "@" + (profileDialog.profile.username || "")
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(12)
+            }
+            Text {
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                text: profileDialog.profile.status === "dnd" ? qsTr("Do not disturb")
+                    : profileDialog.profile.status === "idle" ? qsTr("Idle")
+                    : profileDialog.profile.status === "online" ? qsTr("Online") : qsTr("Offline")
+                color: Theme.textMuted
+                font.pixelSize: Theme.px(12)
+            }
+            Text {
+                Layout.fillWidth: true
+                text: profileDialog.profile.bio || qsTr("No bio yet")
+                color: profileDialog.profile.bio ? Theme.text : Theme.textFaint
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                font.pixelSize: Theme.px(13)
+            }
+            FlatButton {
+                Layout.alignment: Qt.AlignHCenter
+                visible: profileDialog.userId !== App.selfId
+                text: qsTr("Message")
+                onClicked: { profileDialog.close(); App.openDm(profileDialog.userId) }
+            }
         }
     }
 

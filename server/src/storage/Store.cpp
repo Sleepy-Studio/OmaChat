@@ -10,7 +10,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 4;
+constexpr int kSchemaVersion = 5;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -158,6 +158,10 @@ const char* const kSchemaV4[] = {
     "CREATE INDEX oauth_identities_by_user ON oauth_identities(user_id)",
 };
 
+const char* const kSchemaV5[] = {
+    "ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT ''",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -291,6 +295,8 @@ bool Store::migrate(QString* error)
         return false;
     if (current < 4 && !apply(kSchemaV4))
         return false;
+    if (current < 5 && !apply(kSchemaV5))
+        return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
         if (error)
@@ -341,23 +347,23 @@ bool Store::insertUser(const UserRecord& u)
 std::optional<UserRecord> Store::userByName(const QString& username)
 {
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT id, username, display_name, avatar_url, password_hash, created_at "
+    q.prepare(QStringLiteral("SELECT id, username, display_name, avatar_url, password_hash, created_at, bio "
                              "FROM users WHERE username = ?"));
     q.addBindValue(username);
     if (!q.exec() || !q.next())
         return std::nullopt;
     return UserRecord{uid(q.value(0)), q.value(1).toString(), q.value(2).toString(), q.value(3).toString(),
-        q.value(4).toString(), q.value(5).toLongLong()};
+        q.value(4).toString(), q.value(5).toLongLong(), q.value(6).toString()};
 }
 
 std::vector<UserRecord> Store::allUsers()
 {
     std::vector<UserRecord> out;
     QSqlQuery q(m_db);
-    q.exec(QStringLiteral("SELECT id, username, display_name, avatar_url, created_at FROM users"));
+    q.exec(QStringLiteral("SELECT id, username, display_name, avatar_url, created_at, bio FROM users"));
     while (q.next()) {
         out.push_back(UserRecord{uid(q.value(0)), q.value(1).toString(), q.value(2).toString(), q.value(3).toString(),
-            QString(), q.value(4).toLongLong()});
+            QString(), q.value(4).toLongLong(), q.value(5).toString()});
     }
     return out;
 }
@@ -365,6 +371,12 @@ std::vector<UserRecord> Store::allUsers()
 bool Store::updateUserPasswordHash(Id userId, const QString& hash)
 {
     return exec(QStringLiteral("UPDATE users SET password_hash = ? WHERE id = ?"), {hash, sid(userId)});
+}
+
+bool Store::updateUserProfile(Id userId, const QString& displayName, const QString& avatarUrl, const QString& bio)
+{
+    return exec(QStringLiteral("UPDATE users SET display_name = ?, avatar_url = ?, bio = ? WHERE id = ?"),
+        {displayName, avatarUrl, bio, sid(userId)});
 }
 
 // ------------------------------------------------------------ oauth

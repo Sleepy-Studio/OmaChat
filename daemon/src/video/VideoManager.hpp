@@ -31,15 +31,19 @@ namespace omachat::video {
 class ScreenShare : public QObject {
     Q_OBJECT
 public:
-    // `audio` may be null: a share without sound.
+    // `audio` may be null: a share without sound. `previewPath`, if not
+    // empty, gets the raw captured frames so the sharer can see their own
+    // screen without a full encode/decode round trip.
     ScreenShare(std::unique_ptr<ScreenSource> source, std::unique_ptr<ScreenAudioSource> audio,
-        const H264Encoder::Settings& settings, voice::VoiceEngine& voice, QObject* parent = nullptr);
+        const H264Encoder::Settings& settings, voice::VoiceEngine& voice, QString previewPath,
+        QObject* parent = nullptr);
     ~ScreenShare() override;
 
     void start();
     void stop();
     void requestKeyframe(); // any thread; rate-limited
     QJsonObject statsJson() const;
+    const QString& previewPath() const { return m_previewPath; }
 
 signals:
     void started();
@@ -60,6 +64,8 @@ private:
     std::uint64_t m_audioFrames = 0; // audio thread writes, read under m_statsMutex
     H264Encoder::Settings m_settings;
     voice::VoiceEngine& m_voice;
+    QString m_previewPath;
+    media::FrameBufferWriter m_previewWriter;
 
     std::mutex m_mutex;
     std::condition_variable m_wake;
@@ -140,6 +146,9 @@ public:
     void startSharing(std::function<void(bool ok, const QString& error)> done);
     void stopSharing();
     bool sharing() const { return m_share != nullptr && m_shareLive; }
+    // The frame file carrying the sharer's own picture-in-picture preview;
+    // empty until sharing starts.
+    QString selfPreviewPath() const { return m_share ? m_share->previewPath() : QString(); }
 
     // Returns the frame file the GUI should map.
     std::optional<QString> watch(std::uint64_t userId, QString* error);

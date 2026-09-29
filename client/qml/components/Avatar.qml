@@ -8,6 +8,10 @@ Item {
     property string userId
     property string name
     property string status: ""
+    property string avatarUrl: {
+        App.profilesRevision
+        return App.userProfile(userId).avatar_url || ""
+    }
     property bool speaking: false
     property real size: Theme.px(32)
 
@@ -21,9 +25,21 @@ Item {
         color: Theme.userColor(root.userId)
         border.width: root.speaking ? Math.max(2, Theme.px(2)) : 0
         border.color: Theme.success
+        clip: true
+
+        Image {
+            id: avatarImage
+            anchors.fill: parent
+            source: root.avatarUrl.startsWith("https://") ? root.avatarUrl : ""
+            sourceSize.width: root.size * 2
+            sourceSize.height: root.size * 2
+            fillMode: Image.PreserveAspectCrop
+            visible: status === Image.Ready
+        }
 
         Text {
             anchors.centerIn: parent
+            visible: avatarImage.status !== Image.Ready
             text: {
                 const parts = root.name.trim().split(/\s+/)
                 let s = parts.length > 0 && parts[0].length > 0 ? parts[0][0] : "?"

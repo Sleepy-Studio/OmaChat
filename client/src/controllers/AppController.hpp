@@ -55,6 +55,9 @@ class AppController : public QObject {
     Q_PROPERTY(QString selfName READ selfName NOTIFY statusChanged)
     Q_PROPERTY(QString selfUsername READ selfUsername NOTIFY statusChanged)
     Q_PROPERTY(QString selfStatus READ selfStatus NOTIFY statusChanged)
+    Q_PROPERTY(QString selfBio READ selfBio NOTIFY statusChanged)
+    Q_PROPERTY(QString selfAvatarUrl READ selfAvatarUrl NOTIFY statusChanged)
+    Q_PROPERTY(int profilesRevision READ profilesRevision NOTIFY profilesChanged)
 
     // voice
     Q_PROPERTY(bool voiceJoined READ voiceJoined NOTIFY voiceChanged)
@@ -75,6 +78,8 @@ class AppController : public QObject {
     Q_PROPERTY(bool shareStarting READ shareStarting NOTIFY voiceChanged)
     // [{userId, name, path}] for every stream being watched, newest last
     Q_PROPERTY(QVariantList watchedStreams READ watchedStreams NOTIFY voiceChanged)
+    // Frame file for the local user's own picture-in-picture preview while sharing.
+    Q_PROPERTY(QString selfPreviewPath READ selfPreviewPath NOTIFY voiceChanged)
 
     // navigation
     Q_PROPERTY(QString selectedServerId READ selectedServerId NOTIFY selectionChanged)
@@ -173,6 +178,9 @@ public:
     QString selfName() const { return m_self.value(QStringLiteral("display_name")).toString(); }
     QString selfUsername() const { return m_self.value(QStringLiteral("username")).toString(); }
     QString selfStatus() const { return m_self.value(QStringLiteral("status")).toString(QStringLiteral("offline")); }
+    QString selfBio() const { return m_self.value(QStringLiteral("bio")).toString(); }
+    QString selfAvatarUrl() const { return m_self.value(QStringLiteral("avatar_url")).toString(); }
+    int profilesRevision() const { return m_profilesRevision; }
 
     bool voiceJoined() const { return voice().value(QStringLiteral("joined")).toBool(); }
     bool voicePending() const { return voice().value(QStringLiteral("pending")).toBool(); }
@@ -189,6 +197,7 @@ public:
     bool sharingScreen() const { return voice().value(QStringLiteral("streaming")).toBool(); }
     bool shareStarting() const { return m_shareStarting; }
     QVariantList watchedStreams() const;
+    QString selfPreviewPath() const { return voice().value(QStringLiteral("self_preview")).toString(); }
     QString audioError() const
     {
         return m_status.value(QStringLiteral("audio")).toObject().value(QStringLiteral("error")).toString();
@@ -345,6 +354,8 @@ public:
     Q_INVOKABLE void kick(const QString& userId, const QString& reason);
     Q_INVOKABLE void ban(const QString& userId, const QString& reason);
     Q_INVOKABLE void setPresence(const QString& status);
+    Q_INVOKABLE void updateProfile(const QString& displayName, const QString& avatarUrl, const QString& bio);
+    Q_INVOKABLE QVariantMap userProfile(const QString& userId) const;
 
     Q_INVOKABLE void switcherQuery(const QString& text);
     Q_INVOKABLE void switcherActivate(int row);
@@ -387,6 +398,7 @@ public:
 signals:
     void daemonChanged();
     void statusChanged();
+    void profilesChanged();
     void authChanged();
     void oauthIdentitiesChanged();
     void voiceChanged();
@@ -444,6 +456,7 @@ private:
 
     QJsonObject m_status;
     QJsonObject m_self;
+    int m_profilesRevision = 0;
     QHash<QString, QJsonObject> m_serversById;
     QHash<QString, QJsonObject> m_channelsById;
     QHash<QString, QJsonObject> m_usersById;

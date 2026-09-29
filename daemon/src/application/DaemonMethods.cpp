@@ -1028,6 +1028,14 @@ void Daemon::registerMethods()
         env.mutable_set_presence()->set_status(status);
         forward(std::move(env), r);
     };
+    m[QStringLiteral("profile.update")] = [this](const QJsonObject& p, const Responder& r) {
+        proto::Envelope env;
+        auto* profile = env.mutable_update_profile();
+        profile->set_display_name(p.value(QStringLiteral("display_name")).toString().toStdString());
+        profile->set_avatar_url(p.value(QStringLiteral("avatar_url")).toString().toStdString());
+        profile->set_bio(p.value(QStringLiteral("bio")).toString().toStdString());
+        forward(std::move(env), r);
+    };
     m[QStringLiteral("member.list")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id sid = serverParam(p, r);
         if (!sid)

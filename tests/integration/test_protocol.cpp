@@ -86,6 +86,48 @@ struct Fixture : ::testing::Test {
 
 } // namespace
 
+TEST_F(Fixture, ProfileUpdatesAreValidatedAndVisibleToOtherMembers)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    const auto sid = createServer(*alice, "Friends");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+
+    proto::Envelope invalid;
+    auto* bad = invalid.mutable_update_profile();
+    bad->set_display_name("Alice");
+    bad->set_avatar_url("http://example.org/avatar.png");
+    bad->set_bio("hello");
+    auto rejected = alice->call(invalid);
+    ASSERT_TRUE(rejected && rejected->has_error());
+    EXPECT_EQ(rejected->error().code(), proto::ERROR_BAD_REQUEST);
+
+    proto::Envelope update;
+    auto* profile = update.mutable_update_profile();
+    profile->set_display_name("Alice Cooper");
+    profile->set_avatar_url("https://example.org/avatar.png");
+    profile->set_bio("Hello there");
+    auto result = alice->call(update);
+    ASSERT_TRUE(result && result->has_ok());
+    auto event = bob->waitEvent([](const proto::Event& e) {
+        return e.has_user_update() && e.user_update().username() == "alice";
+    });
+    ASSERT_TRUE(event.has_value());
+    EXPECT_EQ(event->user_update().display_name(), "Alice Cooper");
+    EXPECT_EQ(event->user_update().bio(), "Hello there");
+    EXPECT_EQ(event->user_update().avatar_url(), "https://example.org/avatar.png");
+
+    const auto state = sync(*bob);
+    bool found = false;
+    for (const auto& user : state.users()) {
+        if (user.username() == "alice") {
+            found = true;
+            EXPECT_EQ(user.bio(), "Hello there");
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
 TEST_F(Fixture, ProtocolMajorMismatchIsRejected)
 {
     RawClient c(server);

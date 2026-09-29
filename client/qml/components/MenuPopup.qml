@@ -15,7 +15,7 @@ Menu {
         implicitWidth: Theme.px(200)
         contentItem: Text {
             leftPadding: Theme.px(8)
-            text: item.text
+            text: (item.checkable && item.checked ? "✓ " : "") + item.text
             color: item.action && item.action.danger ? Theme.danger : Theme.text
             font.pixelSize: Theme.px(13)
             verticalAlignment: Text.AlignVCenter

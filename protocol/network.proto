@@ -26,6 +26,13 @@ message User {
   string display_name = 3;
   string avatar_url = 4;
   UserStatus status = 5;
+  string bio = 6;
+}
+
+message UpdateProfileRequest {
+  string display_name = 1;
+  string avatar_url = 2;
+  string bio = 3;
 }
 
 message Server {
@@ -584,6 +591,7 @@ message Envelope {
     OAuthUnlinkRequest oauth_unlink = 132;
     ListOAuthIdentitiesRequest list_oauth_identities = 133;
     OAuthIdentityList oauth_identity_list = 134;
+    UpdateProfileRequest update_profile = 135;
 
     // sync
     SyncRequest sync = 20;
