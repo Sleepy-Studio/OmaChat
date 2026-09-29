@@ -1,9 +1,8 @@
 # Development status
 
 Handoff notes for whoever picks this up next (human or agent). Last updated
-2026-09-29. "Current source" below means commit `6decdd4` plus the CI
-dependency and per-share sound-consent changes proposed here. The latest
-tagged release is older.
+2026-09-29. "Current source" below means `main` at `6decdd4` plus the
+changes in draft PR #1. The latest tagged release is older.
 
 ## Where things are
 
@@ -21,12 +20,12 @@ tagged release is older.
 - On 2026-09-29, the current source built and all
   **168 CTest tests passed**: 112 unit, 50 integration, 6 fuzz smoke.
   Integration tests require permission to bind loopback TCP/UDP sockets.
-- The latest GitHub CI run for `6decdd4` failed configuration because the
-  newly required `qt6-multimedia` package was missing from CI. The local
-  working tree adds it to CI, the Arch package and build instructions. The
-  earlier screenshot fix (software renderer, no daemon startup in screenshot
-  mode, explicit save failure) is already on `main`; a local offscreen run
-  produced a valid 1200×760 PNG. Neither CI fix has yet passed on GitHub.
+- GitHub CI for draft PR #1 passed build, unit, fuzz, integration, format,
+  plugin and GUI screenshot checks on 2026-09-29. The PR adds the newly
+  required `qt6-multimedia` package to CI, the Arch package and build
+  instructions. The screenshot smoke test now uses Xvfb and a writable
+  temporary directory; the earlier screenshot-mode changes are already on
+  `main`. These fixes have not been merged into `main` yet.
 - The manual test pass below was last done in the sandbox on 2026-09-28;
   newer OAuth, profile, account deletion, and import paths need live checks.
 - A real `omachat-server` was also stood up on this machine (systemd,
