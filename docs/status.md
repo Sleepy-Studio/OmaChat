@@ -1,23 +1,22 @@
 # Development status
 
 Handoff notes for whoever picks this up next (human or agent). Last updated
-2026-09-29. "Current source" below means `main` (the CI/GUI fixes formerly
-in draft PR #1 have landed directly on `main`; that PR was closed as
-superseded). The latest tagged release is older.
+2026-09-29. "Current source" below means `main`.
 
 ## Where things are
 
 - Remote: `github.com/Sleepy-Studio/OmaChat` (**public** as of 2026-09-28), branch `main`.
-- Latest tagged release: **0.2.0** (`v0.2.0`). The current source adds OAuth,
-  profiles, server-side account deletion, Discord history import, inline
-  media playback and custom server emoji after that tag. These changes need a
-  new release; do not infer their presence from an installed package named
-  `0.2.0-1` alone.
+- Latest tagged release: **0.2.1** (`v0.2.1`), tagged 2026-09-29. It bundles
+  everything added since 0.2.0 — OAuth, profiles, server-side account
+  deletion, Discord history import, inline media playback, custom server
+  emoji, audio level metering, and the CI/GUI screenshot and single-command
+  Omarchy-native install fixes — without a further manual test pass beyond
+  what's recorded below. The AUR `PKGBUILD` now builds from this tag.
 - Protocol **1.2** (capabilities
   `search.server`, `dm.group`, `attachments.resume`, `video.h264`,
   `e2e.v1`; a 1.2 client still works with a 1.1 server). Server schema
   **v7**, daemon local schema **v2**; both migrate forward on start. A database
-  migrated to v7 cannot be opened by the v0.2.0 server.
+  migrated to v7 cannot be opened by a pre-v0.2.1 server.
 - On 2026-09-29, the current source built and all
   **168 CTest tests passed**: 112 unit, 50 integration, 6 fuzz smoke.
   Integration tests require permission to bind loopback TCP/UDP sockets.
@@ -39,7 +38,7 @@ superseded). The latest tagged release is older.
   end to end (clean clone/build/install; container generates its cert and
   config, a real client registered and sent a message through it). AUR
   publishing needs a one-time manual step only the repo owner can do — see
-  `docs/aur-publishing.md`; the AUR package was published for v0.2.0.
+  `docs/aur-publishing.md`; the AUR package now builds from v0.2.1.
 - Project notes dated 2026-09-29 report that `43a145e` was locally installed
   and the Coolify server redeployed (server schema 5→6, daemon connected).
   No live Discord history has been imported. Deployment health is volatile;

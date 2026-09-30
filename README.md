@@ -267,9 +267,8 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
 
 ## Status: 0.2 (early)
 
-`v0.2.0` is the latest tag. Current `main` also contains OAuth, profiles,
-server-side account deletion and Discord history import; see
-[the development status](docs/status.md) for its verification and release plan.
+`v0.2.1` is the latest tag; see [the development status](docs/status.md) for
+its verification and release plan.
 
 Working and tested (see `ctest`): accounts, sessions and resume, TLS with
 explicit certificate trust, servers, invites, categories, text and voice
