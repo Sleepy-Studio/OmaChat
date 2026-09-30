@@ -70,6 +70,9 @@ build dependencies and builds the same package with `makepkg`:
 curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/OmaChat/main/scripts/install.sh | bash
 ```
 
+Quiet by default (a one-line status per step); add `OMACHAT_VERBOSE=1` before
+the pipe for full dependency, compiler and test output.
+
 See [Build](#build) below to build from source instead.
 
 **Self-hosted server, any OS with Docker:**
