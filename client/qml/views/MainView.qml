@@ -60,6 +60,8 @@ Item {
                     renameGroupDialog.value = name
                 }
                 onOpenChannelPermissions: (id, name) => channelPermissions.openFor(id, name)
+                onOpenChannelSettings: id => channelSettings.openFor(id)
+                onOpenChannelDetails: id => channelDetails.openFor(id)
             }
 
             ColumnLayout {
@@ -82,6 +84,7 @@ Item {
                     membersVisible: root.showMembers
                     onToggleMembers: root.showMembers = !root.showMembers
                     onOpenSearch: searchPanel.open()
+                    onOpenChannelDetails: id => channelDetails.openFor(id)
                 }
             }
 
@@ -175,6 +178,8 @@ Item {
         onAccepted: value => App.renameGroup(channelId, value)
     }
     ChannelPermissionsDialog { id: channelPermissions }
+    ChannelSettingsDialog { id: channelSettings }
+    ChannelDetailsDialog { id: channelDetails; onEditRequested: id => channelSettings.openFor(id) }
     CreateChannelDialog { id: createChannelDialog }
 
     CreateServerDialog {

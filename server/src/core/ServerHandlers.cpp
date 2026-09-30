@@ -3,6 +3,10 @@
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
 
+#include <QImageReader>
+
+#include <algorithm>
+
 namespace omachat::server {
 
 using namespace omachat::permissions;
@@ -345,6 +349,12 @@ void ChatServer::handleCreateChannel(Session& s, std::uint64_t rid, const proto:
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel names are 1-64 characters"));
         return;
     }
+    const auto topic = validation::topic(QString::fromStdString(m.topic()));
+    const auto description = validation::channelDescription(QString::fromStdString(m.description()));
+    if (!topic || !description) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel topic or description"));
+        return;
+    }
     if (srv->channels.size() >= 500) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel limit reached"));
         return;
@@ -363,7 +373,8 @@ void ChatServer::handleCreateChannel(Session& s, std::uint64_t rid, const proto:
         if (c && c->parentId == parent)
             position = std::max(position, c->position + 1);
     }
-    ChannelRecord c{m_ids.next(), srv->id, *name, static_cast<ChannelKind>(type), parent, position, {}, {}};
+    ChannelRecord c{m_ids.next(), srv->id, *name, static_cast<ChannelKind>(type), parent, position,
+        *topic, {}, *description};
     if (!m_store.insertChannel(c, now())) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not create channel"));
         return;
@@ -417,6 +428,123 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
             return;
         }
         updated.topic = *topic;
+    }
+    if (m.set_description()) {
+        const auto description = validation::channelDescription(QString::fromStdString(m.description()));
+        if (!description) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("descriptions are at most 2000 characters"));
+            return;
+        }
+        updated.description = *description;
+    }
+    const auto applyArtwork = [&](Id assetId, Id& destination) {
+        if (assetId == destination)
+            return true;
+        if (!assetId) {
+            destination = 0;
+            return true;
+        }
+        const auto asset = m_store.attachment(assetId);
+        if (!asset || !asset->artwork || asset->channelId != c->id || asset->uploaderId != s.userId || asset->messageId
+            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId))
+            return false;
+        QImageReader reader(attachmentPath(assetId));
+        reader.setDecideFormatFromContent(true);
+        const QByteArray format = reader.format().toLower();
+        const QSize size = reader.size();
+        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid()
+            || size.width() > 6000 || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000
+            || reader.imageCount() > 1 || reader.read().isNull())
+            return false;
+        destination = assetId;
+        return true;
+    };
+    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel icon image"));
+        return;
+    }
+    if (m.set_banner() && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel banner image"));
+        return;
+    }
+    if (m.set_parent() || m.set_position()) {
+        if (m.set_parent()) {
+            const Id parent = m.parent_id();
+            const ChannelRecord* category = parent ? m_state.channel(parent) : nullptr;
+            if ((parent && (!category || category->serverId != c->serverId
+                                   || category->kind != ChannelKind::Category))
+                || (c->kind == ChannelKind::Category && parent)) {
+                replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid destination category"));
+                return;
+            }
+            if (parent && !m_state.can(parent, s.userId, ManageChannel)
+                && !m_state.canInServer(c->serverId, s.userId, ManageChannel)) {
+                replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot move channels there"));
+                return;
+            }
+            updated.parentId = parent;
+        }
+        if (m.set_position() && m.position() > 500) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel position"));
+            return;
+        }
+        auto siblings = [&](Id parent, bool categories) {
+            std::vector<ChannelRecord> result;
+            for (Id id : m_state.server(c->serverId)->channels) {
+                const ChannelRecord* item = m_state.channel(id);
+                if (!item || item->id == c->id || item->parentId != parent
+                    || (parent == 0 && (item->kind == ChannelKind::Category) != categories))
+                    continue;
+                result.push_back(*item);
+            }
+            std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
+                return a.position != b.position ? a.position < b.position : a.id < b.id;
+            });
+            return result;
+        };
+        const bool categories = c->kind == ChannelKind::Category;
+        std::vector<ChannelRecord> affected;
+        if (updated.parentId != c->parentId) {
+            auto prior = siblings(c->parentId, categories);
+            for (size_t i = 0; i < prior.size(); ++i) {
+                prior[i].position = static_cast<std::uint32_t>(i);
+                affected.push_back(prior[i]);
+            }
+        }
+        auto destination = siblings(updated.parentId, categories);
+        const size_t insertAt = m.set_position() ? std::min<size_t>(m.position(), destination.size())
+                                                 : destination.size();
+        destination.insert(destination.begin() + static_cast<std::ptrdiff_t>(insertAt), updated);
+        for (size_t i = 0; i < destination.size(); ++i) {
+            destination[i].position = static_cast<std::uint32_t>(i);
+            affected.push_back(destination[i]);
+        }
+        if (!m_store.begin()) {
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not start channel move"));
+            return;
+        }
+        for (const auto& item : affected) {
+            if (!m_store.updateChannel(item)) {
+                m_store.rollback();
+                replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not move channel"));
+                return;
+            }
+        }
+        if (!m_store.commit()) {
+            m_store.rollback();
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not commit channel move"));
+            return;
+        }
+        for (const auto& item : affected) {
+            m_state.putChannel(item);
+            if (item.id == c->id)
+                updated = item;
+        }
+        publishPermissionsChanged(updated.serverId);
+        proto::Envelope env;
+        *env.mutable_channel() = toProto(updated, s.userId);
+        reply(s, rid, std::move(env));
+        return;
     }
     if (!m_store.updateChannel(updated)) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not update channel"));

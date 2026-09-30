@@ -11,7 +11,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 7;
+constexpr int kSchemaVersion = 10;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -197,6 +197,19 @@ const char* const kSchemaV7[] = {
     "CREATE INDEX emoji_by_server ON emoji(server_id)",
 };
 
+const char* const kSchemaV8[] = {
+    "ALTER TABLE channels ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+};
+
+const char* const kSchemaV9[] = {
+    "ALTER TABLE channels ADD COLUMN icon_attachment_id INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE channels ADD COLUMN banner_attachment_id INTEGER NOT NULL DEFAULT 0",
+};
+
+const char* const kSchemaV10[] = {
+    "ALTER TABLE attachments ADD COLUMN artwork INTEGER NOT NULL DEFAULT 0",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -251,11 +264,12 @@ AttachmentRecord readAttachment(const QSqlQuery& q)
     a.size = static_cast<std::uint64_t>(q.value(6).toLongLong());
     a.sha256 = q.value(7).toByteArray();
     a.createdAt = q.value(8).toLongLong();
+    a.artwork = q.value(9).toBool();
     return a;
 }
 
 constexpr const char* kAttachmentColumns
-    = "id, channel_id, uploader_id, message_id, filename, mime_type, size, sha256, created_at";
+    = "id, channel_id, uploader_id, message_id, filename, mime_type, size, sha256, created_at, artwork";
 
 constexpr const char* kMessageColumns
     = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions, encrypted, created_at";
@@ -337,6 +351,12 @@ bool Store::migrate(QString* error)
         return false;
     if (current < 7 && !apply(kSchemaV7))
         return false;
+    if (current < 8 && !apply(kSchemaV8))
+        return false;
+    if (current < 9 && !apply(kSchemaV9))
+        return false;
+    if (current < 10 && !apply(kSchemaV10))
+        return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
         if (error)
@@ -396,7 +416,10 @@ bool Store::deleteUser(Id userId)
         || !exec(QStringLiteral("DELETE FROM bans WHERE user_id = ?"), {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM overrides WHERE target_type = 1 AND target_id = ?"), {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM reactions WHERE user_id = ?"), {sid(userId)})
-        || !exec(QStringLiteral("DELETE FROM attachments WHERE uploader_id = ? AND message_id IS NULL"), {sid(userId)})
+        || !exec(QStringLiteral("DELETE FROM attachments WHERE uploader_id = ? AND message_id IS NULL "
+                                "AND id NOT IN (SELECT attachment_id FROM emoji) "
+                                "AND id NOT IN (SELECT icon_attachment_id FROM channels) "
+                                "AND id NOT IN (SELECT banner_attachment_id FROM channels)"), {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM users WHERE id = ?"), {sid(userId)}))
         return fail();
     if (!commit())
@@ -606,7 +629,8 @@ Store::Snapshot Store::loadSnapshot()
     {
         QSqlQuery q(m_db);
         q.exec(
-            QStringLiteral("SELECT id, COALESCE(server_id, 0), name, type, parent_id, position, topic FROM channels"));
+            QStringLiteral("SELECT id, COALESCE(server_id, 0), name, type, parent_id, position, topic, description, "
+                           "icon_attachment_id, banner_attachment_id FROM channels"));
         while (q.next()) {
             ChannelRecord c;
             c.id = uid(q.value(0));
@@ -616,6 +640,9 @@ Store::Snapshot Store::loadSnapshot()
             c.parentId = uid(q.value(4));
             c.position = q.value(5).toUInt();
             c.topic = q.value(6).toString();
+            c.description = q.value(7).toString();
+            c.iconAttachmentId = uid(q.value(8));
+            c.bannerAttachmentId = uid(q.value(9));
             if (c.serverId) {
                 auto it = servers.find(c.serverId);
                 if (it != servers.end())
@@ -712,10 +739,10 @@ bool Store::setMemberRole(Id serverId, Id userId, Id roleId, bool add)
 bool Store::insertChannel(const ChannelRecord& c, std::int64_t createdAt)
 {
     const QVariant server = c.serverId ? QVariant(sid(c.serverId)) : QVariant(QMetaType(QMetaType::LongLong));
-    if (!exec(QStringLiteral("INSERT INTO channels(id, server_id, name, type, parent_id, position, topic, created_at) "
-                             "VALUES(?,?,?,?,?,?,?,?)"),
+    if (!exec(QStringLiteral("INSERT INTO channels(id, server_id, name, type, parent_id, position, topic, created_at, "
+                             "description, icon_attachment_id, banner_attachment_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)"),
             {sid(c.id), server, c.name, static_cast<int>(c.kind), sid(c.parentId), c.position, c.topic,
-                qint64(createdAt)}))
+                qint64(createdAt), c.description, sid(c.iconAttachmentId), sid(c.bannerAttachmentId)}))
         return false;
     for (Id r : c.recipients)
         exec(QStringLiteral("INSERT INTO dm_recipients(channel_id, user_id) VALUES(?,?)"), {sid(c.id), sid(r)});
@@ -724,8 +751,10 @@ bool Store::insertChannel(const ChannelRecord& c, std::int64_t createdAt)
 
 bool Store::updateChannel(const ChannelRecord& c)
 {
-    return exec(QStringLiteral("UPDATE channels SET name = ?, parent_id = ?, position = ?, topic = ? WHERE id = ?"),
-        {c.name, sid(c.parentId), c.position, c.topic, sid(c.id)});
+    return exec(QStringLiteral("UPDATE channels SET name = ?, parent_id = ?, position = ?, topic = ?, description = ?, "
+                               "icon_attachment_id = ?, banner_attachment_id = ? WHERE id = ?"),
+        {c.name, sid(c.parentId), c.position, c.topic, c.description, sid(c.iconAttachmentId),
+            sid(c.bannerAttachmentId), sid(c.id)});
 }
 
 bool Store::setRecipient(Id channelId, Id userId, bool present)
@@ -867,7 +896,7 @@ bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QStri
         // Only a pending attachment of this author in this channel can be claimed.
         QSqlQuery q(m_db);
         q.prepare(QStringLiteral("UPDATE attachments SET message_id = ? WHERE id = ? AND uploader_id = ? AND "
-                                 "channel_id = ? AND message_id IS NULL"));
+                                 "channel_id = ? AND message_id IS NULL AND artwork = 0"));
         q.addBindValue(sid(m.id));
         q.addBindValue(sid(a.id));
         q.addBindValue(sid(m.authorId));
@@ -1005,9 +1034,9 @@ std::vector<MessageRecord> Store::searchMessages(const std::vector<Id>& channelI
 bool Store::insertAttachment(const AttachmentRecord& a)
 {
     return exec(QStringLiteral("INSERT INTO attachments(id, channel_id, uploader_id, message_id, filename, "
-                               "mime_type, size, sha256, created_at) VALUES(?,?,?,NULL,?,?,?,?,?)"),
+                               "mime_type, size, sha256, created_at, artwork) VALUES(?,?,?,NULL,?,?,?,?,?,?)"),
         {sid(a.id), sid(a.channelId), sid(a.uploaderId), a.filename, a.mimeType, static_cast<qint64>(a.size), a.sha256,
-            qint64(a.createdAt)});
+            qint64(a.createdAt), a.artwork ? 1 : 0});
 }
 
 std::optional<AttachmentRecord> Store::attachment(Id id)
@@ -1037,7 +1066,9 @@ int Store::pendingAttachmentCount(Id uploaderId)
 {
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("SELECT COUNT(*) FROM attachments WHERE uploader_id = ? AND message_id IS NULL "
-                             "AND id NOT IN (SELECT attachment_id FROM emoji)"));
+                             "AND id NOT IN (SELECT attachment_id FROM emoji) "
+                             "AND id NOT IN (SELECT icon_attachment_id FROM channels) "
+                             "AND id NOT IN (SELECT banner_attachment_id FROM channels)"));
     q.addBindValue(sid(uploaderId));
     if (!q.exec() || !q.next())
         return 0;
@@ -1051,7 +1082,9 @@ std::vector<Id> Store::purgePendingAttachments(std::int64_t cutoffMs)
     // Attachments backing a custom emoji stay message_id NULL forever, so
     // they're excluded here rather than counted as an abandoned upload.
     q.prepare(QStringLiteral("SELECT id FROM attachments WHERE message_id IS NULL AND created_at < ? "
-                             "AND id NOT IN (SELECT attachment_id FROM emoji)"));
+                             "AND id NOT IN (SELECT attachment_id FROM emoji) "
+                             "AND id NOT IN (SELECT icon_attachment_id FROM channels) "
+                             "AND id NOT IN (SELECT banner_attachment_id FROM channels)"));
     q.addBindValue(qint64(cutoffMs));
     q.exec();
     while (q.next())
@@ -1064,6 +1097,15 @@ std::vector<Id> Store::purgePendingAttachments(std::int64_t cutoffMs)
 bool Store::deleteAttachment(Id id)
 {
     return exec(QStringLiteral("DELETE FROM attachments WHERE id = ?"), {sid(id)});
+}
+
+Id Store::artworkChannel(Id attachmentId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id FROM channels WHERE icon_attachment_id = ? OR banner_attachment_id = ? LIMIT 1"));
+    q.addBindValue(sid(attachmentId));
+    q.addBindValue(sid(attachmentId));
+    return q.exec() && q.next() ? uid(q.value(0)) : 0;
 }
 
 std::vector<Id> Store::allAttachmentIds()

@@ -22,7 +22,7 @@ add_library(omachat_server_core STATIC
 omachat_set_warnings(omachat_server_core)
 target_include_directories(omachat_server_core PUBLIC src)
 target_link_libraries(omachat_server_core
-    PUBLIC omachat_shared Qt6::Core Qt6::Network Qt6::Sql OpenSSL::Crypto
+    PUBLIC omachat_shared Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql OpenSSL::Crypto
     PRIVATE tomlplusplus::tomlplusplus)
 
 add_executable(omachat-server src/main.cpp)

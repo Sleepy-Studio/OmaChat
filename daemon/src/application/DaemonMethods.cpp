@@ -1023,6 +1023,8 @@ void Daemon::registerMethods()
         auto* c = env.mutable_create_channel();
         c->set_server_id(sid);
         c->set_name(p.value(QStringLiteral("name")).toString().toStdString());
+        c->set_topic(p.value(QStringLiteral("topic")).toString().toStdString());
+        c->set_description(p.value(QStringLiteral("description")).toString().toStdString());
         c->set_type(type == u"voice"  ? proto::CHANNEL_TYPE_VOICE
                 : type == u"category" ? proto::CHANNEL_TYPE_CATEGORY
                                       : proto::CHANNEL_TYPE_TEXT);
@@ -1037,6 +1039,13 @@ void Daemon::registerMethods()
         const Id cid = channelParam(p, r);
         if (!cid)
             return;
+        if ((p.contains(QStringLiteral("description")) || p.contains(QStringLiteral("icon_attachment_id"))
+                || p.contains(QStringLiteral("banner_attachment_id")) || p.contains(QStringLiteral("parent"))
+                || p.contains(QStringLiteral("position")))
+            && !m_conn->capabilities().contains(QStringLiteral("channel.identity.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support channel identity settings"));
+            return;
+        }
         proto::Envelope env;
         auto* u = env.mutable_update_channel();
         u->set_channel_id(cid);
@@ -1045,8 +1054,76 @@ void Daemon::registerMethods()
             u->set_set_topic(true);
             u->set_topic(p.value(QStringLiteral("topic")).toString().toStdString());
         }
+        if (p.contains(QStringLiteral("description"))) {
+            u->set_set_description(true);
+            u->set_description(p.value(QStringLiteral("description")).toString().toStdString());
+        }
+        if (p.contains(QStringLiteral("icon_attachment_id"))) {
+            u->set_set_icon(true);
+            u->set_icon_attachment_id(idFromJson(p.value(QStringLiteral("icon_attachment_id"))));
+        }
+        if (p.contains(QStringLiteral("banner_attachment_id"))) {
+            u->set_set_banner(true);
+            u->set_banner_attachment_id(idFromJson(p.value(QStringLiteral("banner_attachment_id"))));
+        }
+        if (p.contains(QStringLiteral("parent"))) {
+            u->set_set_parent(true);
+            u->set_parent_id(idFromJson(p.value(QStringLiteral("parent"))));
+        }
+        if (p.contains(QStringLiteral("position"))) {
+            u->set_set_position(true);
+            u->set_position(static_cast<std::uint32_t>(p.value(QStringLiteral("position")).toInt()));
+        }
         forward(
             std::move(env), r, [model](const proto::Envelope& reply) { return model->channelJson(reply.channel()); });
+    };
+    m[QStringLiteral("channel.artwork.set")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id cid = channelParam(p, r);
+        if (!cid || !requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("channel.identity.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support channel artwork"));
+            return;
+        }
+        const QString kind = p.value(QStringLiteral("kind")).toString();
+        if (kind != u"icon" && kind != u"banner") {
+            r.error(e::BadRequest, QStringLiteral("kind must be icon or banner"));
+            return;
+        }
+        const QString path = p.value(QStringLiteral("file")).toString();
+        if (path.isEmpty()) {
+            proto::Envelope env;
+            auto* update = env.mutable_update_channel();
+            update->set_channel_id(cid);
+            if (kind == u"icon")
+                update->set_set_icon(true);
+            else
+                update->set_set_banner(true);
+            forward(std::move(env), r, [model](const proto::Envelope& reply) {
+                return model->channelJson(reply.channel());
+            });
+            return;
+        }
+        m_transfers->upload(cid, path,
+            [this, model, cid, kind, r](const FileTransfers::Result& result) {
+                if (!result.ok) {
+                    r.error(result.code, result.message);
+                    return;
+                }
+                proto::Envelope env;
+                auto* update = env.mutable_update_channel();
+                update->set_channel_id(cid);
+                if (kind == u"icon") {
+                    update->set_set_icon(true);
+                    update->set_icon_attachment_id(result.attachment.id());
+                } else {
+                    update->set_set_banner(true);
+                    update->set_banner_attachment_id(result.attachment.id());
+                }
+                forward(std::move(env), r, [model](const proto::Envelope& reply) {
+                    return model->channelJson(reply.channel());
+                });
+            }, true);
     };
     m[QStringLiteral("channel.delete")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);

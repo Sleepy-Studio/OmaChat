@@ -92,6 +92,8 @@ class AppController : public QObject {
     Q_PROPERTY(QString selectedChannelId READ selectedChannelId NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelName READ selectedChannelName NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelTopic READ selectedChannelTopic NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedChannelDescription READ selectedChannelDescription NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedChannelBannerId READ selectedChannelBannerId NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelType READ selectedChannelType NOTIFY selectionChanged)
     Q_PROPERTY(bool canSend READ canSend NOTIFY selectionChanged)
     Q_PROPERTY(bool canManageMessages READ canManageMessages NOTIFY selectionChanged)
@@ -219,6 +221,8 @@ public:
     QString selectedChannelId() const { return m_selectedChannel; }
     QString selectedChannelName() const;
     QString selectedChannelTopic() const;
+    QString selectedChannelDescription() const;
+    QString selectedChannelBannerId() const;
     QString selectedChannelType() const;
     bool canSend() const;
     bool canManageMessages() const;
@@ -350,9 +354,18 @@ public:
     Q_INVOKABLE void createInvite();
     Q_INVOKABLE void leaveServer(const QString& id);
     Q_INVOKABLE void deleteServer(const QString& id);
-    Q_INVOKABLE void createChannel(const QString& name, const QString& type, const QString& parentId);
+    Q_INVOKABLE void createChannel(const QString& name, const QString& type, const QString& parentId,
+        const QString& topic, const QString& description, const QUrl& iconFile, const QUrl& bannerFile);
     Q_INVOKABLE void deleteChannel(const QString& id);
     Q_INVOKABLE void setTopic(const QString& topic);
+    Q_INVOKABLE void updateChannelDetails(const QString& id, const QString& name, const QString& topic,
+        const QString& description);
+    Q_INVOKABLE void setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl);
+    Q_INVOKABLE QVariantMap channelDetails(const QString& id) const { return channel(id).toVariantMap(); }
+    Q_INVOKABLE QVariantList channelCategories() const;
+    Q_INVOKABLE void moveChannelToCategory(const QString& id, const QString& parentId);
+    Q_INVOKABLE void moveChannelRelative(const QString& id, int delta);
+    Q_INVOKABLE QString renderChannelDescription(const QString& content) const { return renderMarkdown(content); }
     Q_INVOKABLE void setChannelMuted(const QString& id, bool muted);
     Q_INVOKABLE bool channelMuted(const QString& id) const { return m_mutedChannels.contains(id); }
     Q_INVOKABLE void openDm(const QString& userId);
@@ -432,6 +445,8 @@ signals:
     void voiceChanged();
     void requestScreenAudioConsent();
     void selectionChanged();
+    void channelDataChanged(const QString& channelId);
+    void channelDetailsSaved(const QString& channelId);
     void discordImportChanged();
     void discordImportFinished(bool success);
     void replyChanged();

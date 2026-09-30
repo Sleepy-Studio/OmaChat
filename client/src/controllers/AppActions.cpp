@@ -12,6 +12,8 @@
 #include <QJsonArray>
 #include <QUrl>
 
+#include <algorithm>
+
 namespace omachat::client {
 
 namespace {
@@ -776,18 +778,25 @@ void AppController::deleteServer(const QString& id)
     call(QStringLiteral("server.delete"), {{"server", id}});
 }
 
-void AppController::createChannel(const QString& name, const QString& type, const QString& parentId)
+void AppController::createChannel(const QString& name, const QString& type, const QString& parentId,
+    const QString& topic, const QString& description, const QUrl& iconFile, const QUrl& bannerFile)
 {
-    QJsonObject params{{"server", m_selectedServer}, {"name", name}, {"type", type}};
+    QJsonObject params{{"server", m_selectedServer}, {"name", name}, {"type", type},
+        {"topic", topic}, {"description", description}};
     if (!parentId.isEmpty() && parentId != u"0")
         params.insert(QStringLiteral("parent"), parentId);
     call(
         QStringLiteral("channel.create"), params,
-        [this](const QJsonObject& c) {
+        [this, iconFile, bannerFile](const QJsonObject& c) {
             m_channelsById.insert(c.value(QStringLiteral("id")).toString(), c);
             rebuildChannels();
             if (c.value(QStringLiteral("type")).toString() == u"text")
                 selectChannel(c.value(QStringLiteral("id")).toString());
+            const QString id = c.value(QStringLiteral("id")).toString();
+            if (!iconFile.isEmpty())
+                setChannelArtwork(id, QStringLiteral("icon"), iconFile);
+            if (!bannerFile.isEmpty())
+                setChannelArtwork(id, QStringLiteral("banner"), bannerFile);
         },
         tr("Cannot create channel"));
 }
@@ -801,6 +810,77 @@ void AppController::setTopic(const QString& topic)
 {
     call(QStringLiteral("channel.update"), {{"channel", m_selectedChannel}, {"topic", topic}}, {},
         tr("Cannot set topic"));
+}
+
+void AppController::updateChannelDetails(const QString& id, const QString& name, const QString& topic,
+    const QString& description)
+{
+    call(QStringLiteral("channel.update"),
+        {{"channel", id}, {"name", name.trimmed()}, {"topic", topic}, {"description", description}},
+        [this, id](const QJsonObject&) { emit channelDetailsSaved(id); },
+        tr("Cannot update channel"));
+}
+
+void AppController::setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl)
+{
+    if (!fileUrl.isEmpty() && !fileUrl.isLocalFile()) {
+        showNotice(tr("Choose a local image file."), true);
+        return;
+    }
+    call(QStringLiteral("channel.artwork.set"),
+        {{"channel", id}, {"kind", kind}, {"file", fileUrl.isEmpty() ? QString() : fileUrl.toLocalFile()}}, {},
+        tr("Cannot update channel image"));
+}
+
+QVariantList AppController::channelCategories() const
+{
+    QVariantList out{{QVariantMap{{"id", "0"}, {"name", tr("Top level")}}}};
+    for (const auto& c : m_channelsById) {
+        if (c.value(QStringLiteral("server_id")).toString() == m_selectedServer
+            && c.value(QStringLiteral("type")).toString() == u"category")
+            out.append(QVariantMap{{"id", c.value(QStringLiteral("id")).toString()},
+                {"name", c.value(QStringLiteral("name")).toString()}});
+    }
+    return out;
+}
+
+void AppController::moveChannelToCategory(const QString& id, const QString& parentId)
+{
+    call(QStringLiteral("channel.update"), {{"channel", id}, {"parent", parentId}}, {},
+        tr("Cannot move channel"));
+}
+
+void AppController::moveChannelRelative(const QString& id, int delta)
+{
+    const QJsonObject current = channel(id);
+    if (current.isEmpty() || !delta)
+        return;
+    const QString parent = current.value(QStringLiteral("parent_id")).toString();
+    const bool category = current.value(QStringLiteral("type")).toString() == u"category";
+    QList<QJsonObject> siblings;
+    for (const auto& candidate : m_channelsById) {
+        if (candidate.value(QStringLiteral("server_id")).toString() != m_selectedServer
+            || candidate.value(QStringLiteral("parent_id")).toString() != parent
+            || (candidate.value(QStringLiteral("type")).toString() == u"category") != category)
+            continue;
+        siblings.append(candidate);
+    }
+    std::sort(siblings.begin(), siblings.end(), [](const auto& a, const auto& b) {
+        const int pa = a.value(QStringLiteral("position")).toInt();
+        const int pb = b.value(QStringLiteral("position")).toInt();
+        return pa == pb ? a.value(QStringLiteral("id")).toString().toULongLong()
+                < b.value(QStringLiteral("id")).toString().toULongLong()
+                        : pa < pb;
+    });
+    for (int i = 0; i < siblings.size(); ++i) {
+        if (siblings.at(i).value(QStringLiteral("id")).toString() != id)
+            continue;
+        const int next = std::clamp(i + delta, 0, static_cast<int>(siblings.size()) - 1);
+        if (next != i)
+            call(QStringLiteral("channel.update"), {{"channel", id}, {"position", next}}, {},
+                tr("Cannot reorder channel"));
+        return;
+    }
 }
 
 void AppController::setChannelMuted(const QString& id, bool muted)

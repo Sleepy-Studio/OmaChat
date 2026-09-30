@@ -11,13 +11,18 @@ Rectangle {
     property bool membersVisible: true
     signal toggleMembers()
     signal openSearch()
+    signal openChannelDetails(string channelId)
 
     function focusComposer() { composer.focusInput() }
+    function loadBanner() {
+        if (App.selectedChannelBannerId.length > 0 && App.selectedChannelBannerId !== "0")
+            App.requestPreview(App.selectedChannelBannerId, "channel-banner.png", 0)
+    }
 
     Connections {
         target: App
         function onFocusComposer() { composer.focusInput() }
-        function onSelectionChanged() { editState.messageId = "" }
+        function onSelectionChanged() { editState.messageId = ""; pane.loadBanner() }
     }
 
     QtObject {
@@ -91,6 +96,12 @@ Rectangle {
                     onClicked: topicDialog.open()
                 }
                 IconButton {
+                    visible: !App.homeSelected && App.selectedChannelId.length > 0
+                    iconName: "info"
+                    tip: qsTr("Channel details")
+                    onClicked: pane.openChannelDetails(App.selectedChannelId)
+                }
+                IconButton {
                     iconName: "search"
                     tip: qsTr("Search this channel (%1)").arg(App.shortcuts["search"] || "Ctrl+F")
                     onClicked: pane.openSearch()
@@ -110,6 +121,15 @@ Rectangle {
                 height: 1
                 color: Theme.border
             }
+        }
+
+        Image {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Theme.px(88)
+            visible: App.selectedChannelBannerId.length > 0 && App.selectedChannelBannerId !== "0" && status === Image.Ready
+            source: App.previews[App.selectedChannelBannerId] || ""
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
         }
 
         // A persistent reminder that outlives navigating away from the

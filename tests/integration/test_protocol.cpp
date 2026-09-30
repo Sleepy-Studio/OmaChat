@@ -5,6 +5,8 @@
 #include "omachat/core/Permissions.hpp"
 
 #include <QCryptographicHash>
+#include <QBuffer>
+#include <QImage>
 
 #include <gtest/gtest.h>
 
@@ -85,6 +87,114 @@ struct Fixture : ::testing::Test {
 };
 
 } // namespace
+
+TEST_F(Fixture, ChannelIdentityAndArtworkFollowChannelVisibility)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    auto outsider = client("outsider");
+    const auto sid = createServer(*alice, "Studio");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+    const auto category = channelNamed(sync(*alice), "Text Channels", proto::CHANNEL_TYPE_CATEGORY);
+    ASSERT_NE(category, 0u);
+
+    proto::Envelope create;
+    auto* newChannel = create.mutable_create_channel();
+    newChannel->set_server_id(sid);
+    newChannel->set_name("design-notes");
+    newChannel->set_type(proto::CHANNEL_TYPE_TEXT);
+    newChannel->set_parent_id(category);
+    newChannel->set_topic("Design work");
+    newChannel->set_description("References and decisions for the design team.");
+    auto created = alice->call(create);
+    ASSERT_TRUE(created && created->has_channel());
+    EXPECT_EQ(created->channel().parent_id(), category);
+    EXPECT_EQ(created->channel().topic(), "Design work");
+    EXPECT_EQ(created->channel().description(), "References and decisions for the design team.");
+    bool persistedDescription = false;
+    const auto createdState = sync(*bob);
+    for (const auto& channel : createdState.channels())
+        if (channel.id() == created->channel().id())
+            persistedDescription = channel.description() == "References and decisions for the design team.";
+    EXPECT_TRUE(persistedDescription);
+
+    proto::Envelope update;
+    auto* details = update.mutable_update_channel();
+    details->set_channel_id(category);
+    details->set_set_description(true);
+    details->set_description("A longer guide for this category.");
+    auto changed = alice->call(update);
+    ASSERT_TRUE(changed && changed->has_channel());
+    EXPECT_EQ(changed->channel().description(), "A longer guide for this category.");
+    const auto bobState = sync(*bob);
+    bool foundDescription = false;
+    for (const auto& c : bobState.channels())
+        if (c.id() == category)
+            foundDescription = c.description() == "A longer guide for this category.";
+    EXPECT_TRUE(foundDescription);
+
+    QByteArray png;
+    QBuffer buffer(&png);
+    ASSERT_TRUE(buffer.open(QIODevice::WriteOnly));
+    QImage icon(16, 16, QImage::Format_ARGB32);
+    icon.fill(Qt::blue);
+    ASSERT_TRUE(icon.save(&buffer, "PNG"));
+    ASSERT_FALSE(png.isEmpty());
+
+    proto::Envelope begin;
+    auto* upload = begin.mutable_begin_upload();
+    upload->set_channel_id(category);
+    upload->set_filename("icon.png");
+    upload->set_mime_type("image/png");
+    upload->set_size(static_cast<std::uint64_t>(png.size()));
+    upload->set_channel_artwork(true);
+    auto denied = bob->call(begin);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+
+    auto ticket = alice->call(begin);
+    ASSERT_TRUE(ticket && ticket->has_upload_ticket());
+    const auto assetId = ticket->upload_ticket().attachment_id();
+    proto::Envelope chunk;
+    chunk.mutable_upload_chunk()->set_attachment_id(assetId);
+    chunk.mutable_upload_chunk()->set_data(png.toStdString());
+    ASSERT_TRUE(alice->call(chunk)->has_ok());
+    proto::Envelope finish;
+    finish.mutable_finish_upload()->set_attachment_id(assetId);
+    finish.mutable_finish_upload()->set_sha256(QCryptographicHash::hash(png, QCryptographicHash::Sha256).toStdString());
+    auto image = alice->call(finish);
+    ASSERT_TRUE(image && image->has_attachment());
+    EXPECT_EQ(image->attachment().mime_type(), "image/png");
+
+    proto::Envelope download;
+    download.mutable_download()->set_attachment_id(assetId);
+    ASSERT_TRUE(bob->call(download)->has_error()) << "pending artwork is still private";
+    details->set_set_description(false);
+    details->set_set_icon(true);
+    details->set_icon_attachment_id(assetId);
+    changed = alice->call(update);
+    ASSERT_TRUE(changed && changed->has_channel());
+    EXPECT_EQ(changed->channel().icon_attachment_id(), assetId);
+    ASSERT_TRUE(bob->call(download)->has_file_chunk());
+    ASSERT_TRUE(outsider->call(download)->has_error());
+
+    const auto general = channelNamed(sync(*alice), "general", proto::CHANNEL_TYPE_TEXT);
+    ASSERT_NE(general, 0u);
+    proto::Envelope move;
+    auto* placement = move.mutable_update_channel();
+    placement->set_channel_id(general);
+    placement->set_set_parent(true);
+    placement->set_parent_id(0);
+    auto moved = alice->call(move);
+    ASSERT_TRUE(moved && moved->has_channel());
+    EXPECT_EQ(moved->channel().parent_id(), 0u);
+    bool topLevelForBob = false;
+    const auto afterMove = sync(*bob);
+    for (const auto& c : afterMove.channels())
+        if (c.id() == general)
+            topLevelForBob = c.parent_id() == 0;
+    EXPECT_TRUE(topLevelForBob);
+}
 
 TEST_F(Fixture, DeletingAccountRemovesServerIdentityAndOwnedServers)
 {

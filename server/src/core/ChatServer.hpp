@@ -71,6 +71,7 @@ private:
         quint64 connId = 0;
         Id userId = 0;
         Id channelId = 0;
+        bool channelArtwork = false;
         QString filename;
         QString mimeType;
         std::uint64_t size = 0;

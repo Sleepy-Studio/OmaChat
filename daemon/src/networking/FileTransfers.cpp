@@ -246,7 +246,7 @@ bool FileTransfers::cancel(quint64 transferId)
 
 // ------------------------------------------------------------------ upload
 
-quint64 FileTransfers::upload(quint64 channelId, const QString& path, Done done)
+quint64 FileTransfers::upload(quint64 channelId, const QString& path, Done done, bool channelArtwork)
 {
     const quint64 id = m_nextId++;
     const QFileInfo info(path);
@@ -269,6 +269,7 @@ quint64 FileTransfers::upload(quint64 channelId, const QString& path, Done done)
     Transfer t;
     t.id = id;
     t.upload = true;
+    t.channelArtwork = channelArtwork;
     t.channelId = channelId;
     t.name = info.fileName();
     t.path = info.absoluteFilePath();
@@ -305,6 +306,7 @@ void FileTransfers::beginUpload(quint64 id)
     b->set_filename(t->name.toStdString());
     b->set_mime_type(t->mimeType.toStdString());
     b->set_size(t->total);
+    b->set_channel_artwork(t->channelArtwork);
     send(id, std::move(env), [this, id](Transfer& live, const proto::Envelope& reply) {
         if (reply.has_error()) {
             fail(id, ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));

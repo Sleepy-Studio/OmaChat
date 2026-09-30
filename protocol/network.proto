@@ -60,6 +60,9 @@ message Channel {
   string topic = 7;
   repeated uint64 recipient_ids = 8;  // DM participants
   uint64 effective_permissions = 9;   // for the receiving user only
+  string description = 10;             // longer channel details, empty by default
+  uint64 icon_attachment_id = 11;
+  uint64 banner_attachment_id = 12;
 }
 
 message Role {
@@ -372,12 +375,24 @@ message CreateChannelRequest {
   string name = 2;
   ChannelType type = 3;
   uint64 parent_id = 4;
+  string topic = 5;
+  string description = 6;
 }
 message UpdateChannelRequest {
   uint64 channel_id = 1;
   string name = 2;           // empty = unchanged
   string topic = 3;
   bool set_topic = 4;
+  string description = 5;
+  bool set_description = 6;
+  uint64 icon_attachment_id = 7;       // 0 clears
+  bool set_icon = 8;
+  uint64 banner_attachment_id = 9;     // 0 clears
+  bool set_banner = 10;
+  uint64 parent_id = 11;
+  bool set_parent = 12;
+  uint32 position = 13;
+  bool set_position = 14;
 }
 message DeleteChannelRequest { uint64 channel_id = 1; }
 message OpenDmRequest { uint64 user_id = 1; }
@@ -510,6 +525,7 @@ message BeginUploadRequest {
   string filename = 2;
   string mime_type = 3;
   uint64 size = 4;
+  bool channel_artwork = 5;            // ManageChannel; also permits voice/category uploads
 }
 message UploadTicket {
   uint64 attachment_id = 1;

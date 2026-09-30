@@ -12,6 +12,8 @@ Rectangle {
     signal createChannel(string parentId)
     signal openServerSettings()
     signal openChannelPermissions(string channelId, string name)
+    signal openChannelSettings(string channelId)
+    signal openChannelDetails(string channelId)
     signal newGroup()
     signal addToGroup(string channelId)
     signal renameGroup(string channelId, string name)
@@ -136,6 +138,8 @@ Rectangle {
         Item {
             implicitHeight: Theme.px(30)
             readonly property var m: parent ? parent.model : null
+            Component.onCompleted: if (m && m.iconAttachmentId && m.iconAttachmentId !== "0")
+                                       App.requestPreview(m.iconAttachmentId, "category-icon.png", 0)
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: Theme.px(6)
@@ -145,6 +149,14 @@ Rectangle {
                 Icon {
                     name: m && m.collapsed ? "chevron-right" : "chevron-down"
                     size: Theme.px(12)
+                }
+                Image {
+                    visible: m && m.iconAttachmentId && m.iconAttachmentId !== "0" && status === Image.Ready
+                    source: m ? (App.previews[m.iconAttachmentId] || "") : ""
+                    Layout.preferredWidth: Theme.px(16)
+                    Layout.preferredHeight: Theme.px(16)
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
                 }
                 SectionLabel {
                     Layout.fillWidth: true
@@ -166,7 +178,16 @@ Rectangle {
                 anchors.fill: parent
                 anchors.rightMargin: Theme.px(30)
                 hoverEnabled: true
-                onClicked: App.toggleCategory(m.itemId)
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onClicked: mouse => {
+                    if (mouse.button === Qt.RightButton) {
+                        categoryMenu.channelId = m.itemId
+                        categoryMenu.channelName = m.name
+                        categoryMenu.popup()
+                    } else {
+                        App.toggleCategory(m.itemId)
+                    }
+                }
             }
             Accessible.role: Accessible.Button
             Accessible.name: (m ? m.name : "") + (m && m.collapsed ? qsTr(", collapsed") : qsTr(", expanded"))
@@ -182,6 +203,9 @@ Rectangle {
             readonly property bool isDm: m && m.rowType === "dm"
             readonly property bool isGroup: m && m.rowType === "group_dm"
             readonly property bool emphasized: m && (m.unread || m.selected)
+            readonly property string iconId: m ? m.iconAttachmentId : ""
+            Component.onCompleted: if (iconId.length > 0 && iconId !== "0")
+                                       App.requestPreview(iconId, "channel-icon.png", 0)
             implicitHeight: isDm ? Theme.px(40) : Theme.px(30)
             anchors.left: parent ? parent.left : undefined
             anchors.right: parent ? parent.right : undefined
@@ -225,10 +249,19 @@ Rectangle {
                     size: Theme.px(26)
                 }
                 Icon {
-                    visible: !row.isDm
+                    visible: !row.isDm && !channelImage.visible
                     name: row.isGroup ? "users" : row.isVoice ? "speaker" : (m && m.locked ? "lock" : "hash")
                     size: Theme.px(16)
                     color: row.emphasized ? Theme.text : Theme.textFaint
+                }
+                Image {
+                    id: channelImage
+                    visible: !row.isDm && row.iconId.length > 0 && row.iconId !== "0" && status === Image.Ready
+                    source: App.previews[row.iconId] || ""
+                    Layout.preferredWidth: Theme.px(16)
+                    Layout.preferredHeight: Theme.px(16)
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
                 }
                 Text {
                     Layout.fillWidth: true
@@ -369,6 +402,42 @@ Rectangle {
     }
 
     MenuPopup {
+        id: categoryMenu
+        property string channelId
+        property string channelName
+        MenuAction {
+            text: qsTr("Category settings")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
+            onTriggered: sidebar.openChannelSettings(categoryMenu.channelId)
+        }
+        MenuAction {
+            text: qsTr("View details")
+            onTriggered: sidebar.openChannelDetails(categoryMenu.channelId)
+        }
+        MenuAction {
+            text: qsTr("Move up")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
+            onTriggered: App.moveChannelRelative(categoryMenu.channelId, -1)
+        }
+        MenuAction {
+            text: qsTr("Move down")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
+            onTriggered: App.moveChannelRelative(categoryMenu.channelId, 1)
+        }
+        MenuAction {
+            text: qsTr("Permissions")
+            enabled: App.canManageRoles
+            onTriggered: sidebar.openChannelPermissions(categoryMenu.channelId, categoryMenu.channelName)
+        }
+        MenuAction {
+            text: qsTr("Delete category")
+            danger: true
+            enabled: App.canManageChannels
+            onTriggered: { channelConfirm.channelId = categoryMenu.channelId; channelConfirm.open() }
+        }
+    }
+
+    MenuPopup {
         id: channelMenu
         property string channelId
         property string channelName
@@ -378,6 +447,11 @@ Rectangle {
         MenuAction {
             text: channelMenu.isVoice ? qsTr("Join voice") : qsTr("Open")
             onTriggered: App.selectChannel(channelMenu.channelId)
+        }
+        MenuAction {
+            text: qsTr("View details")
+            enabled: channelMenu.userId.length === 0 && !channelMenu.isGroup
+            onTriggered: sidebar.openChannelDetails(channelMenu.channelId)
         }
         MenuAction {
             text: App.channelMuted(channelMenu.channelId) ? qsTr("Unmute notifications") : qsTr("Mute notifications")
@@ -399,6 +473,24 @@ Rectangle {
             danger: true
             enabled: channelMenu.isGroup
             onTriggered: { leaveGroupConfirm.channelId = channelMenu.channelId; leaveGroupConfirm.open() }
+        }
+        MenuAction {
+            text: qsTr("Channel settings")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
+                     && channelMenu.userId.length === 0 && !channelMenu.isGroup
+            onTriggered: sidebar.openChannelSettings(channelMenu.channelId)
+        }
+        MenuAction {
+            text: qsTr("Move up")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
+                     && channelMenu.userId.length === 0 && !channelMenu.isGroup
+            onTriggered: App.moveChannelRelative(channelMenu.channelId, -1)
+        }
+        MenuAction {
+            text: qsTr("Move down")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
+                     && channelMenu.userId.length === 0 && !channelMenu.isGroup
+            onTriggered: App.moveChannelRelative(channelMenu.channelId, 1)
         }
         MenuAction {
             text: qsTr("Permissions")

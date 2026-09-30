@@ -38,7 +38,7 @@ public:
 
     // Uploads a local file as a pending attachment in `channelId`. Returns
     // the transfer id used in progress events.
-    quint64 upload(quint64 channelId, const QString& path, Done done);
+    quint64 upload(quint64 channelId, const QString& path, Done done, bool channelArtwork = false);
     // Downloads an attachment to `destination`, writing `<destination>.part`
     // first so a partial file never looks complete.
     quint64 download(quint64 attachmentId, const QString& destination, Done done);
@@ -58,6 +58,7 @@ private:
     struct Transfer {
         quint64 id = 0;
         bool upload = true;
+        bool channelArtwork = false;
         quint64 channelId = 0;
         quint64 attachmentId = 0;
         QString name;

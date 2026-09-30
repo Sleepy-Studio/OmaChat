@@ -68,7 +68,10 @@ Servers and channels
   channel list [SERVER]
   channel join CHANNEL                    voice: join; text: focus in the GUI
   channel create SERVER NAME [--voice|--category] [--parent CATEGORY_ID]
-  channel topic CHANNEL TEXT | delete CHANNEL | mute CHANNEL | unmute CHANNEL
+  channel topic CHANNEL TEXT | description CHANNEL TEXT | rename CHANNEL NAME
+  channel icon CHANNEL FILE | banner CHANNEL FILE | clear-icon CHANNEL | clear-banner CHANNEL
+  channel move CHANNEL CATEGORY_ID | position CHANNEL INDEX
+  channel delete CHANNEL | mute CHANNEL | unmute CHANNEL
 
 Messages
   message send CHANNEL [TEXT...] [--attach FILE]...
@@ -408,6 +411,36 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.method = QStringLiteral("channel.update");
             inv.params = {{"channel", args.at(2)}, {"topic", joinRest(args, 3)}};
             inv.print = simpleOk(QStringLiteral("topic updated"));
+        } else if (sub == u"description" && need(3)) {
+            inv.method = QStringLiteral("channel.update");
+            inv.params = {{"channel", args.at(2)}, {"description", joinRest(args, 3)}};
+            inv.print = simpleOk(QStringLiteral("description updated"));
+        } else if (sub == u"rename" && need(4)) {
+            inv.method = QStringLiteral("channel.update");
+            inv.params = {{"channel", args.at(2)}, {"name", joinRest(args, 3)}};
+            inv.print = simpleOk(QStringLiteral("channel renamed"));
+        } else if ((sub == u"icon" || sub == u"banner") && need(4)) {
+            inv.method = QStringLiteral("channel.artwork.set");
+            inv.params = {{"channel", args.at(2)}, {"kind", sub},
+                {"file", QFileInfo(args.at(3)).absoluteFilePath()}};
+            inv.print = simpleOk(QStringLiteral("channel image updated"));
+        } else if ((sub == u"clear-icon" || sub == u"clear-banner") && need(3)) {
+            inv.method = QStringLiteral("channel.artwork.set");
+            inv.params = {{"channel", args.at(2)},
+                {"kind", sub == u"clear-icon" ? "icon" : "banner"}, {"file", ""}};
+            inv.print = simpleOk(QStringLiteral("channel image removed"));
+        } else if (sub == u"move" && need(4)) {
+            inv.method = QStringLiteral("channel.update");
+            inv.params = {{"channel", args.at(2)}, {"parent", args.at(3)}};
+            inv.print = simpleOk(QStringLiteral("channel moved"));
+        } else if (sub == u"position" && need(4)) {
+            bool valid = false;
+            const int position = args.at(3).toInt(&valid);
+            if (!valid || position < 0)
+                return std::nullopt;
+            inv.method = QStringLiteral("channel.update");
+            inv.params = {{"channel", args.at(2)}, {"position", position}};
+            inv.print = simpleOk(QStringLiteral("channel reordered"));
         } else if (sub == u"delete" && need(3)) {
             inv.method = QStringLiteral("channel.delete");
             inv.params = {{"channel", args.at(2)}};

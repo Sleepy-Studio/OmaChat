@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 7);
+    EXPECT_EQ(store.schemaVersion(), 10);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -60,6 +60,9 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE discord_import_map")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE discord_import_replies")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE users DROP COLUMN bio")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN description")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN icon_attachment_id")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN banner_attachment_id")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP INDEX messages_by_channel_time")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN created_at")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN encrypted")));
@@ -72,7 +75,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 7);
+    EXPECT_EQ(store.schemaVersion(), 10);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 
@@ -83,6 +86,17 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     srv.ownerId = 1;
     ASSERT_TRUE(store.insertServer(srv, 0));
     ASSERT_TRUE(store.insertChannel({20, 10, QStringLiteral("general"), server::ChannelKind::Text, 0, 0, {}, {}}, 0));
+    const auto channels = store.loadSnapshot().channels;
+    ASSERT_EQ(channels.size(), 1u);
+    EXPECT_TRUE(channels.front().description.isEmpty());
+    auto updatedChannel = channels.front();
+    updatedChannel.description = QStringLiteral("A longer channel guide");
+    updatedChannel.iconAttachmentId = 91;
+    updatedChannel.bannerAttachmentId = 92;
+    ASSERT_TRUE(store.updateChannel(updatedChannel));
+    EXPECT_EQ(store.loadSnapshot().channels.front().description, updatedChannel.description);
+    EXPECT_EQ(store.loadSnapshot().channels.front().iconAttachmentId, 91u);
+    EXPECT_EQ(store.loadSnapshot().channels.front().bannerAttachmentId, 92u);
     server::MessageRecord m{30, 20, 1, QString(), 0, 0, false, {}, {}, QByteArray("\x01sealed", 7)};
     ASSERT_TRUE(store.insertMessage(m));
     EXPECT_EQ(store.message(30)->encrypted, QByteArray("\x01sealed", 7));

@@ -92,6 +92,14 @@ std::optional<QString> topic(const QString& input)
     return s;
 }
 
+std::optional<QString> channelDescription(const QString& input)
+{
+    const QString s = input.trimmed();
+    if (s.size() > kMaxChannelDescriptionLength || hasControl(s, true))
+        return std::nullopt;
+    return s;
+}
+
 bool passwordAcceptable(const QString& password)
 {
     const auto bytes = password.toUtf8().size();

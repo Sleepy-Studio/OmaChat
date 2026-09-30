@@ -520,6 +520,9 @@ proto::Channel ChatServer::toProto(const ChannelRecord& c, Id viewer) const
     p.set_parent_id(c.parentId);
     p.set_position(c.position);
     p.set_topic(c.topic.toStdString());
+    p.set_description(c.description.toStdString());
+    p.set_icon_attachment_id(c.iconAttachmentId);
+    p.set_banner_attachment_id(c.bannerAttachmentId);
     for (Id r : c.recipients)
         p.add_recipient_ids(r);
     if (viewer)

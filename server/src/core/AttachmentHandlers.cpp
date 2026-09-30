@@ -3,6 +3,9 @@
 #include "omachat/core/Validation.hpp"
 
 #include <QDir>
+#include <QBuffer>
+#include <QImageReader>
+#include <QImageWriter>
 
 namespace omachat::server {
 
@@ -38,11 +41,16 @@ void ChatServer::handleBeginUpload(Session& s, std::uint64_t rid, const proto::B
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("channel not found"));
         return;
     }
-    if (c->kind != ChannelKind::Text && c->kind != ChannelKind::Dm && c->kind != ChannelKind::GroupDm) {
+    if (m.channel_artwork()) {
+        if (!c->serverId || !m_state.can(c->id, s.userId, ManageChannel)) {
+            replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage artwork here"));
+            return;
+        }
+    } else if (c->kind != ChannelKind::Text && c->kind != ChannelKind::Dm && c->kind != ChannelKind::GroupDm) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("this channel does not accept messages"));
         return;
     }
-    if (!m_state.can(c->id, s.userId, SendMessages | AttachFiles)) {
+    if (!m.channel_artwork() && !m_state.can(c->id, s.userId, SendMessages | AttachFiles)) {
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot attach files here"));
         return;
     }
@@ -55,7 +63,7 @@ void ChatServer::handleBeginUpload(Session& s, std::uint64_t rid, const proto::B
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("empty files cannot be attached"));
         return;
     }
-    if (m.size() > maxUploadBytes()) {
+    if (m.size() > maxUploadBytes() || (m.channel_artwork() && m.size() > 2 * 1024 * 1024)) {
         replyError(s, rid, proto::ERROR_TOO_LARGE,
             QStringLiteral("files on this server are limited to %1 MB").arg(m_config.maxUploadMb));
         return;
@@ -73,6 +81,7 @@ void ChatServer::handleBeginUpload(Session& s, std::uint64_t rid, const proto::B
     u.connId = s.connId;
     u.userId = s.userId;
     u.channelId = c->id;
+    u.channelArtwork = m.channel_artwork();
     u.filename = *name;
     u.mimeType = validation::mimeType(QString::fromStdString(m.mime_type()));
     u.size = m.size();
@@ -177,6 +186,47 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
     }
     u->file->close();
 
+    QByteArray normalized;
+    QByteArray imageFormat;
+    if (u->channelArtwork) {
+        QImageReader reader(u->file->fileName());
+        reader.setDecideFormatFromContent(true);
+        const QByteArray sourceFormat = reader.format().toLower();
+        const QSize dimensions = reader.size();
+        if ((sourceFormat != "png" && sourceFormat != "jpeg" && sourceFormat != "webp")
+            || !dimensions.isValid() || dimensions.width() > 6000 || dimensions.height() > 6000
+            || qint64(dimensions.width()) * dimensions.height() > 12000000 || reader.imageCount() > 1) {
+            abortUpload(id);
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel artwork must be a static PNG, JPEG, or WebP image"));
+            return;
+        }
+        QImage image = reader.read();
+        if (image.isNull()) {
+            abortUpload(id);
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("could not decode channel artwork"));
+            return;
+        }
+        if (image.width() > 1600 || image.height() > 1600)
+            image = image.scaled(1600, 1600, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        imageFormat = image.hasAlphaChannel() ? "PNG" : "JPEG";
+        QBuffer buffer(&normalized);
+        buffer.open(QIODevice::WriteOnly);
+        QImageWriter writer(&buffer, imageFormat);
+        writer.setQuality(85);
+        if (!writer.write(image) || normalized.isEmpty() || normalized.size() > 2 * 1024 * 1024) {
+            abortUpload(id);
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel artwork could not fit the 2 MB image limit"));
+            return;
+        }
+        QFile clean(u->file->fileName());
+        if (!clean.open(QIODevice::WriteOnly | QIODevice::Truncate) || clean.write(normalized) != normalized.size()) {
+            abortUpload(id);
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not save channel artwork"));
+            return;
+        }
+        clean.close();
+    }
+
     AttachmentRecord a;
     a.id = id;
     a.channelId = u->channelId;
@@ -185,7 +235,15 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
     a.mimeType = u->mimeType;
     a.size = u->size;
     a.sha256 = digest;
+    if (u->channelArtwork) {
+        a.size = static_cast<std::uint64_t>(normalized.size());
+        a.sha256 = QCryptographicHash::hash(normalized, QCryptographicHash::Sha256);
+        a.mimeType = imageFormat == "PNG" ? QStringLiteral("image/png") : QStringLiteral("image/jpeg");
+        a.filename = imageFormat == "PNG" ? QStringLiteral("channel-artwork.png")
+                                            : QStringLiteral("channel-artwork.jpg");
+    }
     a.createdAt = now();
+    a.artwork = u->channelArtwork;
     const QString partPath = u->file->fileName();
     if (!QFile::rename(partPath, attachmentPath(id)) || !m_store.insertAttachment(a)) {
         QFile::remove(attachmentPath(id));
@@ -219,7 +277,7 @@ void ChatServer::handleCancelUpload(Session& s, std::uint64_t rid, const proto::
     }
     // A finished but unsent attachment can be withdrawn by its uploader.
     const auto a = m_store.attachment(m.attachment_id());
-    if (!a || a->uploaderId != s.userId || a->messageId != 0) {
+    if (!a || a->uploaderId != s.userId || a->messageId != 0 || m_store.artworkChannel(a->id)) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("no such upload"));
         return;
     }
@@ -233,8 +291,10 @@ void ChatServer::handleDownload(Session& s, std::uint64_t rid, const proto::Down
     if (!limit(s, rid, s.transfer))
         return;
     const auto a = m_store.attachment(m.attachment_id());
+    const Id artworkChannel = a ? m_store.artworkChannel(a->id) : 0;
     const bool visible = a
-        && (a->messageId == 0 ? a->uploaderId == s.userId
+        && (artworkChannel ? m_state.can(artworkChannel, s.userId, ViewChannel)
+            : a->messageId == 0 ? a->uploaderId == s.userId
                               : m_state.can(a->channelId, s.userId, ViewChannel | ReadHistory));
     if (!visible) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("attachment not found"));

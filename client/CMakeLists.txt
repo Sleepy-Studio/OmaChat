@@ -80,11 +80,13 @@ qt_add_qml_module(omachat
         qml/dialogs/PeoplePickerDialog.qml
         qml/dialogs/SafetyDialog.qml
         qml/dialogs/ChannelPermissionsDialog.qml
+        qml/dialogs/ChannelSettingsDialog.qml
+        qml/dialogs/ChannelDetailsDialog.qml
     RESOURCES
         icons/app.svg
         icons/hash.svg icons/speaker.svg icons/mic.svg icons/mic-off.svg icons/headphones.svg
         icons/headphones-off.svg icons/settings.svg icons/plus.svg icons/x.svg icons/reply.svg
-        icons/edit.svg icons/trash.svg icons/copy.svg icons/search.svg icons/lock.svg icons/at.svg
+        icons/edit.svg icons/info.svg icons/trash.svg icons/copy.svg icons/search.svg icons/lock.svg icons/at.svg
         icons/chevron-down.svg icons/chevron-right.svg icons/hangup.svg icons/message.svg
         icons/smile.svg icons/link.svg icons/logout.svg icons/bell-off.svg icons/users.svg
         icons/server.svg icons/alert.svg icons/shield.svg icons/crown.svg

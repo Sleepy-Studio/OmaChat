@@ -25,7 +25,7 @@ option(OMACHAT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 include(GNUInstallDirs)
 include(cmake/OmaChatWarnings.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Sql)
 find_package(Protobuf CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)

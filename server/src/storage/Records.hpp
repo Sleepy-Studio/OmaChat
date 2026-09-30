@@ -75,6 +75,23 @@ struct MemberRecord {
 enum class ChannelKind : int { Text = 0, Voice = 1, Category = 2, Dm = 3, GroupDm = 4 };
 
 struct ChannelRecord {
+    ChannelRecord() = default;
+    ChannelRecord(Id channelId, Id server, QString channelName, ChannelKind channelKind, Id parent,
+        std::uint32_t order, QString channelTopic, std::vector<Id> users, QString channelDescription = {},
+        Id iconId = 0, Id bannerId = 0)
+        : id(channelId)
+        , serverId(server)
+        , name(std::move(channelName))
+        , kind(channelKind)
+        , parentId(parent)
+        , position(order)
+        , topic(std::move(channelTopic))
+        , recipients(std::move(users))
+        , description(std::move(channelDescription))
+        , iconAttachmentId(iconId)
+        , bannerAttachmentId(bannerId)
+    {
+    }
     Id id = 0;
     Id serverId = 0; // 0 for DMs
     QString name;
@@ -83,6 +100,9 @@ struct ChannelRecord {
     std::uint32_t position = 0;
     QString topic;
     std::vector<Id> recipients; // DMs only
+    QString description;
+    Id iconAttachmentId = 0;
+    Id bannerAttachmentId = 0;
 };
 
 struct OverrideRecord {
@@ -125,6 +145,7 @@ struct AttachmentRecord {
     std::uint64_t size = 0;
     QByteArray sha256;
     std::int64_t createdAt = 0;
+    bool artwork = false;
 };
 
 struct MessageRecord {

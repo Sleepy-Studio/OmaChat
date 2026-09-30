@@ -119,6 +119,8 @@ public:
     // Deletes pending attachments created before `cutoffMs`; returns their ids.
     std::vector<Id> purgePendingAttachments(std::int64_t cutoffMs);
     bool deleteAttachment(Id id);
+    // Returns the channel that currently uses an attachment as artwork.
+    Id artworkChannel(Id attachmentId);
     std::vector<Id> allAttachmentIds();
 
     bool setReaction(Id messageId, Id userId, const QString& emoji, bool add);

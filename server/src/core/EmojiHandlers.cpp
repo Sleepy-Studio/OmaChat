@@ -32,7 +32,7 @@ void ChatServer::handleCreateEmoji(Session& s, std::uint64_t rid, const proto::C
         return;
     }
     const auto att = m_store.attachment(m.attachment_id());
-    if (!att || att->uploaderId != s.userId || att->messageId != 0) {
+    if (!att || att->artwork || att->uploaderId != s.userId || att->messageId != 0) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("upload an image first"));
         return;
     }

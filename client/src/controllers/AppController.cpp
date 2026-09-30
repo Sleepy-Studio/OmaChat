@@ -329,6 +329,7 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
     if (name == u"channel.created" || name == u"channel.updated") {
         m_channelsById.insert(id("id"), data);
         rebuildChannels();
+        emit channelDataChanged(id("id"));
         if (id("id") == m_selectedChannel)
             emit selectionChanged();
         return;
@@ -562,6 +563,16 @@ QString AppController::selectedChannelTopic() const
     return channel(m_selectedChannel).value(QStringLiteral("topic")).toString();
 }
 
+QString AppController::selectedChannelDescription() const
+{
+    return channel(m_selectedChannel).value(QStringLiteral("description")).toString();
+}
+
+QString AppController::selectedChannelBannerId() const
+{
+    return channel(m_selectedChannel).value(QStringLiteral("banner_attachment_id")).toString();
+}
+
 QString AppController::selectedChannelType() const
 {
     return channel(m_selectedChannel).value(QStringLiteral("type")).toString();
@@ -788,6 +799,7 @@ void AppController::rebuildChannels()
             {"selected", id == m_selectedChannel}, {"collapsed", m_collapsed.contains(id)}, {"speaking", false},
             {"userMuted", false}, {"userDeafened", false}, {"userId", QString()}, {"presence", QString()},
             {"voiceCount", 0}, {"topic", c.value(QStringLiteral("topic")).toString()}, {"streaming", false}};
+        row.insert(QStringLiteral("iconAttachmentId"), c.value(QStringLiteral("icon_attachment_id")).toString());
         if (type == u"dm") {
             for (const auto& r : c.value(QStringLiteral("recipients")).toArray()) {
                 if (r.toString() != selfId()) {

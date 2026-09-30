@@ -8,6 +8,7 @@ namespace omachat::validation {
 
 inline constexpr int kMaxMessageLength = 4000;
 inline constexpr int kMaxTopicLength = 512;
+inline constexpr int kMaxChannelDescriptionLength = 2000;
 inline constexpr int kMinPasswordLength = 8;
 inline constexpr int kMaxPasswordLength = 1024;
 
@@ -35,6 +36,7 @@ std::optional<QString> roleName(const QString& input);
 std::optional<QString> messageContent(const QString& input);
 
 std::optional<QString> topic(const QString& input);
+std::optional<QString> channelDescription(const QString& input);
 
 bool passwordAcceptable(const QString& password);
 

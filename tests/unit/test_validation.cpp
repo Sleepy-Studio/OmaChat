@@ -36,6 +36,15 @@ TEST(Validation, LabelsRejectControlCharacters)
     EXPECT_FALSE(channelName(QString()));
 }
 
+TEST(Validation, ChannelDescriptionAllowsUsefulTextButNotControlCodes)
+{
+    EXPECT_EQ(channelDescription(QStringLiteral("  Purpose\n- Rule one  ")).value(),
+        QStringLiteral("Purpose\n- Rule one"));
+    EXPECT_TRUE(channelDescription(QString()));
+    EXPECT_FALSE(channelDescription(QString(kMaxChannelDescriptionLength + 1, u'x')));
+    EXPECT_FALSE(channelDescription(QString::fromUtf8("bad\x01text")));
+}
+
 TEST(Validation, Passwords)
 {
     EXPECT_FALSE(passwordAcceptable(QStringLiteral("short")));
