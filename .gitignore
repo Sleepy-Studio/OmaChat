@@ -6,4 +6,18 @@
 /packaging/arch/pkg/
 /packaging/arch/*.pkg.tar.*
 /packaging/arch/omachat/
-/*-local-command-caveat*.txt
+
+# Stray session/log dumps at repo root (e.g. accidentally redirected shell
+# output, agent session transcripts) — never intentionally committed here.
+/[0-9]*.txt
+/*local-command-caveat*.txt
+
+# Editor / OS noise
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python bytecode (scripts/import-discord.py)
+__pycache__/
+*.pyc
