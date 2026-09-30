@@ -12,7 +12,8 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm --needed base-devel git cmake ninja clang \
-            qt6-base qt6-declarative qt6-svg qt6-wayland qtkeychain-qt6 protobuf abseil-cpp \
+            qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia qtkeychain-qt6 xorg-server-xvfb \
+            protobuf abseil-cpp \
             libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
       - uses: actions/checkout@v4
       - name: Configure
@@ -28,7 +29,7 @@ jobs:
         run: mkdir -p -m 700 /tmp/runtime && ctest --test-dir build -L integration --output-on-failure
       - name: GUI smoke test (offscreen render)
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: xcb
           QT_QPA_PLATFORMTHEME: ""
           QT_QUICK_BACKEND: software
           XDG_RUNTIME_DIR: /tmp/runtime
@@ -36,8 +37,9 @@ jobs:
           OMACHAT_SCREENSHOT_DELAY_MS: "1500"
         run: |
           useradd -m ci || true
+          chmod 1777 /tmp
           chown -R ci /tmp/runtime .
-          su ci -c 'build/client/omachat --screenshot /tmp/runtime/gui.png' && test -s /tmp/runtime/gui.png
+          su ci -c 'TMPDIR=/tmp/runtime xvfb-run -a -s "-screen 0 1280x800x24" build/client/omachat --screenshot /tmp/runtime/gui.png' && test -s /tmp/runtime/gui.png
 
   format:
     runs-on: ubuntu-latest

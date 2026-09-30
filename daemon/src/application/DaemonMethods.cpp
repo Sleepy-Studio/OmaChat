@@ -1434,7 +1434,9 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("join a voice channel to share your screen"));
             return;
         }
-        m_video->setShareAudio(p.value(QStringLiteral("audio")).toBool(m_config.video.audio));
+        // An omitted audio flag is always silent, including for users whose
+        // older config file saved the former audio-on default.
+        m_video->setShareAudio(p.value(QStringLiteral("audio")).toBool(false));
         m_video->startSharing([this, r](bool ok, const QString& error) {
             if (!ok) {
                 r.error(error == u"cancelled" ? e::BadRequest : e::MediaDeviceUnavailable, error);

@@ -15,6 +15,8 @@
 #include <QJsonArray>
 #include <QMimeData>
 #include <QMimeDatabase>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QUrl>
 
 namespace omachat::client {
@@ -209,8 +211,7 @@ void AppController::requestMedia(const QString& attachmentId, const QString& fil
         return;
     m_previewRequests.insert(attachmentId);
     m_link.request(
-        QStringLiteral("attachment.download"),
-        {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}},
+        QStringLiteral("attachment.download"), {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}},
         [this, attachmentId](const ipc::Reply& r) {
             if (!r.ok) {
                 m_previewRequests.remove(attachmentId);
@@ -254,6 +255,27 @@ void AppController::openAttachment(const QString& attachmentId, const QString& f
                 QDesktopServices::openUrl(QUrl::fromLocalFile(path));
             else
                 saveAttachment(attachmentId, filename);
+        },
+        0);
+}
+
+void AppController::openVideoAttachment(const QString& attachmentId, const QString& filename)
+{
+    const QString mpv = QStandardPaths::findExecutable(QStringLiteral("mpv"));
+    if (mpv.isEmpty()) {
+        showNotice(tr("Install MPV to open video attachments."), true);
+        return;
+    }
+    m_link.request(
+        QStringLiteral("attachment.download"), {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}},
+        [this, mpv, filename](const ipc::Reply& r) {
+            if (!r.ok) {
+                showNotice(tr("Cannot open %1: %2").arg(filename, r.errorMessage), true);
+                return;
+            }
+            const QString path = r.result.value(QStringLiteral("path")).toString();
+            if (!QFileInfo(path).isFile() || !QProcess::startDetached(mpv, {QStringLiteral("--"), path}))
+                showNotice(tr("Could not start MPV for %1.").arg(filename), true);
         },
         0);
 }

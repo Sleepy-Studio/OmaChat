@@ -182,9 +182,9 @@ Rectangle {
     MenuPopup {
         id: shareOptionsMenu
         MenuAction {
-            text: qsTr("Share system audio")
+            text: qsTr("Offer all-application sound when sharing")
             checkable: true
-            checked: App.videoSettings.audio !== false
+            checked: App.videoSettings.audio === true
             onTriggered: App.setVideo("audio", !checked)
         }
     }

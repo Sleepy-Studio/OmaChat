@@ -335,6 +335,7 @@ public:
     Q_INVOKABLE void setInputMode(const QString& mode);
     Q_INVOKABLE void setUserVolume(const QString& userId, int percent);
     Q_INVOKABLE void toggleScreenShare();
+    Q_INVOKABLE void startScreenShare(bool audio);
     Q_INVOKABLE void watchStream(const QString& userId);
     Q_INVOKABLE void unwatchStream(const QString& userId);
     // Ephemeral laser pointer while sharing your own screen; x/y normalized
@@ -391,6 +392,7 @@ public:
     Q_INVOKABLE void requestMedia(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void saveAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void openAttachment(const QString& attachmentId, const QString& filename, double size);
+    Q_INVOKABLE void openVideoAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void cancelTransfer(const QString& transferId);
     Q_INVOKABLE QString formatSize(double bytes) const;
     Q_INVOKABLE QString formatDuration(qint64 ms) const;
@@ -428,6 +430,7 @@ signals:
     void authChanged();
     void oauthIdentitiesChanged();
     void voiceChanged();
+    void requestScreenAudioConsent();
     void selectionChanged();
     void discordImportChanged();
     void discordImportFinished(bool success);

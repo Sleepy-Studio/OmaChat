@@ -1,29 +1,31 @@
 # Development status
 
 Handoff notes for whoever picks this up next (human or agent). Last updated
-2026-09-29. "Current source" below means the working tree, including the
-unreleased CI and screen-audio changes; the latest tagged release is older.
+2026-09-29. "Current source" below means `main` at `6decdd4` plus the
+changes in draft PR #1. The latest tagged release is older.
 
 ## Where things are
 
 - Remote: `github.com/Sleepy-Studio/OmaChat` (**public** as of 2026-09-28), branch `main`.
 - Latest tagged release: **0.2.0** (`v0.2.0`). The current source adds OAuth,
-  profiles, server-side account deletion, and Discord channel history import
-  after that tag. These changes need a new release; do not infer their presence
-  from the installed package version `0.2.0-1` alone.
+  profiles, server-side account deletion, Discord history import, inline
+  media playback and custom server emoji after that tag. These changes need a
+  new release; do not infer their presence from an installed package named
+  `0.2.0-1` alone.
 - Protocol **1.2** (capabilities
   `search.server`, `dm.group`, `attachments.resume`, `video.h264`,
   `e2e.v1`; a 1.2 client still works with a 1.1 server). Server schema
-  **v6**, daemon local schema **v2**; both migrate forward on start. A database
-  migrated to v6 cannot be opened by the v0.2.0 server.
-- On 2026-09-29, the current source built without changes needed and all
-  **167 CTest tests passed**: 112 unit, 49 integration, 6 fuzz smoke.
+  **v7**, daemon local schema **v2**; both migrate forward on start. A database
+  migrated to v7 cannot be opened by the v0.2.0 server.
+- On 2026-09-29, the current source built and all
+  **168 CTest tests passed**: 112 unit, 50 integration, 6 fuzz smoke.
   Integration tests require permission to bind loopback TCP/UDP sockets.
-- The latest GitHub CI run for `43a145e` passed build, format, unit, fuzz,
-  integration and plugin jobs but failed its offscreen GUI screenshot step.
-  The working tree now sets a software renderer, avoids daemon startup in
-  screenshot mode, and reports image-save failures; a local offscreen run
-  produced a valid 1200×760 PNG. The CI fix is not yet verified on GitHub.
+- GitHub CI for draft PR #1 passed build, unit, fuzz, integration, format,
+  plugin and GUI screenshot checks on 2026-09-29. The PR adds the newly
+  required `qt6-multimedia` package to CI, the Arch package and build
+  instructions. The screenshot smoke test now uses Xvfb and a writable
+  temporary directory; the earlier screenshot-mode changes are already on
+  `main`. These fixes have not been merged into `main` yet.
 - The manual test pass below was last done in the sandbox on 2026-09-28;
   newer OAuth, profile, account deletion, and import paths need live checks.
 - A real `omachat-server` was also stood up on this machine (systemd,
@@ -92,9 +94,12 @@ VAD/PTT), reconnect/resume, CLI, Omarchy bar widget, Arch packaging, and:
   offline operator tool for existing servers. Both preserve historical dates
   and avoid duplicating already imported Discord message IDs. See
   `docs/discord-migration.md` for data and format limits.
+- Inline audio/video attachment playback, Unicode emoji picker and per-server
+  custom emoji are in `6decdd4`; these newer paths still need manual checks.
 - Screen sound is off by default in the current working tree. The GUI
-  setting and CLI `stream start --audio` explicitly opt into capturing
-  every other application's playback; this is not per-window audio.
+  setting requires confirmation on each share, and CLI `stream start --audio`
+  explicitly opts into capturing every other application's playback; this
+  is not per-window audio. A bare CLI start stays silent with old configs.
 
 ## Needs a human (the one-shot test pass)
 
@@ -153,8 +158,9 @@ Start with `scripts/dev-sandbox.sh start` unless noted.
 
 ## Next release plan
 
-**0.3.0 candidate (current feature set):** land and verify the GUI smoke
-fix on GitHub; rerun the clean package check; perform the new-path live tests
+**0.3.0 candidate (current feature set):** land and verify the CI dependency
+and GUI smoke fixes on GitHub; rerun the clean package check; perform the
+new-path live tests
 above plus a two-machine voice/screen-share pass; update the README and
 protocol/security/media docs to describe the shipped source; tag only after
 the checks pass. Build and publish the matching Docker image and AUR update,

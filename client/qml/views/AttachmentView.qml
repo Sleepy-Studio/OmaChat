@@ -3,7 +3,7 @@ import QtQuick.Controls
 import OmaChat
 
 // One attachment inside a message. Small images load a preview through the
-// daemon's cache; everything else is a file card with a save button.
+// daemon's cache; GIFs play inline. Everything else is a file card.
 Item {
     id: root
 
@@ -12,6 +12,7 @@ Item {
 
     readonly property bool isImage: String(attachment.mime_type).startsWith("image/")
                                     && attachment.size <= 10 * 1024 * 1024
+    readonly property bool isGif: isImage && String(attachment.mime_type).toLowerCase() === "image/gif"
     readonly property bool isAudio: String(attachment.mime_type).startsWith("audio/")
     readonly property bool isVideo: String(attachment.mime_type).startsWith("video/")
     readonly property bool isMedia: isAudio || isVideo
@@ -29,10 +30,13 @@ Item {
     Rectangle {
         id: imageBox
         visible: root.isImage
-        readonly property real aspect: image.implicitHeight > 0 ? image.implicitWidth / image.implicitHeight : 4 / 3
-        width: Math.min(Theme.px(400), root.maxWidth,
-                        image.status === Image.Ready ? image.implicitWidth : Theme.px(240))
-        height: Math.min(Theme.px(300), width / aspect)
+        readonly property real naturalWidth: root.isGif ? gif.implicitWidth : image.implicitWidth
+        readonly property real naturalHeight: root.isGif ? gif.implicitHeight : image.implicitHeight
+        readonly property int imageStatus: root.isGif ? gif.status : image.status
+        readonly property real aspect: naturalHeight > 0 ? naturalWidth / naturalHeight : 4 / 3
+        width: Math.min(Theme.px(400), root.maxWidth, Theme.px(300) * aspect,
+                        imageStatus === Image.Ready ? naturalWidth : Theme.px(240))
+        height: width / aspect
         radius: Theme.px(6)
         color: Theme.surface
         clip: true
@@ -40,23 +44,37 @@ Item {
         Image {
             id: image
             anchors.fill: parent
-            source: root.previewUrl
+            visible: !root.isGif
+            source: root.isGif ? "" : root.previewUrl
             asynchronous: true
             fillMode: Image.PreserveAspectFit
-            // Bounds decode memory whatever the sender uploaded.
+            // A single source dimension bounds the decode without changing
+            // the image's aspect ratio.
             sourceSize.width: Theme.px(800)
-            sourceSize.height: Theme.px(600)
+        }
+
+        AnimatedImage {
+            id: gif
+            anchors.fill: parent
+            visible: root.isGif
+            source: root.isGif ? root.previewUrl : ""
+            playing: visible && status === Image.Ready
+            cache: false
+            fillMode: Image.PreserveAspectFit
+            // Qt scales GIF frames to sourceSize before PreserveAspectFit.
+            // Setting both dimensions would force every GIF to 4:3.
+            sourceSize.width: Theme.px(800)
         }
 
         Text {
             anchors.centerIn: parent
-            visible: image.status !== Image.Ready
+            visible: imageBox.imageStatus !== Image.Ready
             width: parent.width - Theme.px(16)
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideMiddle
             color: Theme.textFaint
             font.pixelSize: Theme.px(12)
-            text: image.status === Image.Error ? qsTr("Cannot show %1").arg(root.attachment.filename)
+            text: imageBox.imageStatus === Image.Error ? qsTr("Cannot show %1").arg(root.attachment.filename)
                                                : root.attachment.filename
         }
 
@@ -79,9 +97,11 @@ Item {
         id: mediaPlayer
         visible: root.isMedia
         isVideo: root.isVideo
+        filename: root.attachment.filename || ""
         source: root.previewUrl
         maxWidth: root.maxWidth
         onPlayRequested: App.requestMedia(root.attachment.id, root.attachment.filename)
+        onOpenRequested: App.openVideoAttachment(root.attachment.id, root.attachment.filename)
     }
 
     // ----------------------------------------------------------------- file

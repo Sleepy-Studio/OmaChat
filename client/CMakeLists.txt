@@ -1,4 +1,4 @@
-find_package(Qt6 REQUIRED COMPONENTS Gui Qml Quick QuickControls2 DBus Svg Multimedia)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Gui Qml Quick QuickControls2 DBus Svg Multimedia)
 
 # Pure composer logic (markdown sanitizer, command parser, paste handling),
 # unit tested.
@@ -32,6 +32,7 @@ qt_add_qml_module(omachat
         src/platform/ThemeProvider.hpp src/platform/ThemeProvider.cpp
         src/platform/SingleInstance.hpp src/platform/SingleInstance.cpp
         src/views/VideoFrameItem.hpp src/views/VideoFrameItem.cpp
+        src/views/AudioLevels.hpp src/views/AudioLevels.cpp
     QML_FILES
         qml/Main.qml
         qml/components/Icon.qml

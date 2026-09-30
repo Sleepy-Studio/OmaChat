@@ -1,5 +1,8 @@
 find_package(GTest REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Test)
+if(OMACHAT_BUILD_CLIENT)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Multimedia)
+endif()
 include(GoogleTest)
 
 # Unit tests: pure logic, no network, no audio hardware.
@@ -24,8 +27,10 @@ add_executable(omachat_unit_tests
     unit/test_e2e.cpp
 )
 if(OMACHAT_BUILD_CLIENT)
-    target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp)
-    target_link_libraries(omachat_unit_tests PRIVATE omachat_client_text)
+    target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp
+        unit/test_audio_levels.cpp ../client/src/views/AudioLevels.cpp)
+    target_include_directories(omachat_unit_tests PRIVATE ../client/src)
+    target_link_libraries(omachat_unit_tests PRIVATE omachat_client_text Qt6::Multimedia)
 endif()
 omachat_set_warnings(omachat_unit_tests)
 target_link_libraries(omachat_unit_tests PRIVATE
