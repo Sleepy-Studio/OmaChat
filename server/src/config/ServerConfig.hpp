@@ -50,6 +50,9 @@ struct ServerConfig {
     OAuthProviderSettings oauthGoogle;
 
     // Loads TOML. Unknown keys are ignored; invalid values produce an error.
+    // OMACHAT_OPERATOR_USERNAME and OMACHAT_OPERATOR_REMOTE_RESTART override
+    // the [operator] section when set and non-empty, so container hosts can
+    // configure them without editing the persisted file.
     static bool load(const QString& path, ServerConfig& out, QString* error);
 };
 

@@ -1,12 +1,40 @@
 #include "config/ServerConfig.hpp"
 
 #include <QFileInfo>
+#include <QtGlobal>
 
 #include <toml++/toml.hpp>
 
 #include <sstream>
 
 namespace omachat::server {
+namespace {
+
+// Environment overrides file values so container hosts (Docker, Coolify)
+// and systemd units can configure the server without hand-editing the
+// persisted server.toml. A set-but-empty variable leaves the file value
+// alone, matching the OAuth entrypoint convention.
+std::optional<bool> parseEnvBool(const char* name, bool* out, QString* error)
+{
+    if (!qEnvironmentVariableIsSet(name))
+        return false;
+    const QString value = QString::fromLocal8Bit(qgetenv(name)).trimmed().toLower();
+    if (value.isEmpty())
+        return false;
+    if (value == u"1" || value == u"true" || value == u"yes" || value == u"on") {
+        *out = true;
+        return true;
+    }
+    if (value == u"0" || value == u"false" || value == u"no" || value == u"off") {
+        *out = false;
+        return true;
+    }
+    if (error)
+        *error = QStringLiteral("%1 must be a boolean (true/false)").arg(QString::fromLocal8Bit(name));
+    return std::nullopt;
+}
+
+} // namespace
 
 bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
 {
@@ -53,6 +81,13 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
     out.registrationOpen = t["server"]["registration_open"].value_or(out.registrationOpen);
     out.operatorUsername = str(t["operator"]["username"], out.operatorUsername).trimmed();
     out.remoteRestart = t["operator"]["remote_restart"].value_or(out.remoteRestart);
+    const QString envOperator = QString::fromLocal8Bit(qgetenv("OMACHAT_OPERATOR_USERNAME")).trimmed();
+    if (!envOperator.isEmpty())
+        out.operatorUsername = envOperator;
+    // Fails only on an unparsable value (error already set); when unset
+    // or empty the file value stands.
+    if (!parseEnvBool("OMACHAT_OPERATOR_REMOTE_RESTART", &out.remoteRestart, error))
+        return false;
     auto mport = integer(t["media"]["udp_port"], out.mediaPort, 1, 65535, "media.udp_port");
     out.mediaBind = str(t["media"]["bind"], out.mediaBind);
     auto bitrate = integer(t["media"]["voice_bitrate"], out.voiceBitrate, 24000, 96000, "media.voice_bitrate");

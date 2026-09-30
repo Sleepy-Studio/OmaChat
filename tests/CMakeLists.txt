@@ -22,6 +22,7 @@ add_executable(omachat_unit_tests
     unit/test_spsc_ring.cpp
     unit/test_client_state.cpp
     unit/test_server_state.cpp
+    unit/test_server_config_env.cpp
     unit/test_store.cpp
     unit/test_video.cpp
     unit/test_e2e.cpp

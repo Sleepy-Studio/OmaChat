@@ -37,6 +37,13 @@ services:
       OMACHAT_MAX_UPLOAD_MB: ${OMACHAT_MAX_UPLOAD_MB:-50}
       OMACHAT_LOG_LEVEL: ${OMACHAT_LOG_LEVEL:-info}
 
+      # Optional: instance operator console. Set to your registered account
+      # name to reveal the Instance console in that account's client menu;
+      # leave unset to keep it disabled. Honored on every start, so existing
+      # volumes need only a redeploy after setting it — no config file edits.
+      OMACHAT_OPERATOR_USERNAME: ${OMACHAT_OPERATOR_USERNAME:-}
+      OMACHAT_OPERATOR_REMOTE_RESTART: ${OMACHAT_OPERATOR_REMOTE_RESTART:-false}
+
       # Optional: "sign in with Discord/GitHub/Google". Leave a provider's
       # id/secret unset in Coolify's environment variables to keep it
       # disabled; only supplying both enables it. Register the app as an

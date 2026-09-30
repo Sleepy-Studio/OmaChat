@@ -19,6 +19,21 @@ KEY_PATH="$DATA_DIR/key.pem"
 : "${OMACHAT_NODE_ID:=1}"
 : "${OMACHAT_MAX_UPLOAD_MB:=50}"
 : "${OMACHAT_LOG_LEVEL:=info}"
+# Instance operator console: account to promote, assigned after registering it
+# in the normal client. Empty (the default) disables operator access. Unlike
+# most settings below, these are honored on every start — the server prefers
+# them over the persisted server.toml — so they stay rotatable via env.
+: "${OMACHAT_OPERATOR_USERNAME:=}"
+: "${OMACHAT_OPERATOR_REMOTE_RESTART:=false}"
+# The value is baked into the generated server.toml, where only true/false
+# parse — fail fast instead of writing a config that refuses to load.
+case "$OMACHAT_OPERATOR_REMOTE_RESTART" in
+    true|false) ;;
+    *)
+        echo "omachat-entrypoint: OMACHAT_OPERATOR_REMOTE_RESTART must be true or false" >&2
+        exit 1
+        ;;
+esac
 # OAuth sign-in: all optional and unset by default. Each provider needs both
 # its client id and secret to do anything; see server.toml.example for where
 # to register an app with each one.
@@ -57,10 +72,18 @@ private_key = "$KEY_PATH"
 path = "$DATA_DIR/files"
 max_upload_mb = $OMACHAT_MAX_UPLOAD_MB
 
+[operator]
+username = "$OMACHAT_OPERATOR_USERNAME"
+remote_restart = $OMACHAT_OPERATOR_REMOTE_RESTART
+
 [log]
 level = "$OMACHAT_LOG_LEVEL"
 EOF
 fi
+
+# The [operator] section above is only the first-run initial state: the
+# server prefers OMACHAT_OPERATOR_USERNAME / OMACHAT_OPERATOR_REMOTE_RESTART
+# on every start, so changing them later needs only a restart.
 
 # Keeps [oauth.PROVIDER] in sync with the env vars on every start, even
 # against a config.toml left over from before this existed. Unlike the rest
