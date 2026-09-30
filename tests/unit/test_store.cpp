@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 12);
+    EXPECT_EQ(store.schemaVersion(), 13);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -63,6 +63,9 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE instance_suspensions")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE instance_settings")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE users DROP COLUMN bio")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE servers DROP COLUMN description")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE servers DROP COLUMN icon_attachment_id")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE servers DROP COLUMN banner_attachment_id")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN description")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN icon_attachment_id")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN banner_attachment_id")));
@@ -78,7 +81,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 12);
+    EXPECT_EQ(store.schemaVersion(), 13);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 
@@ -88,6 +91,22 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     srv.name = QStringLiteral("S");
     srv.ownerId = 1;
     ASSERT_TRUE(store.insertServer(srv, 0));
+    // v13: server identity (description plus icon/banner artwork).
+    auto servers = store.loadSnapshot().servers;
+    ASSERT_EQ(servers.size(), 1u);
+    EXPECT_TRUE(servers.front().description.isEmpty());
+    auto updatedServer = servers.front();
+    updatedServer.description = QStringLiteral("A cozy place for the team");
+    updatedServer.iconAttachmentId = 81;
+    updatedServer.bannerAttachmentId = 82;
+    ASSERT_TRUE(store.updateServer(updatedServer));
+    const auto reloadedServers = store.loadSnapshot().servers;
+    ASSERT_EQ(reloadedServers.size(), 1u);
+    EXPECT_EQ(reloadedServers.front().description, updatedServer.description);
+    EXPECT_EQ(reloadedServers.front().iconAttachmentId, 81u);
+    EXPECT_EQ(reloadedServers.front().bannerAttachmentId, 82u);
+    EXPECT_EQ(store.artworkServer(81), 10u);
+    EXPECT_EQ(store.artworkServer(82), 10u);
     ASSERT_TRUE(store.insertChannel({20, 10, QStringLiteral("general"), server::ChannelKind::Text, 0, 0, {}, {}}, 0));
     const auto channels = store.loadSnapshot().channels;
     ASSERT_EQ(channels.size(), 1u);

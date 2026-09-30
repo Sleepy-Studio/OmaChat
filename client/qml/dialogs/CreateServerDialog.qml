@@ -16,6 +16,7 @@ Dialog {
     onAboutToShow: {
         if (!App.discordImportBusy) {
             nameField.text = ""
+            descriptionField.text = ""
             importing = false
             exportFiles = []
         }
@@ -54,6 +55,16 @@ Dialog {
             label: qsTr("Server name")
             placeholder: qsTr("Sleepy Studio")
             input.enabled: !App.discordImportBusy
+            input.onAccepted: createButton.clicked()
+        }
+
+        Field {
+            id: descriptionField
+            Layout.fillWidth: true
+            label: qsTr("Description (optional)")
+            placeholder: qsTr("What is this server for?")
+            input.enabled: !App.discordImportBusy
+            input.maximumLength: 2000
             input.onAccepted: createButton.clicked()
         }
 
@@ -130,7 +141,7 @@ Dialog {
                     if (dialog.importing)
                         App.createServerFromDiscord(nameField.text.trim(), dialog.exportFiles)
                     else {
-                        App.createServer(nameField.text.trim())
+                        App.createServer(nameField.text.trim(), descriptionField.text.trim())
                         dialog.close()
                     }
                 }

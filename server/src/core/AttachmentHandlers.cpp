@@ -277,7 +277,8 @@ void ChatServer::handleCancelUpload(Session& s, std::uint64_t rid, const proto::
     }
     // A finished but unsent attachment can be withdrawn by its uploader.
     const auto a = m_store.attachment(m.attachment_id());
-    if (!a || a->uploaderId != s.userId || a->messageId != 0 || m_store.artworkChannel(a->id)) {
+    if (!a || a->uploaderId != s.userId || a->messageId != 0 || m_store.artworkChannel(a->id)
+        || m_store.artworkServer(a->id)) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("no such upload"));
         return;
     }
@@ -292,10 +293,14 @@ void ChatServer::handleDownload(Session& s, std::uint64_t rid, const proto::Down
         return;
     const auto a = m_store.attachment(m.attachment_id());
     const Id artworkChannel = a ? m_store.artworkChannel(a->id) : 0;
+    const Id artworkServer = artworkChannel ? 0 : (a ? m_store.artworkServer(a->id) : 0);
+    const bool serverVisible
+        = artworkServer && m_state.server(artworkServer) && m_state.server(artworkServer)->members.contains(s.userId);
     const bool visible = a
         && (artworkChannel ? m_state.can(artworkChannel, s.userId, ViewChannel)
-            : a->messageId == 0 ? a->uploaderId == s.userId
-                              : m_state.can(a->channelId, s.userId, ViewChannel | ReadHistory));
+                : artworkServer ? serverVisible
+                                : a->messageId == 0 ? a->uploaderId == s.userId
+                                                    : m_state.can(a->channelId, s.userId, ViewChannel | ReadHistory));
     if (!visible) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("attachment not found"));
         return;

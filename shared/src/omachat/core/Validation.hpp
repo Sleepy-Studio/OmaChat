@@ -37,6 +37,7 @@ std::optional<QString> messageContent(const QString& input);
 
 std::optional<QString> topic(const QString& input);
 std::optional<QString> channelDescription(const QString& input);
+std::optional<QString> serverDescription(const QString& input);
 
 bool passwordAcceptable(const QString& password);
 

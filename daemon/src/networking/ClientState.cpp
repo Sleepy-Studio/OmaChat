@@ -405,7 +405,10 @@ QJsonObject ClientState::serverJson(const proto::Server& s) const
     for (auto n : permissions::names(bits))
         perms.append(QString::fromLatin1(n.data(), static_cast<qsizetype>(n.size())));
     return {{"id", idString(s.id())}, {"name", QString::fromStdString(s.name())}, {"owner_id", idString(s.owner_id())},
-        {"is_owner", s.owner_id() == m_self.id()}, {"permissions", perms}};
+        {"description", QString::fromStdString(s.description())},
+        {"icon_attachment_id", idString(s.icon_attachment_id())},
+        {"banner_attachment_id", idString(s.banner_attachment_id())}, {"is_owner", s.owner_id() == m_self.id()},
+        {"permissions", perms}};
 }
 
 QJsonObject ClientState::channelJson(const proto::Channel& c) const

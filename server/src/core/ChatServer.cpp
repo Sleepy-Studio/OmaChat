@@ -288,6 +288,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kCreateServer:
         handleCreateServer(s, rid, env.create_server());
         break;
+    case P::kUpdateServer:
+        handleUpdateServer(s, rid, env.update_server());
+        break;
     case P::kImportDiscordBatch:
         handleImportDiscordBatch(s, rid, env.import_discord_batch());
         break;
@@ -539,6 +542,19 @@ proto::User ChatServer::toProto(const UserRecord& u) const
     p.set_avatar_url(u.avatarUrl.toStdString());
     p.set_bio(u.bio.toStdString());
     p.set_status(statusOf(u.id));
+    return p;
+}
+
+proto::Server ChatServer::toServerProto(const ServerRecord& s) const
+{
+    proto::Server p;
+    p.set_id(s.id);
+    p.set_name(s.name.toStdString());
+    p.set_icon_url(s.iconUrl.toStdString());
+    p.set_owner_id(s.ownerId);
+    p.set_description(s.description.toStdString());
+    p.set_icon_attachment_id(s.iconAttachmentId);
+    p.set_banner_attachment_id(s.bannerAttachmentId);
     return p;
 }
 

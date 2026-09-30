@@ -40,6 +40,9 @@ message Server {
   string name = 2;
   string icon_url = 3;
   uint64 owner_id = 4;
+  string description = 5;            // longer server details, empty by default
+  uint64 icon_attachment_id = 6;
+  uint64 banner_attachment_id = 7;
 }
 
 enum ChannelType {
@@ -370,7 +373,20 @@ message SyncState {
 
 // --------------------------------------------------------- server/guilds
 
-message CreateServerRequest { string name = 1; }
+message CreateServerRequest {
+  string name = 1;
+  string description = 2;
+}
+message UpdateServerRequest {
+  uint64 server_id = 1;
+  string name = 2;             // empty = unchanged
+  string description = 3;
+  bool set_description = 4;
+  uint64 icon_attachment_id = 5;     // 0 clears
+  bool set_icon = 6;
+  uint64 banner_attachment_id = 7;   // 0 clears
+  bool set_banner = 8;
+}
 // Owner-only, repeat-safe import from DiscordChatExporter JSON. One request
 // carries one bounded batch so even a large channel stays below frame limits.
 message DiscordImportAsset {
@@ -750,6 +766,7 @@ message Envelope {
 
     // servers / channels
     CreateServerRequest create_server = 30;
+    UpdateServerRequest update_server = 49;
     ImportDiscordBatchRequest import_discord_batch = 47;
     ImportDiscordBatchResult import_discord_result = 48;
     LeaveServerRequest leave_server = 31;

@@ -11,7 +11,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 12;
+constexpr int kSchemaVersion = 13;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -218,6 +218,13 @@ const char* const kSchemaV12[] = {
     "CREATE TABLE instance_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, actor_id INTEGER NOT NULL, "
     "action TEXT NOT NULL, target_id INTEGER NOT NULL)",
     "CREATE INDEX instance_audit_recent ON instance_audit(id DESC)",
+};
+
+// v13: server identity (description plus icon/banner artwork, like channels).
+const char* const kSchemaV13[] = {
+    "ALTER TABLE servers ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE servers ADD COLUMN icon_attachment_id INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE servers ADD COLUMN banner_attachment_id INTEGER NOT NULL DEFAULT 0",
 };
 
 qint64 sid(Id id)
@@ -432,6 +439,8 @@ bool Store::migrate(QString* error)
         return false;
     if (current < 12 && !apply(kSchemaV12))
         return false;
+    if (current < 13 && !apply(kSchemaV13))
+        return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
         if (error)
@@ -494,7 +503,9 @@ bool Store::deleteUser(Id userId)
         || !exec(QStringLiteral("DELETE FROM attachments WHERE uploader_id = ? AND message_id IS NULL "
                                 "AND id NOT IN (SELECT attachment_id FROM emoji) "
                                 "AND id NOT IN (SELECT icon_attachment_id FROM channels) "
-                                "AND id NOT IN (SELECT banner_attachment_id FROM channels)"), {sid(userId)})
+                                "AND id NOT IN (SELECT banner_attachment_id FROM channels) "
+                                "AND id NOT IN (SELECT icon_attachment_id FROM servers) "
+                                "AND id NOT IN (SELECT banner_attachment_id FROM servers)"), {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM users WHERE id = ?"), {sid(userId)}))
         return fail();
     if (!commit())
@@ -644,13 +655,17 @@ Store::Snapshot Store::loadSnapshot()
     std::map<Id, ServerRecord> servers;
     {
         QSqlQuery q(m_db);
-        q.exec(QStringLiteral("SELECT id, name, icon_url, owner_id FROM servers"));
+        q.exec(QStringLiteral("SELECT id, name, icon_url, owner_id, description, icon_attachment_id, "
+                              "banner_attachment_id FROM servers"));
         while (q.next()) {
             ServerRecord s;
             s.id = uid(q.value(0));
             s.name = q.value(1).toString();
             s.iconUrl = q.value(2).toString();
             s.ownerId = uid(q.value(3));
+            s.description = q.value(4).toString();
+            s.iconAttachmentId = uid(q.value(5));
+            s.bannerAttachmentId = uid(q.value(6));
             servers.emplace(s.id, std::move(s));
         }
     }
@@ -753,13 +768,17 @@ Store::Snapshot Store::loadSnapshot()
 
 bool Store::insertServer(const ServerRecord& s, std::int64_t createdAt)
 {
-    return exec(QStringLiteral("INSERT INTO servers(id, name, icon_url, owner_id, created_at) VALUES(?,?,?,?,?)"),
-        {sid(s.id), s.name, s.iconUrl, sid(s.ownerId), qint64(createdAt)});
+    return exec(QStringLiteral("INSERT INTO servers(id, name, icon_url, owner_id, created_at, description, "
+                                "icon_attachment_id, banner_attachment_id) VALUES(?,?,?,?,?,?,?,?)"),
+        {sid(s.id), s.name, s.iconUrl, sid(s.ownerId), qint64(createdAt), s.description,
+            sid(s.iconAttachmentId), sid(s.bannerAttachmentId)});
 }
 
-bool Store::updateServer(Id id, const QString& name)
+bool Store::updateServer(const ServerRecord& s)
 {
-    return exec(QStringLiteral("UPDATE servers SET name = ? WHERE id = ?"), {name, sid(id)});
+    return exec(QStringLiteral("UPDATE servers SET name = ?, description = ?, icon_attachment_id = ?, "
+                                "banner_attachment_id = ? WHERE id = ?"),
+        {s.name, s.description, sid(s.iconAttachmentId), sid(s.bannerAttachmentId), sid(s.id)});
 }
 
 bool Store::deleteServer(Id id)
@@ -1143,7 +1162,9 @@ int Store::pendingAttachmentCount(Id uploaderId)
     q.prepare(QStringLiteral("SELECT COUNT(*) FROM attachments WHERE uploader_id = ? AND message_id IS NULL "
                              "AND id NOT IN (SELECT attachment_id FROM emoji) "
                              "AND id NOT IN (SELECT icon_attachment_id FROM channels) "
-                             "AND id NOT IN (SELECT banner_attachment_id FROM channels)"));
+                             "AND id NOT IN (SELECT banner_attachment_id FROM channels) "
+                             "AND id NOT IN (SELECT icon_attachment_id FROM servers) "
+                             "AND id NOT IN (SELECT banner_attachment_id FROM servers)"));
     q.addBindValue(sid(uploaderId));
     if (!q.exec() || !q.next())
         return 0;
@@ -1159,7 +1180,9 @@ std::vector<Id> Store::purgePendingAttachments(std::int64_t cutoffMs)
     q.prepare(QStringLiteral("SELECT id FROM attachments WHERE message_id IS NULL AND created_at < ? "
                              "AND id NOT IN (SELECT attachment_id FROM emoji) "
                              "AND id NOT IN (SELECT icon_attachment_id FROM channels) "
-                             "AND id NOT IN (SELECT banner_attachment_id FROM channels)"));
+                             "AND id NOT IN (SELECT banner_attachment_id FROM channels) "
+                             "AND id NOT IN (SELECT icon_attachment_id FROM servers) "
+                             "AND id NOT IN (SELECT banner_attachment_id FROM servers)"));
     q.addBindValue(qint64(cutoffMs));
     q.exec();
     while (q.next())
@@ -1178,6 +1201,15 @@ Id Store::artworkChannel(Id attachmentId)
 {
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("SELECT id FROM channels WHERE icon_attachment_id = ? OR banner_attachment_id = ? LIMIT 1"));
+    q.addBindValue(sid(attachmentId));
+    q.addBindValue(sid(attachmentId));
+    return q.exec() && q.next() ? uid(q.value(0)) : 0;
+}
+
+Id Store::artworkServer(Id attachmentId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id FROM servers WHERE icon_attachment_id = ? OR banner_attachment_id = ? LIMIT 1"));
     q.addBindValue(sid(attachmentId));
     q.addBindValue(sid(attachmentId));
     return q.exec() && q.next() ? uid(q.value(0)) : 0;

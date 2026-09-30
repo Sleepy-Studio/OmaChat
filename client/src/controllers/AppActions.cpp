@@ -696,10 +696,10 @@ int AppController::userVolume(const QString& userId) const
 
 // --------------------------------------------------------------- servers
 
-void AppController::createServer(const QString& name)
+void AppController::createServer(const QString& name, const QString& description)
 {
     call(
-        QStringLiteral("server.create"), {{"name", name}},
+        QStringLiteral("server.create"), {{"name", name}, {"description", description}},
         [this](const QJsonObject& s) {
             const QString id = s.value(QStringLiteral("id")).toString();
             m_serversById.insert(id, s);
@@ -776,6 +776,23 @@ void AppController::leaveServer(const QString& id)
 void AppController::deleteServer(const QString& id)
 {
     call(QStringLiteral("server.delete"), {{"server", id}});
+}
+
+void AppController::updateServerDetails(const QString& id, const QString& name, const QString& description)
+{
+    call(QStringLiteral("server.update"), {{"server", id}, {"name", name.trimmed()}, {"description", description}},
+        [this, id](const QJsonObject&) { emit serverDetailsSaved(id); }, tr("Cannot update server"));
+}
+
+void AppController::setServerArtwork(const QString& id, const QString& kind, const QUrl& fileUrl)
+{
+    if (!fileUrl.isEmpty() && !fileUrl.isLocalFile()) {
+        showNotice(tr("Choose a local image file."), true);
+        return;
+    }
+    call(QStringLiteral("server.artwork.set"),
+        {{"server", id}, {"kind", kind}, {"file", fileUrl.isEmpty() ? QString() : fileUrl.toLocalFile()}}, {},
+        tr("Cannot update server image"));
 }
 
 void AppController::createChannel(const QString& name, const QString& type, const QString& parentId,

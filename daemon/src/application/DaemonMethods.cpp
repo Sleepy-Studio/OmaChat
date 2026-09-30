@@ -955,6 +955,8 @@ void Daemon::registerMethods()
     m[QStringLiteral("server.create")] = [createOrJoin](const QJsonObject& p, const Responder& r) {
         proto::Envelope env;
         env.mutable_create_server()->set_name(p.value(QStringLiteral("name")).toString().toStdString());
+        env.mutable_create_server()->set_description(
+            p.value(QStringLiteral("description")).toString().toStdString());
         createOrJoin(std::move(env), r);
     };
     m[QStringLiteral("server.create_from_discord")] = [this, model](const QJsonObject& p, const Responder& r) {
@@ -1053,6 +1055,96 @@ void Daemon::registerMethods()
         proto::Envelope env;
         env.mutable_delete_server()->set_server_id(sid);
         forward(std::move(env), r);
+    };
+    m[QStringLiteral("server.update")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id sid = serverParam(p, r);
+        if (!sid)
+            return;
+        if ((p.contains(QStringLiteral("description")) || p.contains(QStringLiteral("icon_attachment_id"))
+                || p.contains(QStringLiteral("banner_attachment_id")))
+            && !m_conn->capabilities().contains(QStringLiteral("server.identity.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support server identity settings"));
+            return;
+        }
+        proto::Envelope env;
+        auto* u = env.mutable_update_server();
+        u->set_server_id(sid);
+        u->set_name(p.value(QStringLiteral("name")).toString().toStdString());
+        if (p.contains(QStringLiteral("description"))) {
+            u->set_set_description(true);
+            u->set_description(p.value(QStringLiteral("description")).toString().toStdString());
+        }
+        if (p.contains(QStringLiteral("icon_attachment_id"))) {
+            u->set_set_icon(true);
+            u->set_icon_attachment_id(idFromJson(p.value(QStringLiteral("icon_attachment_id"))));
+        }
+        if (p.contains(QStringLiteral("banner_attachment_id"))) {
+            u->set_set_banner(true);
+            u->set_banner_attachment_id(idFromJson(p.value(QStringLiteral("banner_attachment_id"))));
+        }
+        forward(std::move(env), r, [model](const proto::Envelope& reply) { return model->serverJson(reply.server()); });
+    };
+    m[QStringLiteral("server.artwork.set")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id sid = serverParam(p, r);
+        if (!sid || !requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("server.identity.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support server artwork"));
+            return;
+        }
+        const QString kind = p.value(QStringLiteral("kind")).toString();
+        if (kind != u"icon" && kind != u"banner") {
+            r.error(e::BadRequest, QStringLiteral("kind must be icon or banner"));
+            return;
+        }
+        const QString path = p.value(QStringLiteral("file")).toString();
+        if (path.isEmpty()) {
+            proto::Envelope env;
+            auto* update = env.mutable_update_server();
+            update->set_server_id(sid);
+            if (kind == u"icon")
+                update->set_set_icon(true);
+            else
+                update->set_set_banner(true);
+            forward(std::move(env), r, [model](const proto::Envelope& reply) {
+                return model->serverJson(reply.server());
+            });
+            return;
+        }
+        // Server artwork reuses the channel upload pipeline: pick any channel
+        // of this server as the upload carrier. Managers of the server can
+        // manage artwork in its channels.
+        Id carrier = 0;
+        for (const auto& [cid, c] : model->channels()) {
+            if (c.server_id() == sid) {
+                carrier = cid;
+                break;
+            }
+        }
+        if (!carrier) {
+            r.error(e::BadRequest, QStringLiteral("this server needs a channel before it can have artwork"));
+            return;
+        }
+        m_transfers->upload(carrier, path,
+            [this, model, sid, kind, r](const FileTransfers::Result& result) {
+                if (!result.ok) {
+                    r.error(result.code, result.message);
+                    return;
+                }
+                proto::Envelope env;
+                auto* update = env.mutable_update_server();
+                update->set_server_id(sid);
+                if (kind == u"icon") {
+                    update->set_set_icon(true);
+                    update->set_icon_attachment_id(result.attachment.id());
+                } else {
+                    update->set_set_banner(true);
+                    update->set_banner_attachment_id(result.attachment.id());
+                }
+                forward(std::move(env), r, [model](const proto::Envelope& reply) {
+                    return model->serverJson(reply.server());
+                });
+            }, true);
     };
     m[QStringLiteral("invite.create")] = [this](const QJsonObject& p, const Responder& r) {
         const Id sid = serverParam(p, r);

@@ -90,6 +90,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool discordImportBusy READ discordImportBusy NOTIFY discordImportChanged)
     Q_PROPERTY(QString discordImportStatus READ discordImportStatus NOTIFY discordImportChanged)
     Q_PROPERTY(QString selectedServerName READ selectedServerName NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedServerDescription READ selectedServerDescription NOTIFY selectionChanged)
     Q_PROPERTY(bool homeSelected READ homeSelected NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelId READ selectedChannelId NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelName READ selectedChannelName NOTIFY selectionChanged)
@@ -100,6 +101,7 @@ class AppController : public QObject {
     Q_PROPERTY(bool canSend READ canSend NOTIFY selectionChanged)
     Q_PROPERTY(bool canManageMessages READ canManageMessages NOTIFY selectionChanged)
     Q_PROPERTY(bool canManageChannels READ canManageChannels NOTIFY selectionChanged)
+    Q_PROPERTY(bool canManageServer READ canManageServer NOTIFY selectionChanged)
     Q_PROPERTY(bool canCreateInvites READ canCreateInvites NOTIFY selectionChanged)
     Q_PROPERTY(bool canKick READ canKick NOTIFY selectionChanged)
     Q_PROPERTY(bool canBan READ canBan NOTIFY selectionChanged)
@@ -221,6 +223,8 @@ public:
     bool discordImportBusy() const { return m_discordImportBusy; }
     QString discordImportStatus() const { return m_discordImportStatus; }
     QString selectedServerName() const;
+    QString selectedServerDescription() const;
+    QVariantMap serverDetails(const QString& id) const;
     bool homeSelected() const { return m_selectedServer == u"home"; }
     QString selectedChannelId() const { return m_selectedChannel; }
     QString selectedChannelName() const;
@@ -231,6 +235,7 @@ public:
     bool canSend() const;
     bool canManageMessages() const;
     bool canManageChannels() const;
+    bool canManageServer() const;
     bool canCreateInvites() const;
     bool canKick() const;
     bool canBan() const;
@@ -352,12 +357,15 @@ public:
     Q_INVOKABLE bool isStreaming(const QString& userId) const;
     Q_INVOKABLE int userVolume(const QString& userId) const;
 
-    Q_INVOKABLE void createServer(const QString& name);
+    Q_INVOKABLE void createServer(const QString& name, const QString& description = {});
     Q_INVOKABLE void createServerFromDiscord(const QString& name, const QVariantList& files);
     Q_INVOKABLE void joinServer(const QString& invite);
     Q_INVOKABLE void createInvite();
     Q_INVOKABLE void leaveServer(const QString& id);
     Q_INVOKABLE void deleteServer(const QString& id);
+    Q_INVOKABLE void updateServerDetails(const QString& id, const QString& name, const QString& description);
+    Q_INVOKABLE void setServerArtwork(const QString& id, const QString& kind, const QUrl& fileUrl);
+    Q_INVOKABLE QString renderServerDescription(const QString& content) const { return renderMarkdown(content); }
     Q_INVOKABLE void refreshInstanceStatus();
     Q_INVOKABLE void setInstanceRegistration(bool open);
     Q_INVOKABLE void setInstanceSuspension(const QString& userId, bool suspended);
@@ -458,6 +466,8 @@ signals:
     void selectionChanged();
     void channelDataChanged(const QString& channelId);
     void channelDetailsSaved(const QString& channelId);
+    void serverDataChanged(const QString& serverId);
+    void serverDetailsSaved(const QString& serverId);
     void discordImportChanged();
     void discordImportFinished(bool success);
     void replyChanged();

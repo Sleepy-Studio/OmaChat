@@ -329,6 +329,105 @@ TEST_F(Fixture, ChannelIdentityAndArtworkFollowChannelVisibility)
     EXPECT_TRUE(topLevelForBob);
 }
 
+TEST_F(Fixture, ServerIdentityAndArtworkVisibleToMembers)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    auto outsider = client("outsider");
+    proto::Envelope create;
+    create.mutable_create_server()->set_name("Studio");
+    create.mutable_create_server()->set_description("A cozy place for the team.");
+    auto created = alice->call(create);
+    ASSERT_TRUE(created && created->has_server());
+    const auto sid = created->server().id();
+    EXPECT_EQ(created->server().description(), "A cozy place for the team.");
+    ASSERT_TRUE(join(*bob, invite(*alice, sid)).has_server());
+
+    // Ordinary members cannot rename the server or change its description.
+    proto::Envelope denied;
+    denied.mutable_update_server()->set_server_id(sid);
+    denied.mutable_update_server()->set_name("Hijacked");
+    auto deniedReply = bob->call(denied);
+    ASSERT_TRUE(deniedReply && deniedReply->has_error());
+    EXPECT_EQ(deniedReply->error().code(), proto::ERROR_PERMISSION_DENIED);
+
+    proto::Envelope update;
+    auto* details = update.mutable_update_server();
+    details->set_server_id(sid);
+    details->set_name("Studio Two");
+    details->set_set_description(true);
+    details->set_description("New description for everyone.");
+    auto changed = alice->call(update);
+    ASSERT_TRUE(changed && changed->has_server());
+    EXPECT_EQ(changed->server().name(), "Studio Two");
+    EXPECT_EQ(changed->server().description(), "New description for everyone.");
+    bool foundForBob = false;
+    const auto bobServers = sync(*bob);
+    for (const auto& s : bobServers.servers())
+        if (s.id() == sid)
+            foundForBob = s.description() == "New description for everyone." && s.name() == "Studio Two";
+    EXPECT_TRUE(foundForBob);
+
+    // Server artwork reuses the channel upload pipeline against a carrier channel.
+    const auto general = channelNamed(sync(*alice), "general", proto::CHANNEL_TYPE_TEXT);
+    ASSERT_NE(general, 0u);
+    QByteArray png;
+    QBuffer buffer(&png);
+    ASSERT_TRUE(buffer.open(QIODevice::WriteOnly));
+    QImage icon(16, 16, QImage::Format_ARGB32);
+    icon.fill(Qt::green);
+    ASSERT_TRUE(icon.save(&buffer, "PNG"));
+    ASSERT_FALSE(png.isEmpty());
+
+    proto::Envelope begin;
+    auto* upload = begin.mutable_begin_upload();
+    upload->set_channel_id(general);
+    upload->set_filename("icon.png");
+    upload->set_mime_type("image/png");
+    upload->set_size(static_cast<std::uint64_t>(png.size()));
+    upload->set_channel_artwork(true);
+    auto rejected = bob->call(begin);
+    ASSERT_TRUE(rejected && rejected->has_error());
+    EXPECT_EQ(rejected->error().code(), proto::ERROR_PERMISSION_DENIED);
+
+    auto ticket = alice->call(begin);
+    ASSERT_TRUE(ticket && ticket->has_upload_ticket());
+    const auto assetId = ticket->upload_ticket().attachment_id();
+    proto::Envelope chunk;
+    chunk.mutable_upload_chunk()->set_attachment_id(assetId);
+    chunk.mutable_upload_chunk()->set_data(png.toStdString());
+    ASSERT_TRUE(alice->call(chunk)->has_ok());
+    proto::Envelope finish;
+    finish.mutable_finish_upload()->set_attachment_id(assetId);
+    finish.mutable_finish_upload()->set_sha256(QCryptographicHash::hash(png, QCryptographicHash::Sha256).toStdString());
+    ASSERT_TRUE(alice->call(finish)->has_attachment());
+
+    proto::Envelope download;
+    download.mutable_download()->set_attachment_id(assetId);
+    ASSERT_TRUE(bob->call(download)->has_error()) << "pending artwork is still private";
+    details->set_name("");
+    details->set_set_description(false);
+    details->set_set_icon(true);
+    details->set_icon_attachment_id(assetId);
+    changed = alice->call(update);
+    ASSERT_TRUE(changed && changed->has_server());
+    EXPECT_EQ(changed->server().icon_attachment_id(), assetId);
+    ASSERT_TRUE(bob->call(download)->has_file_chunk());
+    ASSERT_TRUE(outsider->call(download)->has_error());
+    bool iconForBob = false;
+    const auto bobServersAfterArt = sync(*bob);
+    for (const auto& s : bobServersAfterArt.servers())
+        if (s.id() == sid)
+            iconForBob = s.icon_attachment_id() == assetId;
+    EXPECT_TRUE(iconForBob);
+
+    details->set_set_icon(true);
+    details->set_icon_attachment_id(0);
+    changed = alice->call(update);
+    ASSERT_TRUE(changed && changed->has_server());
+    EXPECT_EQ(changed->server().icon_attachment_id(), 0u);
+}
+
 TEST_F(Fixture, DeletingAccountRemovesServerIdentityAndOwnedServers)
 {
     auto alice = client("alice");

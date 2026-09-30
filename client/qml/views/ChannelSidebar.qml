@@ -383,7 +383,11 @@ Rectangle {
         id: serverMenu
         MenuAction { text: qsTr("Create invite link"); enabled: App.canCreateInvites; onTriggered: App.createInvite() }
         MenuAction { text: qsTr("Create channel"); enabled: App.canManageChannels; onTriggered: sidebar.createChannel("") }
-        MenuAction { text: qsTr("Roles and members"); enabled: App.canManageRoles; onTriggered: sidebar.openServerSettings() }
+        MenuAction {
+            text: qsTr("Server settings")
+            enabled: App.canManageRoles || App.canManageServer
+            onTriggered: sidebar.openServerSettings()
+        }
         MenuAction {
             text: App.isServerOwner ? qsTr("Delete server") : qsTr("Leave server")
             danger: true

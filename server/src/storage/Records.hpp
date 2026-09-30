@@ -118,6 +118,9 @@ struct ServerRecord {
     QString name;
     QString iconUrl;
     Id ownerId = 0;
+    QString description;
+    Id iconAttachmentId = 0;
+    Id bannerAttachmentId = 0;
     std::map<Id, RoleRecord> roles;
     std::map<Id, MemberRecord> members;
     std::set<Id> channels;

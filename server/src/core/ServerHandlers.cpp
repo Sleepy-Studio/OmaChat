@@ -35,10 +35,7 @@ void ChatServer::handleSync(Session& s, std::uint64_t rid)
     for (Id sid : m_state.serversOf(s.userId)) {
         const ServerRecord* srv = m_state.server(sid);
         auto* ps = st->add_servers();
-        ps->set_id(srv->id);
-        ps->set_name(srv->name.toStdString());
-        ps->set_icon_url(srv->iconUrl.toStdString());
-        ps->set_owner_id(srv->ownerId);
+        *ps = toServerProto(*srv);
         st->add_server_permissions_server_ids(sid);
         st->add_server_permissions(m_state.serverPermissions(sid, s.userId));
         for (const auto& [rid2, role] : srv->roles)
@@ -314,6 +311,11 @@ void ChatServer::handleCreateServer(Session& s, std::uint64_t rid, const proto::
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("server names are 1-100 characters"));
         return;
     }
+    const auto description = validation::serverDescription(QString::fromStdString(m.description()));
+    if (!description) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("server descriptions are at most 2000 characters"));
+        return;
+    }
     int owned = 0;
     for (const auto& [id, srv] : m_state.servers())
         owned += srv.ownerId == s.userId ? 1 : 0;
@@ -327,6 +329,7 @@ void ChatServer::handleCreateServer(Session& s, std::uint64_t rid, const proto::
     srv.id = m_ids.next();
     srv.name = *name;
     srv.ownerId = s.userId;
+    srv.description = *description;
 
     struct Preset {
         const char* name;
@@ -383,13 +386,95 @@ void ChatServer::handleCreateServer(Session& s, std::uint64_t rid, const proto::
 
     proto::Event e;
     auto* ps = e.mutable_server_create();
-    ps->set_id(srv.id);
-    ps->set_name(srv.name.toStdString());
-    ps->set_owner_id(srv.ownerId);
+    *ps = toServerProto(srv);
     publish(e, {s.userId});
 
     proto::Envelope env;
     *env.mutable_server() = *ps;
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::UpdateServerRequest& m)
+{
+    ServerRecord* srv = m_state.server(m.server_id());
+    if (!srv || !srv->members.contains(s.userId)) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("server not found"));
+        return;
+    }
+    if (!m_state.canInServer(m.server_id(), s.userId, ManageServer)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage this server"));
+        return;
+    }
+    ServerRecord updated = *srv;
+    if (!m.name().empty()) {
+        const auto name = validation::serverName(QString::fromStdString(m.name()));
+        if (!name) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("server names are 1-100 characters"));
+            return;
+        }
+        updated.name = *name;
+    }
+    if (m.set_description()) {
+        const auto description = validation::serverDescription(QString::fromStdString(m.description()));
+        if (!description) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                QStringLiteral("server descriptions are at most 2000 characters"));
+            return;
+        }
+        updated.description = *description;
+    }
+    // Server artwork reuses the channel upload pipeline: the attachment is
+    // uploaded with channel_artwork=true against any channel of this server,
+    // then referenced here. This keeps image normalization in one place.
+    const auto applyArtwork = [&](Id assetId, Id& destination) {
+        if (assetId == destination)
+            return true;
+        if (!assetId) {
+            destination = 0;
+            return true;
+        }
+        const auto asset = m_store.attachment(assetId);
+        if (!asset || !asset->artwork || asset->uploaderId != s.userId || asset->messageId
+            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId)
+            || m_store.artworkServer(assetId))
+            return false;
+        const ChannelRecord* carrier = m_state.channel(asset->channelId);
+        if (!carrier || carrier->serverId != srv->id)
+            return false;
+        QImageReader reader(attachmentPath(assetId));
+        reader.setDecideFormatFromContent(true);
+        const QByteArray format = reader.format().toLower();
+        const QSize size = reader.size();
+        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid()
+            || size.width() > 6000 || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000
+            || reader.imageCount() > 1 || reader.read().isNull())
+            return false;
+        destination = assetId;
+        return true;
+    };
+    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid server icon image"));
+        return;
+    }
+    if (m.set_banner() && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid server banner image"));
+        return;
+    }
+    if (!m_store.updateServer(updated)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not update server"));
+        return;
+    }
+    m_state.putServer(updated);
+
+    proto::Event e;
+    *e.mutable_server_update() = toServerProto(updated);
+    std::vector<Id> audience;
+    for (const auto& [uid, mem] : updated.members)
+        audience.push_back(uid);
+    publish(std::move(e), audience);
+
+    proto::Envelope env;
+    *env.mutable_server() = toServerProto(updated);
     reply(s, rid, std::move(env));
 }
 
@@ -675,7 +760,8 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         }
         const auto asset = m_store.attachment(assetId);
         if (!asset || !asset->artwork || asset->channelId != c->id || asset->uploaderId != s.userId || asset->messageId
-            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId))
+            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId)
+            || m_store.artworkServer(assetId))
             return false;
         QImageReader reader(attachmentPath(assetId));
         reader.setDecideFormatFromContent(true);

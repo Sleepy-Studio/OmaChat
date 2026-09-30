@@ -35,7 +35,8 @@ AppController::AppController(const config::ClientConfig& config, QObject* parent
     : QObject(parent)
     , m_config(config)
     , m_link(config.startup.launchDaemon)
-    , m_servers({"key", "itemId", "name", "initials", "isHome", "unread", "mentions", "selected", "inVoice"})
+    , m_servers({"key", "itemId", "name", "initials", "isHome", "unread", "mentions", "selected", "inVoice",
+          "description", "iconAttachmentId", "bannerAttachmentId"})
     , m_channels({"key", "itemId", "rowType", "name", "depth", "unread", "mentions", "muted", "locked", "selected",
           "collapsed", "speaking", "userMuted", "userDeafened", "userId", "presence", "voiceCount", "topic",
           "streaming"})
@@ -397,6 +398,7 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
     if (name == u"server.updated") {
         m_serversById.insert(id("id"), data);
         rebuildServers();
+        emit serverDataChanged(id("id"));
         emit selectionChanged();
         return;
     }
@@ -607,6 +609,18 @@ QString AppController::selectedServerName() const
     return m_serversById.value(m_selectedServer).value(QStringLiteral("name")).toString();
 }
 
+QString AppController::selectedServerDescription() const
+{
+    if (homeSelected())
+        return {};
+    return m_serversById.value(m_selectedServer).value(QStringLiteral("description")).toString();
+}
+
+QVariantMap AppController::serverDetails(const QString& id) const
+{
+    return m_serversById.value(id).toVariantMap();
+}
+
 QString AppController::selectedChannelName() const
 {
     return channel(m_selectedChannel).value(QStringLiteral("name")).toString();
@@ -656,6 +670,10 @@ bool AppController::serverPermission(const char* name) const
 bool AppController::canManageChannels() const
 {
     return !homeSelected() && serverPermission("MANAGE_CHANNEL");
+}
+bool AppController::canManageServer() const
+{
+    return !homeSelected() && serverPermission("MANAGE_SERVER");
 }
 bool AppController::canCreateInvites() const
 {
@@ -832,8 +850,12 @@ void AppController::rebuildServers()
         ids.begin(), ids.end(), [](const QString& a, const QString& b) { return a.toULongLong() < b.toULongLong(); });
     const QString voiceServer = channel(voiceChannelId()).value(QStringLiteral("server_id")).toString();
     for (const QString& id : ids) {
-        const QString name = m_serversById.value(id).value(QStringLiteral("name")).toString();
+        const QJsonObject server = m_serversById.value(id);
+        const QString name = server.value(QStringLiteral("name")).toString();
         rows.append({{"key", id}, {"itemId", id}, {"name", name}, {"initials", initials(name)}, {"isHome", false},
+            {"description", server.value(QStringLiteral("description")).toString()},
+            {"iconAttachmentId", server.value(QStringLiteral("icon_attachment_id")).toString()},
+            {"bannerAttachmentId", server.value(QStringLiteral("banner_attachment_id")).toString()},
             {"unread", unreadByServer.value(id) > 0}, {"mentions", mentionsByServer.value(id)},
             {"selected", id == m_selectedServer}, {"inVoice", voiceJoined() && id == voiceServer}});
     }

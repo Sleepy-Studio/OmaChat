@@ -80,7 +80,7 @@ public:
     Snapshot loadSnapshot();
 
     bool insertServer(const ServerRecord& s, std::int64_t createdAt);
-    bool updateServer(Id id, const QString& name);
+    bool updateServer(const ServerRecord& s);
     bool deleteServer(Id id);
     bool insertRole(const RoleRecord& r);
     bool updateRole(const RoleRecord& r);
@@ -135,6 +135,8 @@ public:
     bool deleteAttachment(Id id);
     // Returns the channel that currently uses an attachment as artwork.
     Id artworkChannel(Id attachmentId);
+    // Returns the server that currently uses an attachment as icon/banner.
+    Id artworkServer(Id attachmentId);
     std::vector<Id> allAttachmentIds();
 
     bool setReaction(Id messageId, Id userId, const QString& emoji, bool add);

@@ -42,6 +42,15 @@ Rectangle {
                 required property bool selected
                 required property bool inVoice
                 required property int index
+                property string iconId: model.iconAttachmentId || ""
+                Component.onCompleted: {
+                    if (!isHome && iconId && iconId !== "0")
+                        App.requestPreview(iconId, "server-icon.png", 0)
+                }
+                onIconIdChanged: {
+                    if (!isHome && iconId && iconId !== "0")
+                        App.requestPreview(iconId, "server-icon.png", 0)
+                }
 
                 width: ListView.view.width
                 height: Theme.px(44)
@@ -70,6 +79,7 @@ Rectangle {
                     color: entry.selected ? Theme.accent : (area.containsMouse ? Theme.raised : Theme.surface)
                     border.width: list.activeFocus && list.currentIndex === entry.index ? 2 : 0
                     border.color: Theme.text
+                    clip: true
                     Behavior on radius { NumberAnimation { duration: Theme.animationMs } }
 
                     Icon {
@@ -79,9 +89,18 @@ Rectangle {
                         size: Theme.px(20)
                         color: entry.selected ? Theme.accentText : Theme.text
                     }
+                    Image {
+                        anchors.fill: parent
+                        visible: !entry.isHome && entry.iconId && entry.iconId !== "0"
+                                 && source.toString().length > 0 && status === Image.Ready
+                        source: entry.iconId && entry.iconId !== "0" ? (App.previews[entry.iconId] || "") : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                    }
                     Text {
                         anchors.centerIn: parent
-                        visible: !entry.isHome
+                        visible: !entry.isHome && !(entry.iconId && entry.iconId !== "0"
+                                 && (App.previews[entry.iconId] || "").length > 0)
                         text: entry.initials
                         color: entry.selected ? Theme.accentText : Theme.text
                         font.pixelSize: Theme.px(15)

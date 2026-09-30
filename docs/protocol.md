@@ -20,9 +20,11 @@ protocol ([media.md](media.md)), and the local IPC protocol.
    or `ERROR_PROTOCOL_MISMATCH` (different major) and closes.
    Current version: **1.2**. Minor versions negotiate through capability
    strings (`resume`, `voice.opus`, `media.chacha20poly1305`, `search.fts`,
-   `attachments`; since 1.2 `search.server`, `dm.group`,
-   `attachments.resume`, `video.h264`, `e2e.v1`; `profile.v1` adds editable profiles;
-   `discord.import` enables owner-only channel history import). `HelloReply.max_upload_bytes` is 0
+    `attachments`; since 1.2 `search.server`, `dm.group`,
+    `attachments.resume`, `video.h264`, `e2e.v1`; `profile.v1` adds editable profiles;
+    `channel.identity.v1` adds channel descriptions plus icon/banner artwork;
+    `server.identity.v1` adds server descriptions plus icon/banner artwork;
+    `discord.import` enables owner-only channel history import). `HelloReply.max_upload_bytes` is 0
    when a server takes no attachments. Clients check a capability before
    using the feature, so a 1.2 client works with a 1.1 server.
 3. Unauthenticated connections have 30 s to finish authenticating.

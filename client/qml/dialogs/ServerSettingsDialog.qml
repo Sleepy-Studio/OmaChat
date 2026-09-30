@@ -19,6 +19,13 @@ Dialog {
     property string editColor
     property var editPerms: []
     property bool dirty: false
+    // ---- server overview state
+    property string serverId
+    property string serverName: ""
+    property string serverDescription: ""
+    property var serverDetails: ({})
+    property bool serverDirty: false
+    readonly property bool serverIdentitySupported: App.capabilities.indexOf("server.identity.v1") >= 0
     readonly property var role: {
         const roles = App.serverRoles
         for (let i = 0; i < roles.length; ++i)
@@ -45,8 +52,23 @@ Dialog {
 
     onAboutToShow: {
         tabs.currentIndex = 0
+        dialog.serverId = App.selectedServerId
+        dialog.serverDetails = App.serverDetails(dialog.serverId)
+        dialog.serverName = dialog.serverDetails.name || ""
+        dialog.serverDescription = dialog.serverDetails.description || ""
+        dialog.serverDirty = false
+        dialog.loadServerImages()
         const roles = App.serverRoles
         selectRole(roles.length > 0 ? roles[0] : null)
+    }
+
+    function loadServerImages() {
+        const icon = dialog.serverDetails.icon_attachment_id
+        if (icon && icon !== "0")
+            App.requestPreview(icon, "server-icon.png", 0)
+        const banner = dialog.serverDetails.banner_attachment_id
+        if (banner && banner !== "0")
+            App.requestPreview(banner, "server-banner.png", 0)
     }
 
     Connections {
@@ -60,6 +82,28 @@ Dialog {
                 dialog.selectRole(dialog.role)
             }
         }
+        function onServerDataChanged(id) {
+            if (id !== dialog.serverId)
+                return
+            dialog.serverDetails = App.serverDetails(id)
+            if (!dialog.serverDirty) {
+                dialog.serverName = dialog.serverDetails.name || ""
+                dialog.serverDescription = dialog.serverDetails.description || ""
+            }
+            dialog.loadServerImages()
+        }
+        function onServerDetailsSaved(id) {
+            if (id === dialog.serverId)
+                dialog.serverDirty = false
+        }
+    }
+
+    FileDialog {
+        id: serverImagePicker
+        property string kind
+        title: kind === "icon" ? qsTr("Choose server icon") : qsTr("Choose server banner")
+        nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.webp)")]
+        onAccepted: App.setServerArtwork(dialog.serverId, kind, selectedFile)
     }
 
     component Tab: TabButton {
@@ -104,7 +148,7 @@ Dialog {
             Layout.fillWidth: true
             background: Rectangle { color: "transparent" }
             Repeater {
-                model: [qsTr("Roles"), qsTr("Members"), qsTr("Emoji")]
+                model: [qsTr("Overview"), qsTr("Roles"), qsTr("Members"), qsTr("Emoji")]
                 delegate: Tab {}
             }
         }
@@ -113,6 +157,137 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: tabs.currentIndex
+
+            // ---------------------------------------------------- overview
+            ScrollView {
+                clip: true
+                ColumnLayout {
+                    width: parent.width
+                    spacing: Theme.px(10)
+
+                    Field {
+                        Layout.fillWidth: true
+                        label: qsTr("Server name")
+                        text: dialog.serverName
+                        input.maximumLength: 100
+                        input.enabled: App.canManageServer
+                        input.onTextEdited: { dialog.serverName = input.text; dialog.serverDirty = true }
+                    }
+                    Text {
+                        text: qsTr("DESCRIPTION")
+                        color: Theme.textMuted
+                        font.pixelSize: Theme.px(11)
+                        font.bold: true
+                    }
+                    TextArea {
+                        id: serverDescriptionField
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Theme.px(120)
+                        wrapMode: TextEdit.Wrap
+                        color: Theme.text
+                        text: dialog.serverDescription
+                        enabled: App.canManageServer
+                        placeholderText: qsTr("What is this server for? Add guidance and useful links.")
+                        font.pixelSize: Theme.px(13)
+                        background: Rectangle {
+                            color: Theme.surfaceAlt
+                            radius: Theme.px(4)
+                            border.color: serverDescriptionField.activeFocus ? Theme.accent : Theme.border
+                        }
+                        onTextChanged: {
+                            if (dialog.serverDescription !== text) {
+                                dialog.serverDescription = text
+                                dialog.serverDirty = true
+                            }
+                        }
+                        Accessible.name: qsTr("Server description")
+                    }
+                    Text {
+                        Layout.alignment: Qt.AlignRight
+                        text: (dialog.serverDescription || "").length + "/2000"
+                        color: (dialog.serverDescription || "").length > 2000 ? Theme.danger : Theme.textFaint
+                        font.pixelSize: Theme.px(11)
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.px(8)
+                        enabled: dialog.serverIdentitySupported && App.canManageServer
+                        Image {
+                            source: dialog.serverDetails.icon_attachment_id
+                                    && dialog.serverDetails.icon_attachment_id !== "0"
+                                    ? (App.previews[dialog.serverDetails.icon_attachment_id] || "") : ""
+                            Layout.preferredWidth: Theme.px(36)
+                            Layout.preferredHeight: Theme.px(36)
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                        }
+                        FlatButton {
+                            text: qsTr("Choose icon…")
+                            onClicked: { serverImagePicker.kind = "icon"; serverImagePicker.open() }
+                        }
+                        FlatButton {
+                            text: qsTr("Remove icon")
+                            enabled: dialog.serverDetails.icon_attachment_id
+                                     && dialog.serverDetails.icon_attachment_id !== "0"
+                            onClicked: App.setServerArtwork(dialog.serverId, "icon", "")
+                        }
+                    }
+                    Image {
+                        source: dialog.serverDetails.banner_attachment_id
+                                && dialog.serverDetails.banner_attachment_id !== "0"
+                                ? (App.previews[dialog.serverDetails.banner_attachment_id] || "") : ""
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Theme.px(76)
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        visible: source.toString().length > 0
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        enabled: dialog.serverIdentitySupported && App.canManageServer
+                        FlatButton {
+                            text: qsTr("Choose banner…")
+                            onClicked: { serverImagePicker.kind = "banner"; serverImagePicker.open() }
+                        }
+                        FlatButton {
+                            text: qsTr("Remove banner")
+                            enabled: dialog.serverDetails.banner_attachment_id
+                                     && dialog.serverDetails.banner_attachment_id !== "0"
+                            onClicked: App.setServerArtwork(dialog.serverId, "banner", "")
+                        }
+                    }
+                    Text {
+                        visible: !dialog.serverIdentitySupported
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: Theme.textFaint
+                        font.pixelSize: Theme.px(11)
+                        text: qsTr("This server does not support icons, banners, or descriptions yet.")
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Item { Layout.fillWidth: true }
+                        FlatButton {
+                            text: qsTr("Revert")
+                            enabled: dialog.serverDirty
+                            onClicked: {
+                                dialog.serverName = dialog.serverDetails.name || ""
+                                dialog.serverDescription = dialog.serverDetails.description || ""
+                                dialog.serverDirty = false
+                            }
+                        }
+                        FlatButton {
+                            text: qsTr("Save")
+                            primary: true
+                            enabled: dialog.serverDirty && App.canManageServer
+                                     && dialog.serverName.trim().length > 0
+                                     && (dialog.serverDescription || "").length <= 2000
+                            onClicked: App.updateServerDetails(dialog.serverId, dialog.serverName,
+                                                               dialog.serverDescription)
+                        }
+                    }
+                }
+            }
 
             // ------------------------------------------------------ roles
             RowLayout {

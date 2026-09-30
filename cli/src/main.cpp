@@ -64,6 +64,8 @@ Accounts
 
 Servers and channels
   server list | create NAME | join INVITE | leave SERVER | delete SERVER
+  server rename SERVER NAME | description SERVER TEXT
+  server icon SERVER FILE | banner SERVER FILE | clear-icon SERVER | clear-banner SERVER
   invite create SERVER [--max-uses N] [--expires SECONDS]
   channel list [SERVER]
   channel join CHANNEL                    voice: join; text: focus in the GUI
@@ -357,6 +359,24 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.method = QStringLiteral("server.") + sub;
             inv.params = {{"server", args.at(2)}};
             inv.print = simpleOk(sub == u"leave" ? QStringLiteral("left server") : QStringLiteral("server deleted"));
+        } else if (sub == u"rename" && need(4)) {
+            inv.method = QStringLiteral("server.update");
+            inv.params = {{"server", args.at(2)}, {"name", joinRest(args, 3)}};
+            inv.print = simpleOk(QStringLiteral("server renamed"));
+        } else if (sub == u"description" && need(3)) {
+            inv.method = QStringLiteral("server.update");
+            inv.params = {{"server", args.at(2)}, {"description", joinRest(args, 3)}};
+            inv.print = simpleOk(QStringLiteral("server description updated"));
+        } else if ((sub == u"icon" || sub == u"banner") && need(4)) {
+            inv.method = QStringLiteral("server.artwork.set");
+            inv.params = {{"server", args.at(2)}, {"kind", sub},
+                {"file", QFileInfo(args.at(3)).absoluteFilePath()}};
+            inv.print = simpleOk(QStringLiteral("server image updated"));
+        } else if ((sub == u"clear-icon" || sub == u"clear-banner") && need(3)) {
+            inv.method = QStringLiteral("server.artwork.set");
+            inv.params = {{"server", args.at(2)},
+                {"kind", sub == u"clear-icon" ? "icon" : "banner"}, {"file", ""}};
+            inv.print = simpleOk(QStringLiteral("server image removed"));
         } else {
             usageError = QStringLiteral("unknown server command");
             return std::nullopt;

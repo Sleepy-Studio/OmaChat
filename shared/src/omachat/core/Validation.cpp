@@ -100,6 +100,11 @@ std::optional<QString> channelDescription(const QString& input)
     return s;
 }
 
+std::optional<QString> serverDescription(const QString& input)
+{
+    return channelDescription(input);
+}
+
 bool passwordAcceptable(const QString& password)
 {
     const auto bytes = password.toUtf8().size();

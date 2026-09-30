@@ -118,6 +118,7 @@ private:
 
     // ---- conversions
     proto::User toProto(const UserRecord& u) const;
+    proto::Server toServerProto(const ServerRecord& s) const;
     proto::Channel toProto(const ChannelRecord& c, Id viewer) const;
     proto::Role toProto(const RoleRecord& r) const;
     proto::CustomEmoji toProto(const EmojiRecord& e) const;
@@ -156,6 +157,7 @@ private:
     void handleInstanceModeration(Session& s, std::uint64_t rid, const proto::InstanceModerationRequest& m);
     bool isOperator(const Session& s) const { return m_operatorId && s.userId == m_operatorId; }
     void handleCreateServer(Session& s, std::uint64_t rid, const proto::CreateServerRequest& m);
+    void handleUpdateServer(Session& s, std::uint64_t rid, const proto::UpdateServerRequest& m);
     void handleImportDiscordBatch(Session& s, std::uint64_t rid, const proto::ImportDiscordBatchRequest& m);
     void handleLeaveServer(Session& s, std::uint64_t rid, const proto::LeaveServerRequest& m);
     void handleDeleteServer(Session& s, std::uint64_t rid, const proto::DeleteServerRequest& m);
