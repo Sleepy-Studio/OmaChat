@@ -5,6 +5,7 @@
 
 #include <toml++/toml.hpp>
 
+#include <cstdint>
 #include <sstream>
 
 namespace omachat::server {
@@ -79,11 +80,23 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
     auto port = integer(t["server"]["port"], out.port, 1, 65535, "server.port");
     auto node = integer(t["server"]["node_id"], out.nodeId, 0, 1023, "server.node_id");
     out.registrationOpen = t["server"]["registration_open"].value_or(out.registrationOpen);
-    out.operatorUsername = str(t["operator"]["username"], out.operatorUsername).trimmed();
+    // Snowflake ids never set bit 63, so the TOML int64 range holds them all.
+    auto operatorId = integer(t["operator"]["user_id"], 0, 1, INT64_MAX, "operator.user_id");
     out.remoteRestart = t["operator"]["remote_restart"].value_or(out.remoteRestart);
-    const QString envOperator = QString::fromLocal8Bit(qgetenv("OMACHAT_OPERATOR_USERNAME")).trimmed();
-    if (!envOperator.isEmpty())
-        out.operatorUsername = envOperator;
+    if (qEnvironmentVariableIsSet("OMACHAT_OPERATOR_USER_ID")) {
+        const QString envOperator = QString::fromLocal8Bit(qgetenv("OMACHAT_OPERATOR_USER_ID")).trimmed();
+        if (!envOperator.isEmpty()) {
+            bool ok = false;
+            const auto id = envOperator.toULongLong(&ok);
+            if (!ok || id == 0 || id > static_cast<Id>(INT64_MAX)) {
+                if (error)
+                    *error = QStringLiteral(
+                        "OMACHAT_OPERATOR_USER_ID must be a positive integer (server user id)");
+                return false;
+            }
+            operatorId = static_cast<std::int64_t>(id);
+        }
+    }
     // Fails only on an unparsable value (error already set); when unset
     // or empty the file value stands.
     if (!parseEnvBool("OMACHAT_OPERATOR_REMOTE_RESTART", &out.remoteRestart, error))
@@ -113,7 +126,7 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
     oauth(out.oauthGithub, "github");
     oauth(out.oauthGoogle, "google");
 
-    if (!port || !node || !mport || !bitrate || !upload || !access || !refresh || !perIp)
+    if (!port || !node || !mport || !bitrate || !upload || !access || !refresh || !perIp || !operatorId)
         return false;
     if (dbType != u"sqlite") {
         if (error)
@@ -122,6 +135,7 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
     }
     out.port = static_cast<std::uint16_t>(*port);
     out.nodeId = static_cast<std::uint32_t>(*node);
+    out.operatorUserId = static_cast<Id>(*operatorId);
     out.mediaPort = static_cast<std::uint16_t>(*mport);
     out.voiceBitrate = static_cast<int>(*bitrate);
     out.maxUploadMb = static_cast<int>(*upload);

@@ -20,11 +20,12 @@ services:
       OMACHAT_NAME: "OmaChat"
       OMACHAT_HOSTNAME: "localhost" # change to your real domain or IP
       OMACHAT_REGISTRATION_OPEN: "true"
-      # Optional: instance operator console. Set to your registered account
-      # name to reveal the Instance console in that account's client menu;
-      # leave empty to keep it disabled. Honored on every start, so existing
-      # volumes need only a restart after setting it — no config file edits.
-      OMACHAT_OPERATOR_USERNAME: ""
+      # Optional: instance operator console. Set to your numeric server user
+      # id (omachatctl status --json | jq .user.id) to reveal the Instance
+      # console in that account's client menu; leave empty to keep it
+      # disabled. Honored on every start, so existing volumes need only a
+      # restart after setting it — no config file edits.
+      OMACHAT_OPERATOR_USER_ID: ""
       OMACHAT_OPERATOR_REMOTE_RESTART: "false" # true only: restart policy can revive a deliberate exit
       # Optional: "sign in with Discord/GitHub/Google". Leave a provider's
       # id/secret empty (or unset) to keep it disabled; only supplying both

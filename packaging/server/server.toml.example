@@ -32,12 +32,14 @@ access_token_minutes = 15
 refresh_token_days = 30
 
 # After registering your own account, assign it as operator either here or,
-# preferably on container hosts, with OMACHAT_OPERATOR_USERNAME and
+# preferably on container hosts, with OMACHAT_OPERATOR_USER_ID and
 # OMACHAT_OPERATOR_REMOTE_RESTART (env wins when both are set).
-# The account must already exist; an unknown name prevents startup. This is
-# instance administration, separate from ownership of an individual community.
+# The id is the numeric server user id (omachatctl status --json | jq .user.id);
+# it must already exist — an unknown id prevents startup. Numeric ids are used
+# instead of usernames because they are stable. This is instance
+# administration, separate from ownership of an individual community.
 # [operator]
-# username = "your-account-name"
+# user_id = 0  # 0 = no operator assigned
 # remote_restart = false  # set true only with systemd/Docker restart supervision
 
 # OAuth login/registration. Leave a provider's section out (or its client_id

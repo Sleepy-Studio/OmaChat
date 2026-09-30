@@ -47,8 +47,8 @@ protocol ([media.md](media.md)), and the local IPC protocol.
 refresh token (stored as SHA-256 on the server, 30 days), session id.
 
 The host can assign one existing account as instance operator via
-`OMACHAT_OPERATOR_USERNAME` (or the `[operator]` section of `server.toml`;
-env takes precedence). `InstanceStatusRequest`, `SetInstanceRegistrationRequest`,
+`OMACHAT_OPERATOR_USER_ID` (or `user_id` in the `[operator]` section of
+`server.toml`; env takes precedence). `InstanceStatusRequest`, `SetInstanceRegistrationRequest`,
 `SetInstanceSuspensionRequest`, `InstanceModerationRequest`,
 `DeleteInstanceCommunityRequest`, and `RestartInstanceRequest` are checked
 against that server-side identity on every request. Operator actions have a

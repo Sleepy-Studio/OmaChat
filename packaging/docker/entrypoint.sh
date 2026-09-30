@@ -19,14 +19,20 @@ KEY_PATH="$DATA_DIR/key.pem"
 : "${OMACHAT_NODE_ID:=1}"
 : "${OMACHAT_MAX_UPLOAD_MB:=50}"
 : "${OMACHAT_LOG_LEVEL:=info}"
-# Instance operator console: account to promote, assigned after registering it
-# in the normal client. Empty (the default) disables operator access. Unlike
-# most settings below, these are honored on every start — the server prefers
-# them over the persisted server.toml — so they stay rotatable via env.
-: "${OMACHAT_OPERATOR_USERNAME:=}"
+# Instance operator console: server-side user id to promote, assigned after
+# registering in the normal client. Empty (the default) disables operator
+# access. Unlike most settings below, these are honored on every start — the
+# server prefers them over the persisted server.toml — so they stay rotatable
+# via env. Find the id with: omachatctl status --json | jq .user.id
+: "${OMACHAT_OPERATOR_USER_ID:=}"
 : "${OMACHAT_OPERATOR_REMOTE_RESTART:=false}"
-# The value is baked into the generated server.toml, where only true/false
-# parse — fail fast instead of writing a config that refuses to load.
+# Both values are baked into the generated server.toml, where only true/false
+# and plain integers parse — fail fast instead of writing a config that
+# refuses to load.
+if [[ -n "$OMACHAT_OPERATOR_USER_ID" && "$OMACHAT_OPERATOR_USER_ID" == *[!0-9]* ]]; then
+    echo "omachat-entrypoint: OMACHAT_OPERATOR_USER_ID must be a positive integer (server user id)" >&2
+    exit 1
+fi
 case "$OMACHAT_OPERATOR_REMOTE_RESTART" in
     true|false) ;;
     *)
@@ -73,7 +79,7 @@ path = "$DATA_DIR/files"
 max_upload_mb = $OMACHAT_MAX_UPLOAD_MB
 
 [operator]
-username = "$OMACHAT_OPERATOR_USERNAME"
+user_id = ${OMACHAT_OPERATOR_USER_ID:-0}
 remote_restart = $OMACHAT_OPERATOR_REMOTE_RESTART
 
 [log]
@@ -82,7 +88,7 @@ EOF
 fi
 
 # The [operator] section above is only the first-run initial state: the
-# server prefers OMACHAT_OPERATOR_USERNAME / OMACHAT_OPERATOR_REMOTE_RESTART
+# server prefers OMACHAT_OPERATOR_USER_ID / OMACHAT_OPERATOR_REMOTE_RESTART
 # on every start, so changing them later needs only a restart.
 
 # Keeps [oauth.PROVIDER] in sync with the env vars on every start, even

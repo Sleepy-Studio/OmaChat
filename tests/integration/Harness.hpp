@@ -22,13 +22,16 @@ public:
     ~TestServer();
 
     bool start(quint16 port = 0, quint16 mediaPort = 0);
-    void setOperatorUsername(const QString& username) { m_operatorUsername = username; }
+    void setOperatorUserId(server::Id userId) { m_operatorUserId = userId; }
     void stop();
     quint16 port() const { return m_port; }
     quint16 mediaPort() const { return m_mediaPort; }
     const QSslCertificate& certificate() const { return m_identity.chain.first(); }
     QString fingerprint() const;
     server::ChatServer* server() { return m_server.get(); }
+    // Server-side user id for a registered username (0 when unknown).
+    // Call while the server is stopped so its SQLite file is idle.
+    server::Id userId(const QString& username);
 
 private:
     QTemporaryDir m_dir;
@@ -36,7 +39,7 @@ private:
     std::unique_ptr<server::ChatServer> m_server;
     quint16 m_port = 0;
     quint16 m_mediaPort = 0;
-    QString m_operatorUsername;
+    server::Id m_operatorUserId = 0;
 };
 
 // Speaks the protobuf protocol directly (no daemon).

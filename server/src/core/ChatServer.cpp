@@ -79,16 +79,15 @@ bool ChatServer::start(const TlsIdentity& identity, QString* error)
     m_state.load(m_store.allUsers(), std::move(snap.servers), std::move(snap.channels), std::move(snap.overrides));
     if (auto override = m_store.registrationOverride())
         m_config.registrationOpen = *override;
-    if (!m_config.operatorUsername.isEmpty()) {
-        const auto operatorUser = m_state.userByName(m_config.operatorUsername);
-        if (!operatorUser) {
+    if (m_config.operatorUserId != 0) {
+        if (!m_state.user(m_config.operatorUserId)) {
             if (error)
-                *error
-                    = QStringLiteral("operator account '%1' does not exist; create it before enabling operator access")
-                          .arg(m_config.operatorUsername);
+                *error = QStringLiteral("operator user id '%1' does not exist; register it before enabling operator "
+                                        "access")
+                             .arg(m_config.operatorUserId);
             return false;
         }
-        m_operatorId = operatorUser->id;
+        m_operatorId = m_config.operatorUserId;
     }
 
     QSslConfiguration tls = QSslConfiguration::defaultConfiguration();

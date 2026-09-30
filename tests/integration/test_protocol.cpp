@@ -8,6 +8,8 @@
 #include <QBuffer>
 #include <QImage>
 
+#include <limits>
+
 #include <gtest/gtest.h>
 
 using namespace omachat;
@@ -105,10 +107,12 @@ TEST_F(Fixture, InstanceOperatorRequiresHostAssignmentAndPersistsControls)
     bob.reset();
     charlie.reset();
     server.stop();
-    server.setOperatorUsername(QStringLiteral("unregistered"));
+    const std::uint64_t operatorId = server.userId(QStringLiteral("alice"));
+    ASSERT_NE(operatorId, 0u);
+    server.setOperatorUserId(std::numeric_limits<std::uint64_t>::max());
     EXPECT_FALSE(server.start()) << "unknown operator must prevent startup";
     server.stop();
-    server.setOperatorUsername(QStringLiteral("alice"));
+    server.setOperatorUserId(operatorId);
     ASSERT_TRUE(server.start());
 
     RawClient operatorClient(server);

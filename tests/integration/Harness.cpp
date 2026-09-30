@@ -1,6 +1,7 @@
 #include "Harness.hpp"
 
 #include "omachat/core/Version.hpp"
+#include "storage/Store.hpp"
 #include "transport/Certificates.hpp"
 
 #include <QCoreApplication>
@@ -42,7 +43,7 @@ bool TestServer::start(quint16 port, quint16 mediaPort)
     cfg.databasePath = m_dir.filePath(QStringLiteral("server.db"));
     cfg.filesPath = m_dir.filePath(QStringLiteral("files"));
     cfg.maxConnectionsPerIp = 1000;
-    cfg.operatorUsername = m_operatorUsername;
+    cfg.operatorUserId = m_operatorUserId;
     m_server = std::make_unique<server::ChatServer>(cfg);
     QString error;
     if (!m_server->start(m_identity, &error)) {
@@ -57,6 +58,16 @@ bool TestServer::start(quint16 port, quint16 mediaPort)
 void TestServer::stop()
 {
     m_server.reset();
+}
+
+server::Id TestServer::userId(const QString& username)
+{
+    server::Store store;
+    QString error;
+    if (!store.open(m_dir.filePath(QStringLiteral("server.db")), &error))
+        return 0;
+    const auto user = store.userByName(username);
+    return user ? user->id : 0;
 }
 
 QString TestServer::fingerprint() const

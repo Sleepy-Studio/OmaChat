@@ -207,19 +207,21 @@ Register your own account first. Then assign it as operator with environment
 variables and restart the service:
 
 ```yaml
-OMACHAT_OPERATOR_USERNAME: "your-account-name"
+OMACHAT_OPERATOR_USER_ID: "123456789"
 OMACHAT_OPERATOR_REMOTE_RESTART: "true"
 ```
 
-In Coolify these are plain environment variables on the service; with
-`docker run` pass `-e OMACHAT_OPERATOR_USERNAME=...`; with systemd add
-`Environment=...` to a unit override. The variables are honored on every
-start and take precedence over `server.toml`, so no persisted-file editing
-is needed. The TOML equivalent (`[operator]` section in
+The id is your numeric server user id — find it with
+`omachatctl status --json | jq .user.id`. Ids are used instead of usernames
+because they are stable. In Coolify these are plain environment variables on
+the service; with `docker run` pass `-e OMACHAT_OPERATOR_USER_ID=...`; with
+systemd add `Environment=...` to a unit override. The variables are honored
+on every start and take precedence over `server.toml`, so no persisted-file
+editing is needed. The TOML equivalent (`[operator]` section in
 `/var/lib/omachat/server.toml`, see `server.toml.example`) still works and
 is used when the variables are unset or empty.
 
-`username` must name an existing account. If it does not, startup fails rather
+`user_id` must be an existing account's id. If it is not, startup fails rather
 than silently assigning the privilege to a later registrant. Leave
 `remote_restart` off unless systemd, Docker, or another supervisor is
 configured to restart a process that exits with a nonzero status. The packaged

@@ -37,11 +37,11 @@ services:
       OMACHAT_MAX_UPLOAD_MB: ${OMACHAT_MAX_UPLOAD_MB:-50}
       OMACHAT_LOG_LEVEL: ${OMACHAT_LOG_LEVEL:-info}
 
-      # Optional: instance operator console. Set to your registered account
-      # name to reveal the Instance console in that account's client menu;
+      # Optional: instance operator console. Set to your numeric server user
+      # id to reveal the Instance console in that account's client menu;
       # leave unset to keep it disabled. Honored on every start, so existing
       # volumes need only a redeploy after setting it — no config file edits.
-      OMACHAT_OPERATOR_USERNAME: ${OMACHAT_OPERATOR_USERNAME:-}
+      OMACHAT_OPERATOR_USER_ID: ${OMACHAT_OPERATOR_USER_ID:-}
       OMACHAT_OPERATOR_REMOTE_RESTART: ${OMACHAT_OPERATOR_REMOTE_RESTART:-false}
 
       # Optional: "sign in with Discord/GitHub/Google". Leave a provider's

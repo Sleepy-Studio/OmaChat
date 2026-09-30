@@ -5,8 +5,9 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
 
 ## Working tree: hosted instance operator console
 
-An existing account can be assigned as instance operator through
-`[operator] username` in the persisted server config. The normal login then
+An existing account can be assigned as instance operator by numeric user id,
+through `OMACHAT_OPERATOR_USER_ID` or `user_id` in the `[operator]` section of
+the persisted server config. The normal login then
 reveals an Instance console with live counts, users, communities, recent logs,
 and an audit trail. Server-enforced actions cover registration, account
 suspension/restoration, cross-community kick/ban/unban, community deletion,
