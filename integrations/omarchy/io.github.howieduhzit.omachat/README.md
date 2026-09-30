@@ -12,7 +12,7 @@ The widget talks to `omachatd` over its per-user socket
 it never polls or spawns processes for live state, and it holds no
 credentials. If `omachatd` is not running it shows a disconnected state.
 
-Install / remove (from the OmaChat repository):
+Install / remove:
 
-    integrations/omarchy/install.sh
-    integrations/omarchy/uninstall.sh
+    omachat-omarchy-plugin install
+    omachat-omarchy-plugin uninstall

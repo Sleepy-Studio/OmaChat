@@ -1,0 +1,37 @@
+#!/bin/bash
+# Installs or removes the OmaChat Omarchy bar widget for the current user.
+# Copy, not symlink: Omarchy rejects symlinked plugins. Never touches the
+# native app itself, and never needs root.
+#
+#   omachat-omarchy-plugin install
+#   omachat-omarchy-plugin uninstall
+set -euo pipefail
+
+ID=io.github.howieduhzit.omachat
+SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+SRC="$SRC_DIR/$ID"
+DEST="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$ID"
+
+usage() { echo "usage: $(basename "$0") install|uninstall" >&2; exit 1; }
+[[ $# -eq 1 ]] || usage
+
+case "$1" in
+    install)
+        command -v omarchy >/dev/null || { echo "omarchy not found; the native app works without this plugin." >&2; exit 1; }
+        omarchy plugin validate "$SRC"
+        mkdir -p "$DEST"
+        cp -f "$SRC"/manifest.json "$SRC"/*.qml "$SRC"/README.md "$DEST"/
+        omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+        omarchy plugin enable "$ID"
+        echo "Installed $ID to $DEST"
+        ;;
+    uninstall)
+        omarchy plugin disable "$ID" >/dev/null 2>&1 || true
+        rm -rf -- "$DEST"
+        omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+        echo "Removed $ID"
+        ;;
+    *)
+        usage
+        ;;
+esac

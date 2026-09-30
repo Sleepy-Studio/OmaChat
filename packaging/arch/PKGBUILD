@@ -3,23 +3,28 @@
 # Build from the published repository:   makepkg -si
 # Build the working tree you are in:      OMACHAT_SRC=$PWD/../.. makepkg -si
 #
-# The Omarchy shell plugin is not part of this package; it is installed and
-# removed independently with `omarchy plugin add|remove` (see README).
+# The Omarchy bar widget plugin is not force-installed into any user's
+# ~/.config (pacman runs as root and must not touch user home directories),
+# but its files ship in the package and `omachat-omarchy-plugin install`
+# wires it up per-user in one command. See omachat.install for the reminder
+# shown after install/upgrade.
 
 pkgname=omachat
 pkgver=0.2.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Native voice, text and screen chat for Omarchy and Linux (client, daemon, CLI and self-hostable server)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/Sleepy-Studio/OmaChat"
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qtkeychain-qt6' 'protobuf' 'abseil-cpp'
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qt6-multimedia' 'qtkeychain-qt6' 'protobuf' 'abseil-cpp'
          'libsodium' 'opus' 'libpipewire' 'openssl' 'tomlplusplus' 'rnnoise' 'ffmpeg' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja' 'git' 'gtest')
 optdepends=('gnome-keyring: store session tokens in the Secret Service keyring'
             'kwallet: alternative Secret Service keyring'
+            'mpv: open video attachments in MPV'
             'xdg-desktop-portal: screen sharing, with a backend such as xdg-desktop-portal-hyprland')
 backup=()
+install=omachat.install
 source=("git+${url}.git#tag=v${pkgver}")
 sha256sums=('SKIP')
 if [[ -n ${OMACHAT_SRC:-} ]]; then
@@ -52,4 +57,15 @@ package() {
     DESTDIR="${pkgdir}" cmake --install build
     install -Dm644 "$(_src)/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
     install -Dm644 "$(_src)/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+
+    local plugin_src="$(_src)/integrations/omarchy"
+    local plugin_dest="${pkgdir}/usr/share/omachat/omarchy-plugin"
+    install -Dm755 "${plugin_src}/omachat-omarchy-plugin" "${plugin_dest}/omachat-omarchy-plugin"
+    install -d "${plugin_dest}/io.github.howieduhzit.omachat"
+    install -m644 "${plugin_src}"/io.github.howieduhzit.omachat/*.qml \
+        "${plugin_src}"/io.github.howieduhzit.omachat/manifest.json \
+        "${plugin_src}"/io.github.howieduhzit.omachat/README.md \
+        "${plugin_dest}/io.github.howieduhzit.omachat/"
+    install -d "${pkgdir}/usr/bin"
+    ln -s /usr/share/omachat/omarchy-plugin/omachat-omarchy-plugin "${pkgdir}/usr/bin/omachat-omarchy-plugin"
 }

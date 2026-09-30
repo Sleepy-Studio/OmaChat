@@ -20,7 +20,9 @@ assistants, bots or LLM features.
   or a whole server
 - [Discord channel import](docs/discord-migration.md) from JSON exports in Add Server,
   with an offline operator tool for existing servers
-- File attachments: picker, drag and drop, pasted images, inline previews;
+- File attachments: picker, drag and drop, pasted images, aspect-correct inline
+  previews with animated GIF playback, audio level visualization, and MPV
+  opening for video (MPV installed separately);
   transfers continue after a dropped connection
 - Markdown subset (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
   fenced code blocks, `> quotes`, links) rendered through a sanitizer —
@@ -54,13 +56,21 @@ assistants, bots or LLM features.
 **Client (Arch / Omarchy):**
 
 ```bash
+yay -S omachat   # or: paru -S omachat
+```
+
+(<https://aur.archlinux.org/packages/omachat>). Installs the client, daemon,
+CLI and server in one package. Then, optionally, add the
+[Omarchy bar widget](#omarchy-integration-optional).
+
+No AUR helper installed? Use the one-line script instead — it installs
+build dependencies and builds the same package with `makepkg`:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/OmaChat/main/scripts/install.sh | bash
 ```
 
-Or from the AUR: `yay -S omachat` / `paru -S omachat`
-(<https://aur.archlinux.org/packages/omachat>). Both install the client,
-daemon, CLI and server in one package — see [Build](#build) below to build
-from source instead.
+See [Build](#build) below to build from source instead.
 
 **Self-hosted server, any OS with Docker:**
 
@@ -96,7 +106,7 @@ For development, or to build for a distribution the install script doesn't
 cover yet. On Arch Linux:
 
 ```bash
-sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland \
+sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia \
     qtkeychain-qt6 protobuf libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
@@ -182,10 +192,15 @@ middle-click toggles mute, right-click opens the app. It talks to
 `omachatd` over the local socket and shows a dim icon when the daemon is
 not running.
 
+The AUR/PKGBUILD package ships the plugin files; wire it up per-user with:
+
 ```bash
-integrations/omarchy/install.sh      # copies into ~/.config/omarchy/plugins, validates, enables
-integrations/omarchy/uninstall.sh    # disables and removes it
+omachat-omarchy-plugin install      # copies into ~/.config/omarchy/plugins, validates, enables
+omachat-omarchy-plugin uninstall    # disables and removes it
 ```
+
+(Building from source instead? The same script lives at
+`integrations/omarchy/omachat-omarchy-plugin`.)
 
 OmaChat works fully without the plugin, and outside Omarchy on any Wayland
 desktop (built-in dark theme, same features).
@@ -272,8 +287,9 @@ Not done yet — be aware:
 - **Voice between two separate machines has not been tested yet**, and
   mouth-to-ear latency on real hardware has not been measured.
 - Screen capture through the desktop portal has not been tried by hand
-  yet (the rest of the video path is tested). Shared sound is mono and
-  comes from all other applications, not only the shared window.
+  yet (the rest of the video path is tested). Shared sound is opt-in,
+  mono, and comes from all other applications, not only the shared window.
+  The GUI confirms each share with sound.
 - See [docs/status.md](docs/status.md) for the current list.
 
 ## License

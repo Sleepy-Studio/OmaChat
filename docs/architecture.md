@@ -32,7 +32,7 @@ running.
 | `daemon/` | `omachatd`: server connection, client model, IPC server, voice engine, PipeWire backend, notifications, keyring |
 | `cli/` | `omachatctl` |
 | `client/` | `omachat` GUI: C++ controller + models, QML views |
-| `integrations/omarchy/` | Omarchy bar widget plugin and install/uninstall scripts |
+| `integrations/omarchy/` | Omarchy bar widget plugin and the `omachat-omarchy-plugin` install/uninstall script |
 | `packaging/` | desktop entry, icon, systemd units, server config example, PKGBUILD |
 | `tests/` | unit, integration (real TLS/UDP, in-process server and daemons), fuzz |
 
