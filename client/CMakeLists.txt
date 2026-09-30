@@ -77,6 +77,7 @@ qt_add_qml_module(omachat
         qml/dialogs/SearchPanel.qml
         qml/dialogs/ConfirmDialog.qml
         qml/dialogs/ServerSettingsDialog.qml
+        qml/dialogs/InstanceConsoleDialog.qml
         qml/dialogs/PeoplePickerDialog.qml
         qml/dialogs/SafetyDialog.qml
         qml/dialogs/ChannelPermissionsDialog.qml

@@ -29,6 +29,7 @@ public:
     const MemberRecord* member(Id serverId, Id userId) const;
 
     const std::map<Id, ServerRecord>& servers() const { return m_servers; }
+    std::size_t userCount() const { return m_users.size(); }
     const std::map<Id, ChannelRecord>& channels() const { return m_channels; }
 
     std::vector<Id> serversOf(Id userId) const;

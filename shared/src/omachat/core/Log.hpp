@@ -8,6 +8,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace omachat::log {
 
@@ -62,6 +63,8 @@ std::optional<Level> parseLevel(std::string_view name);
 void initialize(std::string_view component, Level level);
 
 void write(Level level, std::string_view category, std::string_view message, std::initializer_list<Field> fields = {});
+// Last 200 process log lines, available only to server-side operator handlers.
+std::vector<QString> recentLines();
 
 inline bool enabled(Level l)
 {

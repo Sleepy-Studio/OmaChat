@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 10);
+    EXPECT_EQ(store.schemaVersion(), 12);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
@@ -59,6 +59,9 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE oauth_identities")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE discord_import_map")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE discord_import_replies")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE instance_audit")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE instance_suspensions")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE instance_settings")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE users DROP COLUMN bio")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN description")));
         ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE channels DROP COLUMN icon_attachment_id")));
@@ -75,7 +78,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 10);
+    EXPECT_EQ(store.schemaVersion(), 12);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 

@@ -120,6 +120,11 @@ void ChatServer::handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OA
             }
 
             // No account linked to this provider identity yet: register one.
+            if (!m_config.registrationOpen) {
+                replyError(*sp, rid, proto::ERROR_REGISTRATION_CLOSED,
+                    QStringLiteral("registration is closed on this server"));
+                return;
+            }
             // The display name comes from the provider profile; the username
             // is derived from it and made unique, since providers don't
             // guarantee OmaChat's stricter charset or uniqueness.

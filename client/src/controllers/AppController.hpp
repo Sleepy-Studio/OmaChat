@@ -44,6 +44,8 @@ class AppController : public QObject {
     Q_PROPERTY(QString accountUser READ accountUser NOTIFY statusChanged)
     Q_PROPERTY(QString accountId READ accountId NOTIFY statusChanged)
     Q_PROPERTY(QString instanceName READ instanceName NOTIFY statusChanged)
+    Q_PROPERTY(bool isInstanceOperator READ isInstanceOperator NOTIFY instanceStatusChanged)
+    Q_PROPERTY(QVariantMap instanceStatus READ instanceStatus NOTIFY instanceStatusChanged)
     Q_PROPERTY(bool authBusy READ authBusy NOTIFY authChanged)
     Q_PROPERTY(QString authError READ authError NOTIFY authChanged)
     // Provider sign-in methods linked to the current account (Settings > Account).
@@ -178,6 +180,8 @@ public:
     QString accountUser() const { return account().value(QStringLiteral("username")).toString(); }
     QString accountId() const { return account().value(QStringLiteral("id")).toString(); }
     QString instanceName() const { return m_status.value(QStringLiteral("instance")).toString(); }
+    bool isInstanceOperator() const { return m_instanceOperator; }
+    QVariantMap instanceStatus() const { return m_instanceStatus.toVariantMap(); }
     bool authBusy() const { return m_authBusy; }
     QString authError() const { return m_authError; }
     QVariantList oauthIdentities() const { return m_oauthIdentities; }
@@ -354,6 +358,12 @@ public:
     Q_INVOKABLE void createInvite();
     Q_INVOKABLE void leaveServer(const QString& id);
     Q_INVOKABLE void deleteServer(const QString& id);
+    Q_INVOKABLE void refreshInstanceStatus();
+    Q_INVOKABLE void setInstanceRegistration(bool open);
+    Q_INVOKABLE void setInstanceSuspension(const QString& userId, bool suspended);
+    Q_INVOKABLE void deleteInstanceCommunity(const QString& serverId);
+    Q_INVOKABLE void moderateInstanceCommunity(const QString& serverId, const QString& userId, const QString& action);
+    Q_INVOKABLE void restartInstance();
     Q_INVOKABLE void createChannel(const QString& name, const QString& type, const QString& parentId,
         const QString& topic, const QString& description, const QUrl& iconFile, const QUrl& bannerFile);
     Q_INVOKABLE void deleteChannel(const QString& id);
@@ -439,6 +449,7 @@ public:
 signals:
     void daemonChanged();
     void statusChanged();
+    void instanceStatusChanged();
     void profilesChanged();
     void authChanged();
     void oauthIdentitiesChanged();
@@ -504,6 +515,8 @@ private:
     MarkdownRenderer m_markdown;
 
     QJsonObject m_status;
+    QJsonObject m_instanceStatus;
+    bool m_instanceOperator = false;
     QJsonObject m_self;
     int m_profilesRevision = 0;
     QHash<QString, QJsonObject> m_serversById;

@@ -10,6 +10,7 @@ Rectangle {
 
     signal createServer()
     signal joinServer()
+    signal openInstanceConsole()
 
     ColumnLayout {
         anchors.fill: parent
@@ -195,6 +196,15 @@ Rectangle {
             onObjectRemoved: (index, object) => accountMenu.removeAction(object)
         }
         MenuSeparator {}
+        Instantiator {
+            model: App.isInstanceOperator ? 1 : 0
+            delegate: MenuAction {
+                text: qsTr("Instance console")
+                onTriggered: rail.openInstanceConsole()
+            }
+            onObjectAdded: (index, object) => accountMenu.insertAction(App.accounts.length + 1, object)
+            onObjectRemoved: (index, object) => accountMenu.removeAction(object)
+        }
         MenuAction { text: qsTr("Add another account"); onTriggered: App.addingAccount = true }
     }
 

@@ -22,6 +22,9 @@ struct ServerConfig {
     QString bind = QStringLiteral("0.0.0.0");
     std::uint16_t port = 6473;
     bool registrationOpen = true;
+    // Existing account promoted by the host operator after registration.
+    QString operatorUsername;
+    bool remoteRestart = false;
     std::uint32_t nodeId = 1; // snowflake node (0..1023)
 
     std::uint16_t mediaPort = 6474;

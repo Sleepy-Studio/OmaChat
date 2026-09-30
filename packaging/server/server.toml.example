@@ -31,6 +31,13 @@ max_upload_mb = 50
 access_token_minutes = 15
 refresh_token_days = 30
 
+# After registering your own account, add this section and restart the server.
+# The account must already exist; an unknown name prevents startup. This is
+# instance administration, separate from ownership of an individual community.
+# [operator]
+# username = "your-account-name"
+# remote_restart = false  # set true only with systemd/Docker restart supervision
+
 # OAuth login/registration. Leave a provider's section out (or its client_id
 # / client_secret empty) to keep it disabled; the client only ever sees
 # providers the server advertises. `enabled` defaults to true once both an

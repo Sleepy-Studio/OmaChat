@@ -22,6 +22,7 @@ public:
     ~TestServer();
 
     bool start(quint16 port = 0, quint16 mediaPort = 0);
+    void setOperatorUsername(const QString& username) { m_operatorUsername = username; }
     void stop();
     quint16 port() const { return m_port; }
     quint16 mediaPort() const { return m_mediaPort; }
@@ -35,6 +36,7 @@ private:
     std::unique_ptr<server::ChatServer> m_server;
     quint16 m_port = 0;
     quint16 m_mediaPort = 0;
+    QString m_operatorUsername;
 };
 
 // Speaks the protobuf protocol directly (no daemon).

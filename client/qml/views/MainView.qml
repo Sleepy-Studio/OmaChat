@@ -168,6 +168,11 @@ Item {
     CommandHelp { id: commandHelp }
     SearchPanel { id: searchPanel }
     ServerSettingsDialog { id: serverSettings }
+    InstanceConsoleDialog { id: instanceConsole }
+    Connections {
+        target: rail
+        function onOpenInstanceConsole() { instanceConsole.open() }
+    }
     PeoplePickerDialog { id: peoplePicker }
     TextPromptDialog {
         id: renameGroupDialog

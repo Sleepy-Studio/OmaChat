@@ -26,6 +26,20 @@ public:
 
     bool open(const QString& path, QString* error);
     int schemaVersion() const;
+    std::optional<bool> registrationOverride();
+    bool setRegistrationOverride(bool open);
+    std::uint64_t messageCount();
+    bool isSuspended(Id userId);
+    bool setSuspended(Id userId, bool suspended);
+    bool deleteSessionsForUser(Id userId);
+    struct AuditEntry {
+        std::int64_t at;
+        Id actorId;
+        QString action;
+        Id targetId;
+    };
+    bool recordAudit(std::int64_t at, Id actorId, const QString& action, Id targetId);
+    std::vector<AuditEntry> recentAudit();
 
     // Groups multi-statement mutations so a failure cannot leave half a
     // server behind.

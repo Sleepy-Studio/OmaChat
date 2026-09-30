@@ -3,6 +3,24 @@
 Handoff notes for whoever picks this up next (human or agent). Last updated
 2026-09-29. "Current source" below means `main`.
 
+## Working tree: hosted instance operator console
+
+An existing account can be assigned as instance operator through
+`[operator] username` in the persisted server config. The normal login then
+reveals an Instance console with live counts, users, communities, recent logs,
+and an audit trail. Server-enforced actions cover registration, account
+suspension/restoration, cross-community kick/ban/unban, community deletion,
+and an optional supervised restart. The operator cannot self-suspend or
+delete the assigned account. OAuth first sign-up now observes closed
+registration. Schema v12 stores registration override, suspensions, and audit
+entries; the new protocol capability is `instance.operator.v1`.
+
+Build, QML lint, 174/174 CTest tests, and offscreen GUI startup passed. A
+focused TLS integration test verifies host assignment, denial for ordinary
+accounts, moderation, persisted settings and suspensions, and deletion across
+restart. An authenticated visual pass of the console and a supervised restart
+have not been performed. Source is uncommitted, uninstalled, and undeployed.
+
 ## Where things are
 
 - Remote: `github.com/Sleepy-Studio/OmaChat` (**public** as of 2026-09-28), branch `main`.

@@ -2,7 +2,9 @@
 #include "core/ChatServer.hpp"
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
+#include "omachat/core/Version.hpp"
 
+#include <QCoreApplication>
 #include <QImageReader>
 
 #include <algorithm>
@@ -76,6 +78,233 @@ void ChatServer::handleSync(Session& s, std::uint64_t rid)
     }
     st->set_last_sequence(m_events.lastSequence());
     reply(s, rid, std::move(env));
+}
+
+void ChatServer::handleInstanceStatus(Session& s, std::uint64_t rid)
+{
+    if (!isOperator(s)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("instance operator access required"));
+        return;
+    }
+    proto::Envelope env;
+    auto* status = env.mutable_instance_status();
+    status->set_instance_name(m_config.instanceName.toStdString());
+    status->set_server_version(kVersion);
+    status->set_started_at(m_startedAt);
+    status->set_registration_open(m_config.registrationOpen);
+    status->set_connected_sessions(static_cast<std::uint32_t>(m_userConns.size()));
+    std::uint32_t online = 0;
+    Id previous = 0;
+    for (const auto& [uid, connId] : m_userConns) {
+        (void)connId;
+        if (uid != previous) {
+            ++online;
+            previous = uid;
+        }
+    }
+    status->set_online_users(online);
+    status->set_total_users(static_cast<std::uint32_t>(m_state.userCount()));
+    status->set_total_messages(m_store.messageCount());
+    status->set_restart_available(m_config.remoteRestart);
+    for (const auto& user : m_store.allUsers()) {
+        auto* item = status->add_users();
+        item->set_id(user.id);
+        item->set_username(user.username.toStdString());
+        item->set_display_name(user.displayName.toStdString());
+        item->set_online(m_userConns.contains(user.id));
+        item->set_suspended(m_store.isSuspended(user.id));
+    }
+    for (const auto& entry : m_store.recentAudit()) {
+        auto* item = status->add_audit();
+        item->set_at(entry.at);
+        item->set_actor_id(entry.actorId);
+        item->set_action(entry.action.toStdString());
+        item->set_target_id(entry.targetId);
+    }
+    for (const auto& line : log::recentLines())
+        status->add_log_lines(line.toStdString());
+    for (const auto& [id, community] : m_state.servers()) {
+        auto* item = status->add_communities();
+        item->set_id(id);
+        item->set_name(community.name.toStdString());
+        item->set_owner_id(community.ownerId);
+        if (const auto* owner = m_state.user(community.ownerId))
+            item->set_owner_name(owner->username.toStdString());
+        item->set_members(static_cast<std::uint32_t>(community.members.size()));
+        item->set_channels(static_cast<std::uint32_t>(community.channels.size()));
+        for (const auto& [uid, member] : community.members) {
+            (void)member;
+            item->add_member_ids(uid);
+        }
+        for (Id uid : community.bans)
+            item->add_banned_user_ids(uid);
+    }
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::handleSetInstanceRegistration(Session& s, std::uint64_t rid, bool open)
+{
+    if (!isOperator(s)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("instance operator access required"));
+        return;
+    }
+    if (!m_store.begin() || !m_store.setRegistrationOverride(open)
+        || !m_store.recordAudit(
+            now(), s.userId, open ? QStringLiteral("registration.open") : QStringLiteral("registration.close"), 0)
+        || !m_store.commit()) {
+        m_store.rollback();
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not save registration setting"));
+        return;
+    }
+    m_config.registrationOpen = open;
+    OMA_INFO("operator", "registration changed", {"operator", s.userId}, {"open", open});
+    replyOk(s, rid);
+}
+
+void ChatServer::handleDeleteInstanceCommunity(Session& s, std::uint64_t rid, Id serverId)
+{
+    if (!isOperator(s)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("instance operator access required"));
+        return;
+    }
+    const ServerRecord* community = m_state.server(serverId);
+    if (!community) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("community not found"));
+        return;
+    }
+    std::vector<Id> members;
+    for (const auto& [uid, member] : community->members) {
+        (void)member;
+        members.push_back(uid);
+    }
+    for (Id uid : members) {
+        const auto voice = m_voice.find(uid);
+        if (voice != m_voice.end() && community->channels.contains(voice->second.channelId))
+            leaveVoice(uid);
+    }
+    if (!m_store.begin() || !m_store.deleteServer(serverId)
+        || !m_store.recordAudit(now(), s.userId, QStringLiteral("community.delete"), serverId) || !m_store.commit()) {
+        m_store.rollback();
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not delete community"));
+        return;
+    }
+    m_state.removeServer(serverId);
+    proto::Event event;
+    event.mutable_server_delete()->set_server_id(serverId);
+    publish(std::move(event), members);
+    OMA_WARN("operator", "community deleted", {"operator", s.userId}, {"server", serverId});
+    replyOk(s, rid);
+}
+
+void ChatServer::handleSetInstanceSuspension(Session& s, std::uint64_t rid, Id userId, bool suspended)
+{
+    if (!isOperator(s)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("instance operator access required"));
+        return;
+    }
+    if (!m_state.user(userId)) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("user not found"));
+        return;
+    }
+    if (userId == m_operatorId) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("operator cannot suspend own account"));
+        return;
+    }
+    if (!m_store.begin() || !m_store.setSuspended(userId, suspended)
+        || (suspended && !m_store.deleteSessionsForUser(userId))
+        || !m_store.recordAudit(
+            now(), s.userId, suspended ? QStringLiteral("account.suspend") : QStringLiteral("account.restore"), userId)
+        || !m_store.commit()) {
+        m_store.rollback();
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not update account suspension"));
+        return;
+    }
+    if (suspended) {
+        for (auto it = m_accessTokens.begin(); it != m_accessTokens.end();)
+            it = it->userId == userId ? m_accessTokens.erase(it) : std::next(it);
+        std::vector<quint64> connections;
+        for (auto it = m_userConns.lower_bound(userId); it != m_userConns.upper_bound(userId); ++it)
+            connections.push_back(it->second);
+        for (quint64 connId : connections)
+            if (Session* peer = sessionFor(connId))
+                peer->conn->close();
+    }
+    OMA_WARN(
+        "operator", suspended ? "account suspended" : "account restored", {"operator", s.userId}, {"user", userId});
+    replyOk(s, rid);
+}
+
+void ChatServer::handleRestartInstance(Session& s, std::uint64_t rid)
+{
+    if (!isOperator(s) || !m_config.remoteRestart) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("remote restart is not available"));
+        return;
+    }
+    if (!m_store.recordAudit(now(), s.userId, QStringLiteral("instance.restart"), 0)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not record restart"));
+        return;
+    }
+    OMA_WARN("operator", "instance restart requested", {"operator", s.userId});
+    replyOk(s, rid);
+    // Both the packaged systemd unit and Docker Compose restart nonzero exits.
+    QTimer::singleShot(250, this, [] { QCoreApplication::exit(75); });
+}
+
+void ChatServer::handleInstanceModeration(Session& s, std::uint64_t rid, const proto::InstanceModerationRequest& m)
+{
+    if (!isOperator(s)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("instance operator access required"));
+        return;
+    }
+    const ServerRecord* community = m_state.server(m.server_id());
+    if (!community || !m_state.user(m.user_id())) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("community or user not found"));
+        return;
+    }
+    if (m.user_id() == community->ownerId || m.user_id() == m_operatorId) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("cannot moderate an owner account"));
+        return;
+    }
+    QString action;
+    switch (m.action()) {
+    case proto::InstanceModerationRequest::KICK:
+        if (!community->members.contains(m.user_id())) {
+            replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("member not found"));
+            return;
+        }
+        removeMemberFromServer(m.server_id(), m.user_id(), QStringLiteral("operator_kick"));
+        action = QStringLiteral("community.kick");
+        break;
+    case proto::InstanceModerationRequest::BAN:
+        if (!m_store.insertBan(m.server_id(), m.user_id(), s.userId, QStringLiteral("instance operator"), now())) {
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not ban user"));
+            return;
+        }
+        m_state.addBan(m.server_id(), m.user_id());
+        if (community->members.contains(m.user_id()))
+            removeMemberFromServer(m.server_id(), m.user_id(), QStringLiteral("operator_ban"));
+        action = QStringLiteral("community.ban");
+        break;
+    case proto::InstanceModerationRequest::UNBAN:
+        if (!community->bans.contains(m.user_id())) {
+            replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("ban not found"));
+            return;
+        }
+        if (!m_store.deleteBan(m.server_id(), m.user_id())) {
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not unban user"));
+            return;
+        }
+        m_state.removeBan(m.server_id(), m.user_id());
+        action = QStringLiteral("community.unban");
+        break;
+    default:
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid moderation action"));
+        return;
+    }
+    m_store.recordAudit(now(), s.userId, action, m.user_id());
+    OMA_WARN("operator", "community moderation", {"operator", s.userId}, {"server", m.server_id()},
+        {"target", m.user_id()}, {"action", action});
+    replyOk(s, rid);
 }
 
 void ChatServer::handleCreateServer(Session& s, std::uint64_t rid, const proto::CreateServerRequest& m)

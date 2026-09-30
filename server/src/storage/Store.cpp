@@ -11,7 +11,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 10;
+constexpr int kSchemaVersion = 12;
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -210,6 +210,16 @@ const char* const kSchemaV10[] = {
     "ALTER TABLE attachments ADD COLUMN artwork INTEGER NOT NULL DEFAULT 0",
 };
 
+const char* const kSchemaV11[] = {
+    "CREATE TABLE instance_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+};
+const char* const kSchemaV12[] = {
+    "CREATE TABLE instance_suspensions(user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE)",
+    "CREATE TABLE instance_audit(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, actor_id INTEGER NOT NULL, "
+    "action TEXT NOT NULL, target_id INTEGER NOT NULL)",
+    "CREATE INDEX instance_audit_recent ON instance_audit(id DESC)",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -312,6 +322,67 @@ int Store::schemaVersion() const
     return 0;
 }
 
+std::optional<bool> Store::registrationOverride()
+{
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral("SELECT value FROM instance_settings WHERE key = 'registration_open'")) && q.next())
+        return q.value(0).toString() == u"1";
+    return std::nullopt;
+}
+
+bool Store::setRegistrationOverride(bool open)
+{
+    return exec(QStringLiteral("INSERT INTO instance_settings(key, value) VALUES('registration_open', ?) "
+                               "ON CONFLICT(key) DO UPDATE SET value = excluded.value"),
+        {open ? QStringLiteral("1") : QStringLiteral("0")});
+}
+
+std::uint64_t Store::messageCount()
+{
+    QSqlQuery q(m_db);
+    if (q.exec(QStringLiteral("SELECT COUNT(*) FROM messages")) && q.next())
+        return q.value(0).toULongLong();
+    return 0;
+}
+
+bool Store::isSuspended(Id userId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT 1 FROM instance_suspensions WHERE user_id = ?"));
+    q.addBindValue(sid(userId));
+    return q.exec() && q.next();
+}
+
+bool Store::setSuspended(Id userId, bool suspended)
+{
+    return suspended
+        ? exec(QStringLiteral("INSERT OR IGNORE INTO instance_suspensions(user_id) VALUES(?)"), {sid(userId)})
+        : exec(QStringLiteral("DELETE FROM instance_suspensions WHERE user_id = ?"), {sid(userId)});
+}
+
+bool Store::deleteSessionsForUser(Id userId)
+{
+    return exec(QStringLiteral("DELETE FROM sessions WHERE user_id = ?"), {sid(userId)});
+}
+
+bool Store::recordAudit(std::int64_t at, Id actorId, const QString& action, Id targetId)
+{
+    return exec(QStringLiteral("INSERT INTO instance_audit(at, actor_id, action, target_id) VALUES(?, ?, ?, ?)"),
+        {qint64(at), sid(actorId), action, sid(targetId)});
+}
+
+std::vector<Store::AuditEntry> Store::recentAudit()
+{
+    std::vector<AuditEntry> result;
+    QSqlQuery q(m_db);
+    if (!q.exec(
+            QStringLiteral("SELECT at, actor_id, action, target_id FROM instance_audit ORDER BY id DESC LIMIT 100")))
+        return result;
+    while (q.next())
+        result.push_back({q.value(0).toLongLong(), uid(q.value(1)), q.value(2).toString(), uid(q.value(3))});
+    return result;
+}
+
 bool Store::migrate(QString* error)
 {
     const int current = schemaVersion();
@@ -356,6 +427,10 @@ bool Store::migrate(QString* error)
     if (current < 9 && !apply(kSchemaV9))
         return false;
     if (current < 10 && !apply(kSchemaV10))
+        return false;
+    if (current < 11 && !apply(kSchemaV11))
+        return false;
+    if (current < 12 && !apply(kSchemaV12))
         return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {

@@ -148,6 +148,13 @@ private:
 
     // ---- handlers: servers & channels (ServerHandlers.cpp)
     void handleSync(Session& s, std::uint64_t rid);
+    void handleInstanceStatus(Session& s, std::uint64_t rid);
+    void handleSetInstanceRegistration(Session& s, std::uint64_t rid, bool open);
+    void handleDeleteInstanceCommunity(Session& s, std::uint64_t rid, Id serverId);
+    void handleSetInstanceSuspension(Session& s, std::uint64_t rid, Id userId, bool suspended);
+    void handleRestartInstance(Session& s, std::uint64_t rid);
+    void handleInstanceModeration(Session& s, std::uint64_t rid, const proto::InstanceModerationRequest& m);
+    bool isOperator(const Session& s) const { return m_operatorId && s.userId == m_operatorId; }
     void handleCreateServer(Session& s, std::uint64_t rid, const proto::CreateServerRequest& m);
     void handleImportDiscordBatch(Session& s, std::uint64_t rid, const proto::ImportDiscordBatchRequest& m);
     void handleLeaveServer(Session& s, std::uint64_t rid, const proto::LeaveServerRequest& m);
@@ -231,6 +238,8 @@ private:
     std::int64_t now() const;
 
     ServerConfig m_config;
+    Id m_operatorId = 0;
+    std::int64_t m_startedAt = 0;
     Store m_store;
     State m_state;
     EventLog m_events;

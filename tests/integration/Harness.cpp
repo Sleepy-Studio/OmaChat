@@ -42,6 +42,7 @@ bool TestServer::start(quint16 port, quint16 mediaPort)
     cfg.databasePath = m_dir.filePath(QStringLiteral("server.db"));
     cfg.filesPath = m_dir.filePath(QStringLiteral("files"));
     cfg.maxConnectionsPerIp = 1000;
+    cfg.operatorUsername = m_operatorUsername;
     m_server = std::make_unique<server::ChatServer>(cfg);
     QString error;
     if (!m_server->start(m_identity, &error)) {

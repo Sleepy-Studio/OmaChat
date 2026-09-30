@@ -51,6 +51,8 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
     auto port = integer(t["server"]["port"], out.port, 1, 65535, "server.port");
     auto node = integer(t["server"]["node_id"], out.nodeId, 0, 1023, "server.node_id");
     out.registrationOpen = t["server"]["registration_open"].value_or(out.registrationOpen);
+    out.operatorUsername = str(t["operator"]["username"], out.operatorUsername).trimmed();
+    out.remoteRestart = t["operator"]["remote_restart"].value_or(out.remoteRestart);
     auto mport = integer(t["media"]["udp_port"], out.mediaPort, 1, 65535, "media.udp_port");
     out.mediaBind = str(t["media"]["bind"], out.mediaBind);
     auto bitrate = integer(t["media"]["voice_bitrate"], out.voiceBitrate, 24000, 96000, "media.voice_bitrate");

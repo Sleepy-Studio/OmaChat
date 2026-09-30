@@ -46,6 +46,13 @@ protocol ([media.md](media.md)), and the local IPC protocol.
 `AuthResult` = user, access token (in-memory on the server, 15 min),
 refresh token (stored as SHA-256 on the server, 30 days), session id.
 
+The host can assign one existing account as instance operator in
+`server.toml`. `InstanceStatusRequest`, `SetInstanceRegistrationRequest`,
+`SetInstanceSuspensionRequest`, `InstanceModerationRequest`,
+`DeleteInstanceCommunityRequest`, and `RestartInstanceRequest` are checked
+against that server-side identity on every request. Operator actions have a
+persistent audit record. Registration and suspensions persist in SQLite.
+
 `HelloReply.oauth_providers` lists the providers (Discord/GitHub/Google) the
 server has credentials configured for, each with the `client_id` and
 `authorize_url` a client needs to send the user to the provider — never a

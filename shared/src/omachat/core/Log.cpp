@@ -3,9 +3,11 @@
 #include <QDateTime>
 #include <QtGlobal>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <mutex>
 #include <string>
 
@@ -16,6 +18,7 @@ std::atomic<Level> g_level{Level::Info};
 std::mutex g_writeMutex;
 std::string g_component = "omachat";
 bool g_journal = false;
+std::deque<QString> g_recent;
 
 const char* levelName(Level l)
 {
@@ -197,9 +200,19 @@ void write(Level l, std::string_view category, std::string_view message, std::in
     line.push_back('\n');
 
     std::lock_guard lock(g_writeMutex);
+    g_recent.push_back(
+        QString::fromUtf8(line.data(), static_cast<qsizetype>(std::min<size_t>(line.size(), 2048))).trimmed());
+    if (g_recent.size() > 200)
+        g_recent.pop_front();
     std::fwrite(line.data(), 1, line.size(), stderr);
     if (l >= Level::Warning)
         std::fflush(stderr);
+}
+
+std::vector<QString> recentLines()
+{
+    std::lock_guard lock(g_writeMutex);
+    return {g_recent.begin(), g_recent.end()};
 }
 
 } // namespace omachat::log

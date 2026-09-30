@@ -839,6 +839,102 @@ void Daemon::registerMethods()
             list.append(model->serverJson(s));
         r.ok({{"servers", list}});
     };
+    m[QStringLiteral("instance.status")] = [this](const QJsonObject&, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        proto::Envelope env;
+        env.mutable_instance_status_request();
+        m_conn->request(std::move(env), [r](const proto::Envelope& reply) {
+            if (reply.has_error()) {
+                r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+                return;
+            }
+            if (!reply.has_instance_status()) {
+                r.error(e::Internal, QStringLiteral("invalid instance status response"));
+                return;
+            }
+            const auto& status = reply.instance_status();
+            QJsonArray communities, users, audit, logs;
+            for (const auto& item : status.communities()) {
+                QJsonArray members, bans;
+                for (const auto uid : item.member_ids())
+                    members.append(idString(uid));
+                for (const auto uid : item.banned_user_ids())
+                    bans.append(idString(uid));
+                communities.append(QJsonObject{{"id", idString(item.id())},
+                    {"name", QString::fromStdString(item.name())}, {"owner_id", idString(item.owner_id())},
+                    {"owner_name", QString::fromStdString(item.owner_name())}, {"members", int(item.members())},
+                    {"channels", int(item.channels())}, {"member_ids", members}, {"banned_user_ids", bans}});
+            }
+            for (const auto& item : status.users())
+                users.append(
+                    QJsonObject{{"id", idString(item.id())}, {"username", QString::fromStdString(item.username())},
+                        {"display_name", QString::fromStdString(item.display_name())}, {"online", item.online()},
+                        {"suspended", item.suspended()}});
+            for (const auto& item : status.audit())
+                audit.append(QJsonObject{{"at", double(item.at())}, {"actor_id", idString(item.actor_id())},
+                    {"action", QString::fromStdString(item.action())}, {"target_id", idString(item.target_id())}});
+            for (const auto& line : status.log_lines())
+                logs.append(QString::fromStdString(line));
+            r.ok({{"instance_name", QString::fromStdString(status.instance_name())},
+                {"version", QString::fromStdString(status.server_version())},
+                {"started_at", double(status.started_at())}, {"registration_open", status.registration_open()},
+                {"connected_sessions", int(status.connected_sessions())}, {"online_users", int(status.online_users())},
+                {"total_users", int(status.total_users())}, {"total_messages", double(status.total_messages())},
+                {"communities", communities}, {"users", users}, {"audit", audit}, {"logs", logs},
+                {"restart_available", status.restart_available()}});
+        });
+    };
+    auto operatorAction = [this](proto::Envelope env, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        m_conn->request(std::move(env), [r](const proto::Envelope& reply) {
+            if (reply.has_error())
+                r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+            else
+                r.ok();
+        });
+    };
+    m[QStringLiteral("instance.registration")] = [operatorAction](const QJsonObject& p, const Responder& r) {
+        proto::Envelope env;
+        env.mutable_set_instance_registration()->set_open(p.value(QStringLiteral("open")).toBool());
+        operatorAction(std::move(env), r);
+    };
+    m[QStringLiteral("instance.community_delete")] = [operatorAction](const QJsonObject& p, const Responder& r) {
+        proto::Envelope env;
+        env.mutable_delete_instance_community()->set_server_id(idFromJson(p.value(QStringLiteral("server_id"))));
+        operatorAction(std::move(env), r);
+    };
+    m[QStringLiteral("instance.suspend")] = [operatorAction](const QJsonObject& p, const Responder& r) {
+        proto::Envelope env;
+        auto* request = env.mutable_set_instance_suspension();
+        request->set_user_id(idFromJson(p.value(QStringLiteral("user_id"))));
+        request->set_suspended(p.value(QStringLiteral("suspended")).toBool());
+        operatorAction(std::move(env), r);
+    };
+    m[QStringLiteral("instance.restart")] = [operatorAction](const QJsonObject&, const Responder& r) {
+        proto::Envelope env;
+        env.mutable_restart_instance();
+        operatorAction(std::move(env), r);
+    };
+    m[QStringLiteral("instance.moderate")] = [operatorAction](const QJsonObject& p, const Responder& r) {
+        proto::Envelope env;
+        auto* request = env.mutable_instance_moderation();
+        request->set_server_id(idFromJson(p.value(QStringLiteral("server_id"))));
+        request->set_user_id(idFromJson(p.value(QStringLiteral("user_id"))));
+        const QString action = p.value(QStringLiteral("action")).toString();
+        if (action == u"kick")
+            request->set_action(proto::InstanceModerationRequest::KICK);
+        else if (action == u"ban")
+            request->set_action(proto::InstanceModerationRequest::BAN);
+        else if (action == u"unban")
+            request->set_action(proto::InstanceModerationRequest::UNBAN);
+        else {
+            r.error(e::BadRequest, QStringLiteral("invalid moderation action"));
+            return;
+        }
+        operatorAction(std::move(env), r);
+    };
     // Creating or joining a server brings roles, channels and members with
     // it: reply only once the resynchronized model contains all of it.
     auto createOrJoin = [this, model](proto::Envelope env, const Responder& r) {

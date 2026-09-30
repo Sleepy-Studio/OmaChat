@@ -88,6 +88,135 @@ struct Fixture : ::testing::Test {
 
 } // namespace
 
+TEST_F(Fixture, InstanceOperatorRequiresHostAssignmentAndPersistsControls)
+{
+    auto alice = client("alice");
+    auto bob = client("bob");
+    auto charlie = client("charlie");
+    const auto communityId = createServer(*bob, "Bob's room");
+    ASSERT_NE(communityId, 0u);
+    ASSERT_TRUE(join(*charlie, invite(*bob, communityId)).has_server());
+    proto::Envelope statusRequest;
+    statusRequest.mutable_instance_status_request();
+    auto before = alice->call(statusRequest);
+    ASSERT_TRUE(before && before->has_error());
+    EXPECT_EQ(before->error().code(), proto::ERROR_PERMISSION_DENIED);
+    alice.reset();
+    bob.reset();
+    charlie.reset();
+    server.stop();
+    server.setOperatorUsername(QStringLiteral("unregistered"));
+    EXPECT_FALSE(server.start()) << "unknown operator must prevent startup";
+    server.stop();
+    server.setOperatorUsername(QStringLiteral("alice"));
+    ASSERT_TRUE(server.start());
+
+    RawClient operatorClient(server);
+    ASSERT_TRUE(operatorClient.connect());
+    ASSERT_TRUE(operatorClient.hello());
+    ASSERT_TRUE(operatorClient.login("alice", "correct horse"));
+    RawClient regular(server);
+    ASSERT_TRUE(regular.connect());
+    ASSERT_TRUE(regular.hello());
+    ASSERT_TRUE(regular.login("bob", "correct horse"));
+
+    auto denied = regular.call(statusRequest);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+    auto status = operatorClient.call(statusRequest);
+    ASSERT_TRUE(status && status->has_instance_status());
+    proto::Envelope restart;
+    restart.mutable_restart_instance();
+    denied = operatorClient.call(restart);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+    ASSERT_EQ(status->instance_status().communities_size(), 1);
+    EXPECT_EQ(status->instance_status().communities(0).id(), communityId);
+    EXPECT_EQ(status->instance_status().users_size(), 3);
+
+    std::uint64_t charlieId = 0;
+    for (const auto& user : status->instance_status().users())
+        if (user.username() == "charlie")
+            charlieId = user.id();
+    ASSERT_NE(charlieId, 0u);
+    proto::Envelope moderation;
+    moderation.mutable_instance_moderation()->set_server_id(communityId);
+    moderation.mutable_instance_moderation()->set_user_id(charlieId);
+    moderation.mutable_instance_moderation()->set_action(proto::InstanceModerationRequest::BAN);
+    denied = regular.call(moderation);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+    auto moderated = operatorClient.call(moderation);
+    ASSERT_TRUE(moderated && moderated->has_ok());
+    status = operatorClient.call(statusRequest);
+    ASSERT_TRUE(status && status->has_instance_status());
+    EXPECT_EQ(status->instance_status().communities(0).banned_user_ids_size(), 1);
+    moderation.mutable_instance_moderation()->set_action(proto::InstanceModerationRequest::UNBAN);
+    moderated = operatorClient.call(moderation);
+    ASSERT_TRUE(moderated && moderated->has_ok());
+
+    proto::Envelope closeRegistration;
+    closeRegistration.mutable_set_instance_registration()->set_open(false);
+    denied = regular.call(closeRegistration);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+    auto changed = operatorClient.call(closeRegistration);
+    ASSERT_TRUE(changed && changed->has_ok());
+    RawClient newcomer(server);
+    ASSERT_TRUE(newcomer.connect());
+    ASSERT_TRUE(newcomer.hello());
+    EXPECT_FALSE(newcomer.registerUser("dave", "correct horse"));
+
+    std::uint64_t bobId = 0;
+    std::uint64_t aliceId = 0;
+    for (const auto& user : status->instance_status().users()) {
+        if (user.username() == "bob")
+            bobId = user.id();
+        if (user.username() == "alice")
+            aliceId = user.id();
+    }
+    ASSERT_NE(bobId, 0u);
+    ASSERT_NE(aliceId, 0u);
+    proto::Envelope suspend;
+    suspend.mutable_set_instance_suspension()->set_user_id(bobId);
+    suspend.mutable_set_instance_suspension()->set_suspended(true);
+    changed = operatorClient.call(suspend);
+    ASSERT_TRUE(changed && changed->has_ok());
+    EXPECT_TRUE(waitFor([&] { return !regular.connected(); }));
+    RawClient suspended(server);
+    ASSERT_TRUE(suspended.connect());
+    ASSERT_TRUE(suspended.hello());
+    EXPECT_FALSE(suspended.login("bob", "correct horse"));
+    suspend.mutable_set_instance_suspension()->set_user_id(aliceId);
+    denied = operatorClient.call(suspend);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+
+    operatorClient.abort();
+    server.stop();
+    ASSERT_TRUE(server.start());
+    RawClient restoredOperator(server);
+    ASSERT_TRUE(restoredOperator.connect());
+    ASSERT_TRUE(restoredOperator.hello());
+    ASSERT_TRUE(restoredOperator.login("alice", "correct horse"));
+    status = restoredOperator.call(statusRequest);
+    ASSERT_TRUE(status && status->has_instance_status());
+    EXPECT_FALSE(status->instance_status().registration_open());
+    bool bobSuspended = false;
+    for (const auto& user : status->instance_status().users())
+        if (user.id() == bobId)
+            bobSuspended = user.suspended();
+    EXPECT_TRUE(bobSuspended);
+    proto::Envelope removeCommunity;
+    removeCommunity.mutable_delete_instance_community()->set_server_id(communityId);
+    changed = restoredOperator.call(removeCommunity);
+    ASSERT_TRUE(changed && changed->has_ok());
+    status = restoredOperator.call(statusRequest);
+    ASSERT_TRUE(status && status->has_instance_status());
+    EXPECT_EQ(status->instance_status().communities_size(), 0);
+    EXPECT_GE(status->instance_status().audit_size(), 3);
+}
+
 TEST_F(Fixture, ChannelIdentityAndArtworkFollowChannelVisibility)
 {
     auto alice = client("alice");

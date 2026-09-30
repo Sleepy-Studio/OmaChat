@@ -201,6 +201,35 @@ From a terminal: `omachatctl account register chat.example.org:6473 you`,
 `omachatctl server create "My Community"`,
 `omachatctl invite create "My Community" --max-uses 10`.
 
+### Instance operator console
+
+Register your own account first. Then add this to the server's persisted
+`server.toml` and restart the service:
+
+```toml
+[operator]
+username = "your-account-name"
+remote_restart = true
+```
+
+`username` must name an existing account. If it does not, startup fails rather
+than silently assigning the privilege to a later registrant. Leave
+`remote_restart = false` unless systemd, Docker, or another supervisor is
+configured to restart a process that exits with a nonzero status. The packaged
+systemd unit and Compose file support this. In Docker/Coolify, edit the
+persisted `/var/lib/omachat/server.toml`; changing environment variables after
+first boot does not rewrite it.
+
+Log in with that account in the normal client. The account menu then shows
+**Instance console**. It reports uptime, connected sessions, users, messages,
+communities, recent process logs and operator actions. It can open or close
+registration, suspend or restore accounts, moderate members in any community,
+delete a community, and request a supervised restart. Suspensions revoke all
+sessions and block password, OAuth, refresh, and resume login. The operator
+cannot suspend or delete their own account through the client; remove the
+assignment from the config first if the identity must change. The console
+does not expose a host shell, files, secrets, or direct message contents.
+
 ## Backups
 
 Server state is the SQLite database (WAL mode) plus the attachment files.

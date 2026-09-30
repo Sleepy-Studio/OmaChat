@@ -303,6 +303,56 @@ message ResumeResult {
 // ------------------------------------------------------------- state sync
 
 message SyncRequest {}
+// Instance operator access is assigned locally in server.toml, never by a client.
+message InstanceStatusRequest {}
+message InstanceCommunity {
+  uint64 id = 1;
+  string name = 2;
+  uint64 owner_id = 3;
+  string owner_name = 4;
+  uint32 members = 5;
+  uint32 channels = 6;
+  repeated uint64 member_ids = 7;
+  repeated uint64 banned_user_ids = 8;
+}
+message InstanceUser {
+  uint64 id = 1;
+  string username = 2;
+  string display_name = 3;
+  bool online = 4;
+  bool suspended = 5;
+}
+message InstanceAuditEntry {
+  int64 at = 1;
+  uint64 actor_id = 2;
+  string action = 3;
+  uint64 target_id = 4;
+}
+message InstanceStatus {
+  string instance_name = 1;
+  string server_version = 2;
+  int64 started_at = 3;
+  bool registration_open = 4;
+  uint32 connected_sessions = 5;
+  uint32 online_users = 6;
+  uint32 total_users = 7;
+  uint64 total_messages = 8;
+  repeated InstanceCommunity communities = 9;
+  repeated InstanceUser users = 10;
+  repeated InstanceAuditEntry audit = 11;
+  bool restart_available = 12;
+  repeated string log_lines = 13;
+}
+message SetInstanceRegistrationRequest { bool open = 1; }
+message DeleteInstanceCommunityRequest { uint64 server_id = 1; }
+message SetInstanceSuspensionRequest { uint64 user_id = 1; bool suspended = 2; }
+message RestartInstanceRequest {}
+message InstanceModerationRequest {
+  enum Action { KICK = 0; BAN = 1; UNBAN = 2; }
+  uint64 server_id = 1;
+  uint64 user_id = 2;
+  Action action = 3;
+}
 
 message SyncState {
   User self = 1;
@@ -690,6 +740,13 @@ message Envelope {
     // sync
     SyncRequest sync = 20;
     SyncState sync_state = 21;
+    InstanceStatusRequest instance_status_request = 150;
+    InstanceStatus instance_status = 151;
+    SetInstanceRegistrationRequest set_instance_registration = 152;
+    DeleteInstanceCommunityRequest delete_instance_community = 153;
+    SetInstanceSuspensionRequest set_instance_suspension = 154;
+    RestartInstanceRequest restart_instance = 155;
+    InstanceModerationRequest instance_moderation = 156;
 
     // servers / channels
     CreateServerRequest create_server = 30;

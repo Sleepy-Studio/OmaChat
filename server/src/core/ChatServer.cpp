@@ -77,6 +77,19 @@ bool ChatServer::start(const TlsIdentity& identity, QString* error)
 
     auto snap = m_store.loadSnapshot();
     m_state.load(m_store.allUsers(), std::move(snap.servers), std::move(snap.channels), std::move(snap.overrides));
+    if (auto override = m_store.registrationOverride())
+        m_config.registrationOpen = *override;
+    if (!m_config.operatorUsername.isEmpty()) {
+        const auto operatorUser = m_state.userByName(m_config.operatorUsername);
+        if (!operatorUser) {
+            if (error)
+                *error
+                    = QStringLiteral("operator account '%1' does not exist; create it before enabling operator access")
+                          .arg(m_config.operatorUsername);
+            return false;
+        }
+        m_operatorId = operatorUser->id;
+    }
 
     QSslConfiguration tls = QSslConfiguration::defaultConfiguration();
     tls.setLocalCertificateChain(identity.chain);
@@ -103,6 +116,7 @@ bool ChatServer::start(const TlsIdentity& identity, QString* error)
         return false;
     }
     m_housekeeping.start();
+    m_startedAt = now();
     OMA_INFO("server", "listening", {"control", QStringLiteral("%1:%2").arg(m_config.bind).arg(controlPort())},
         {"media", QStringLiteral("%1:%2").arg(m_config.mediaBind).arg(mediaPort())},
         {"servers", static_cast<qint64>(m_state.servers().size())}, {"registration", m_config.registrationOpen});
@@ -234,6 +248,25 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     switch (env.payload_case()) {
     case P::kSync:
         handleSync(s, rid);
+        break;
+    case P::kInstanceStatusRequest:
+        handleInstanceStatus(s, rid);
+        break;
+    case P::kSetInstanceRegistration:
+        handleSetInstanceRegistration(s, rid, env.set_instance_registration().open());
+        break;
+    case P::kDeleteInstanceCommunity:
+        handleDeleteInstanceCommunity(s, rid, env.delete_instance_community().server_id());
+        break;
+    case P::kSetInstanceSuspension:
+        handleSetInstanceSuspension(
+            s, rid, env.set_instance_suspension().user_id(), env.set_instance_suspension().suspended());
+        break;
+    case P::kRestartInstance:
+        handleRestartInstance(s, rid);
+        break;
+    case P::kInstanceModeration:
+        handleInstanceModeration(s, rid, env.instance_moderation());
         break;
     case P::kLogout:
         handleLogout(s, rid);

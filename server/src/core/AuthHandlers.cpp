@@ -88,6 +88,7 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("profile.v1");
     r->add_capabilities("discord.import");
     r->add_capabilities("channel.identity.v1");
+    r->add_capabilities("instance.operator.v1");
     r->set_instance_name(m_config.instanceName.toStdString());
     r->set_registration_open(m_config.registrationOpen);
     r->set_media_udp_port(mediaPort());
@@ -250,7 +251,7 @@ void ChatServer::handleResume(Session& s, std::uint64_t rid, const proto::Resume
     const QString token = QString::fromStdString(m.access_token());
     auto it = m_accessTokens.find(token);
     if (it == m_accessTokens.end() || it->expiresAt < now() || it->sessionId != m.session_id()
-        || !m_state.user(it->userId)) {
+        || !m_state.user(it->userId) || m_store.isSuspended(it->userId)) {
         replyError(s, rid, proto::ERROR_AUTHENTICATION, QStringLiteral("access token expired"));
         return;
     }
@@ -286,6 +287,11 @@ void ChatServer::handleLogout(Session& s, std::uint64_t rid)
 
 void ChatServer::handleDeleteAccount(Session& s, std::uint64_t rid)
 {
+    if (isOperator(s)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED,
+            QStringLiteral("remove the operator assignment in server.toml before deleting this account"));
+        return;
+    }
     const Id userId = s.userId;
     struct RemovedServer { Id id; std::vector<Id> members; };
     struct LeftServer { Id id; std::vector<Id> members; };
@@ -358,6 +364,11 @@ void ChatServer::handleDeleteAccount(Session& s, std::uint64_t rid)
 
 void ChatServer::completeAuth(Session& s, std::uint64_t rid, Id userId, Id sessionId, const QString& refreshToken)
 {
+    if (m_store.isSuspended(userId)) {
+        m_store.deleteSession(sessionId);
+        replyError(s, rid, proto::ERROR_AUTHENTICATION, QStringLiteral("this account is suspended"));
+        return;
+    }
     const QString access = auth::randomToken();
     const std::int64_t expires = now() + std::int64_t(m_config.accessTokenMinutes) * 60000;
     m_accessTokens.insert(access, AccessGrant{userId, sessionId, expires});

@@ -181,9 +181,15 @@ void AppController::loadSnapshot()
 void AppController::applyStatus(const QJsonObject& status)
 {
     const QString previousState = state();
+    const QString previousAccount = accountId();
     const bool voiceBefore = voiceJoined();
     const QString voiceChannelBefore = voiceChannelId();
     m_status = status;
+    if (state() != u"connected" || previousAccount != accountId()) {
+        m_instanceOperator = false;
+        m_instanceStatus = {};
+        emit instanceStatusChanged();
+    }
     const QJsonObject user = status.value(QStringLiteral("user")).toObject();
     if (!user.isEmpty())
         m_self = user;
@@ -261,6 +267,54 @@ void AppController::applySnapshot(const QJsonObject& snap)
     rebuildMembers();
     m_messages.refreshRendering();
     emit selectionChanged();
+    refreshInstanceStatus();
+}
+
+void AppController::refreshInstanceStatus()
+{
+    if (state() != u"connected")
+        return;
+    const QString requestedAccount = accountId();
+    m_link.request(QStringLiteral("instance.status"), {}, [this, requestedAccount](const ipc::Reply& r) {
+        if (requestedAccount != accountId())
+            return;
+        m_instanceOperator = r.ok;
+        m_instanceStatus = r.ok ? r.result : QJsonObject{};
+        emit instanceStatusChanged();
+    });
+}
+
+void AppController::setInstanceRegistration(bool open)
+{
+    call(
+        QStringLiteral("instance.registration"), {{"open", open}},
+        [this](const QJsonObject&) { refreshInstanceStatus(); }, tr("Cannot change registration"));
+}
+
+void AppController::setInstanceSuspension(const QString& userId, bool suspended)
+{
+    call(
+        QStringLiteral("instance.suspend"), {{"user_id", userId}, {"suspended", suspended}},
+        [this](const QJsonObject&) { refreshInstanceStatus(); }, tr("Cannot update account"));
+}
+
+void AppController::deleteInstanceCommunity(const QString& serverId)
+{
+    call(
+        QStringLiteral("instance.community_delete"), {{"server_id", serverId}},
+        [this](const QJsonObject&) { refreshInstanceStatus(); }, tr("Cannot delete community"));
+}
+
+void AppController::moderateInstanceCommunity(const QString& serverId, const QString& userId, const QString& action)
+{
+    call(
+        QStringLiteral("instance.moderate"), {{"server_id", serverId}, {"user_id", userId}, {"action", action}},
+        [this](const QJsonObject&) { refreshInstanceStatus(); }, tr("Cannot moderate community"));
+}
+
+void AppController::restartInstance()
+{
+    call(QStringLiteral("instance.restart"), {}, {}, tr("Cannot restart instance"));
 }
 
 // ----------------------------------------------------------------- events
