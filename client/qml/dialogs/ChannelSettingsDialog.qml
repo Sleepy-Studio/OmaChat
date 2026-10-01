@@ -132,7 +132,7 @@ Dialog {
             }
             FlatButton {
                 text: qsTr("Remove icon")
-                enabled: dialog.details.icon_attachment_id && dialog.details.icon_attachment_id !== "0"
+                enabled: !!dialog.details.icon_attachment_id && dialog.details.icon_attachment_id !== "0"
                 onClicked: App.setChannelArtwork(dialog.channelId, "icon", "")
             }
         }
@@ -153,7 +153,7 @@ Dialog {
             }
             FlatButton {
                 text: qsTr("Remove banner")
-                enabled: dialog.details.banner_attachment_id && dialog.details.banner_attachment_id !== "0"
+                enabled: !!dialog.details.banner_attachment_id && dialog.details.banner_attachment_id !== "0"
                 onClicked: App.setChannelArtwork(dialog.channelId, "banner", "")
             }
         }

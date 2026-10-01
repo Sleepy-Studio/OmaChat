@@ -227,7 +227,7 @@ Dialog {
                         }
                         FlatButton {
                             text: qsTr("Remove icon")
-                            enabled: dialog.serverDetails.icon_attachment_id
+                            enabled: !!dialog.serverDetails.icon_attachment_id
                                      && dialog.serverDetails.icon_attachment_id !== "0"
                             onClicked: App.setServerArtwork(dialog.serverId, "icon", "")
                         }
@@ -251,7 +251,7 @@ Dialog {
                         }
                         FlatButton {
                             text: qsTr("Remove banner")
-                            enabled: dialog.serverDetails.banner_attachment_id
+                            enabled: !!dialog.serverDetails.banner_attachment_id
                                      && dialog.serverDetails.banner_attachment_id !== "0"
                             onClicked: App.setServerArtwork(dialog.serverId, "banner", "")
                         }

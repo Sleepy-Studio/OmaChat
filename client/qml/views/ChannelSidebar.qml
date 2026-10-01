@@ -178,7 +178,7 @@ Rectangle {
                     size: Theme.px(12)
                 }
                 Image {
-                    visible: m && m.iconAttachmentId && m.iconAttachmentId !== "0" && status === Image.Ready
+                    visible: !!(m && m.iconAttachmentId && m.iconAttachmentId !== "0") && status === Image.Ready
                     source: m ? (App.previews[m.iconAttachmentId] || "") : ""
                     Layout.preferredWidth: Theme.px(16)
                     Layout.preferredHeight: Theme.px(16)
@@ -230,7 +230,7 @@ Rectangle {
             readonly property bool isDm: m && m.rowType === "dm"
             readonly property bool isGroup: m && m.rowType === "group_dm"
             readonly property bool emphasized: m && (m.unread || m.selected)
-            readonly property string iconId: m ? m.iconAttachmentId : ""
+            readonly property string iconId: m && m.iconAttachmentId ? m.iconAttachmentId : ""
             Component.onCompleted: if (iconId.length > 0 && iconId !== "0")
                                        App.requestPreview(iconId, "channel-icon.png", 0)
             implicitHeight: isDm ? Theme.px(40) : Theme.px(30)
