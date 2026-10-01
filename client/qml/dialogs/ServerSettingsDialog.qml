@@ -218,7 +218,7 @@ Dialog {
                                     ? (App.previews[dialog.serverDetails.icon_attachment_id] || "") : ""
                             Layout.preferredWidth: Theme.px(36)
                             Layout.preferredHeight: Theme.px(36)
-                            fillMode: Image.PreserveAspectCrop
+                            fillMode: Image.PreserveAspectFit
                             asynchronous: true
                         }
                         FlatButton {
@@ -238,7 +238,7 @@ Dialog {
                                 ? (App.previews[dialog.serverDetails.banner_attachment_id] || "") : ""
                         Layout.fillWidth: true
                         Layout.preferredHeight: Theme.px(76)
-                        fillMode: Image.PreserveAspectCrop
+                        fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         visible: source.toString().length > 0
                     }

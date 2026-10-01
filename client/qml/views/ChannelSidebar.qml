@@ -105,7 +105,7 @@ Rectangle {
             visible: !App.homeSelected && status === Image.Ready
             source: App.selectedServerBannerId && App.selectedServerBannerId !== "0"
                     ? (App.previews[App.selectedServerBannerId] || "") : ""
-            fillMode: Image.PreserveAspectCrop
+            fillMode: Image.PreserveAspectFit
             asynchronous: true
         }
 

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import QtQuick.Layouts
 import OmaChat
 
@@ -90,14 +91,31 @@ Rectangle {
                         size: Theme.px(20)
                         color: entry.selected ? Theme.accentText : Theme.text
                     }
+                    Rectangle {
+                        id: iconMask
+                        anchors.fill: parent
+                        radius: tile.radius
+                        color: "white"
+                    }
+                    ShaderEffectSource {
+                        id: iconMaskTexture
+                        sourceItem: iconMask
+                        hideSource: true
+                        visible: false
+                    }
                     Image {
                         id: serverIcon
                         anchors.fill: parent
                         visible: !entry.isHome && entry.iconId && entry.iconId !== "0"
                                  && source.toString().length > 0 && status === Image.Ready
                         source: entry.iconId && entry.iconId !== "0" ? (App.previews[entry.iconId] || "") : ""
-                        fillMode: Image.PreserveAspectCrop
+                        fillMode: Image.PreserveAspectFit
                         asynchronous: true
+                        layer.enabled: true
+                        layer.effect: MultiEffect {
+                            maskEnabled: true
+                            maskSource: iconMaskTexture
+                        }
                     }
                     Text {
                         anchors.centerIn: parent
