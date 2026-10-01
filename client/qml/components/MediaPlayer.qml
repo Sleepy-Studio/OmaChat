@@ -14,6 +14,8 @@ Item {
     property bool isVideo: false
     property real maxWidth: Theme.px(400)
     property bool pendingPlay: false
+    property alias volume: volumeSlider.value
+    property bool muted: false
     readonly property bool ready: root.source.length > 0
     readonly property bool playing: player.playbackState === Multimedia.MediaPlayer.PlayingState
     readonly property bool rotatedVideo: Math.abs(videoOutput.orientation % 180) === 90
@@ -58,8 +60,12 @@ Item {
         Multimedia.MediaPlayer {
             id: player
             source: root.ready ? root.source : ""
-            audioOutput: Multimedia.AudioOutput { id: audioOutput }
-            audioBufferOutput: root.isVideo ? null : levels.output
+            audioOutput: Multimedia.AudioOutput {
+                id: audioOutput
+                volume: root.volume
+                muted: root.muted
+            }
+            audioBufferOutput: levels.output
             videoOutput: root.isVideo ? videoOutput : null
             onMediaStatusChanged: root.startPendingPlayback()
             onPlaybackStateChanged: {
@@ -224,11 +230,55 @@ Item {
                 onMoved: player.setPosition(value)
             }
 
+            Item {
+                id: volumeControls
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: Theme.px(98)
+                height: Theme.px(32)
+
+                IconButton {
+                    id: muteButton
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Theme.px(28)
+                    height: width
+                    iconName: "speaker"
+                    iconSize: Theme.px(16)
+                    iconColor: root.muted || root.volume === 0 ? Theme.textFaint : Theme.textMuted
+                    tip: root.muted ? qsTr("Unmute") : qsTr("Mute")
+                    onClicked: {
+                        if (root.muted && root.volume === 0)
+                            root.volume = 0.5
+                        root.muted = !root.muted
+                    }
+                }
+
+                Slider {
+                    id: volumeSlider
+                    anchors.left: muteButton.right
+                    anchors.leftMargin: Theme.px(2)
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    from: 0
+                    to: 1
+                    stepSize: 0.01
+                    value: 1.0
+                    Accessible.name: qsTr("Media volume")
+                    Accessible.description: qsTr("%1 percent").arg(Math.round(value * 100))
+                    onMoved: {
+                        root.muted = false
+                    }
+                    ToolTip.visible: hovered || pressed
+                    ToolTip.text: Math.round(value * 100) + "%"
+                }
+            }
+
             Text {
                 id: timeLabel
                 visible: root.ready
-                anchors.right: parent.right
-                anchors.rightMargin: Theme.px(8)
+                anchors.right: volumeControls.left
+                anchors.rightMargin: Theme.px(6)
                 anchors.verticalCenter: parent.verticalCenter
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(11)

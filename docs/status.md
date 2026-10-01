@@ -112,11 +112,11 @@ VAD/PTT), reconnect/resume, CLI, Omarchy bar widget, Arch packaging, and:
   offline operator tool for existing servers. Both preserve historical dates
   and avoid duplicating already imported Discord message IDs. See
   `docs/discord-migration.md` for data and format limits.
-- Audio and video attachments have in-chat playback controls, including an audio
-  level visualizer. The audio preview opens the desktop's default player; video
-  shows a first-frame thumbnail and its preview opens MPV. Unicode emoji
-  picker and per-server custom emoji are in `6decdd4`; these newer paths still
-  need manual checks.
+- Audio and video attachments have in-chat playback, mute and volume controls,
+  including an audio level visualizer. The audio preview opens the desktop's
+  default player; video shows a first-frame thumbnail and its preview opens
+  MPV. Unicode emoji picker and per-server custom emoji are in `6decdd4`;
+  these newer paths still need manual checks.
 - Screen sound is off by default in the current working tree. The GUI
   setting requires confirmation on each share, and CLI `stream start --audio`
   explicitly opts into capturing every other application's playback; this
