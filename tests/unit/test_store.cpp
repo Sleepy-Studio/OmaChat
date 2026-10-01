@@ -330,6 +330,8 @@ TEST(LocalStore, AccountsVolumesMutes)
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("l.db")), &error));
     const auto id = store.addAccount({0, QStringLiteral("chat.example"), 6473, QStringLiteral("alice"), {}, 0});
     ASSERT_GT(id, 0);
+    ASSERT_TRUE(store.findAccount(QStringLiteral("CHAT.EXAMPLE"), 6473, QStringLiteral("alice")));
+    EXPECT_EQ(store.findAccount(QStringLiteral("CHAT.EXAMPLE"), 6473, QStringLiteral("alice"))->id, id);
     EXPECT_EQ(store.addAccount({0, QStringLiteral("chat.example"), 6473, QStringLiteral("alice"), {}, 0}), 0)
         << "duplicate account rejected";
     EXPECT_TRUE(store.setTrustedFingerprint(id, QStringLiteral("SHA256:AA")));

@@ -204,7 +204,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | Area | Methods |
 |---|---|
 | daemon | `daemon.status`, `daemon.version`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe` |
-| accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.oauthLogin {host, port, provider: discord\|github\|google}`, `account.oauthLink {provider}` (attaches a provider to the signed-in account), `account.oauthUnlink {provider}`, `account.oauthIdentities` → `{identities: [{provider, username, linked_at}]}`, `account.logout`, `account.remove`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
+| accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.oauthLogin {host, port, provider: discord\|github\|google}`, `account.oauthLink {provider}` (attaches a provider to the signed-in account), `account.oauthUnlink {provider}`, `account.oauthIdentities` → `{identities: [{provider, username, linked_at}]}`, `account.logout`, `account.remove`, `account.forgetDuplicate {account}`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
 
 | servers | `server.list`, `server.create`, `server.create_from_discord {name, files}`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
 | channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
@@ -219,6 +219,8 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.reload` |
 
 `account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
+
+`account.forgetDuplicate {account}` removes only a legacy local `oauth-*` placeholder and its local credentials. It requires the active account and placeholder to be connected to the same server and authenticated as the same remote user. It never deletes the server account.
 
 Push-to-talk held by a client is released automatically if that client
 disconnects.

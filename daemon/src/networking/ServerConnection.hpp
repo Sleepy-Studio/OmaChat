@@ -138,7 +138,7 @@ private:
     void sendResume();
     void sendRefresh(const QString& token);
     void sendCredentials();
-    void handleAuthReply(const proto::Envelope& reply);
+    void handleAuthReply(const proto::Envelope& reply, AuthCallback done = {});
     void setState(State s, const QString& code = {}, const QString& message = {});
     void scheduleReconnect();
     void failCredentials(const QString& code, const QString& message);

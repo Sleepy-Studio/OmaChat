@@ -162,7 +162,7 @@ std::optional<Account> LocalStore::account(std::int64_t id)
 std::optional<Account> LocalStore::findAccount(const QString& host, quint16 port, const QString& username)
 {
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT %1 FROM accounts WHERE host = ? AND port = ? AND username = ?")
+    q.prepare(QStringLiteral("SELECT %1 FROM accounts WHERE host = ? COLLATE NOCASE AND port = ? AND username = ?")
             .arg(QLatin1StringView(kAccountCols)));
     q.addBindValue(host);
     q.addBindValue(port);

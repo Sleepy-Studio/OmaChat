@@ -551,6 +551,10 @@ void Daemon::registerMethods()
             r.error(e::NotFound, QStringLiteral("no such account"));
             return;
         }
+        if (a->id == m_active) {
+            r.ok({{"account", accountJson(*a)}, {"left_voice", false}});
+            return;
+        }
         const bool leftVoice = m_voiceChannel != 0 && a->id != m_active;
         Link& link = linkFor(a->id);
         const auto state = link.conn->state();
@@ -641,6 +645,36 @@ void Daemon::registerMethods()
             r.ok();
         });
     };
+    // Retire an old OAuth placeholder only when the active saved account is
+    // proven to be the same remote user. This never deletes a server user.
+    m[QStringLiteral("account.forgetDuplicate")] = [this](const QJsonObject& p, const Responder& r) {
+        const auto id = p.value(QStringLiteral("account")).toVariant().toLongLong();
+        const auto candidate = m_store.account(id);
+        const auto active = m_store.account(m_active);
+        auto it = m_links.find(id);
+        if (!candidate || !active || id == m_active || it == m_links.end()
+            || !candidate->username.startsWith(QStringLiteral("oauth-"))
+            || candidate->host.compare(active->host, Qt::CaseInsensitive) != 0 || candidate->port != active->port
+            || it->second.conn->state() != ServerConnection::State::Connected
+            || m_conn->state() != ServerConnection::State::Connected || it->second.conn->model().self().id() == 0
+            || it->second.conn->model().self().id() != m_conn->model().self().id()) {
+            r.error(e::BadRequest, QStringLiteral("not a verified duplicate of the active account"));
+            return;
+        }
+        if (!m_store.removeAccount(id)) {
+            r.error(e::StorageError, QStringLiteral("could not remove the local duplicate"));
+            return;
+        }
+        it->second.e2e->forget();
+        it->second.conn->stop();
+        m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
+        QTimer::singleShot(0, this, [this, id] {
+            m_links.erase(id);
+            scheduleStatus();
+        });
+        scheduleStatus();
+        r.ok();
+    };
     auto authMethod = [this, ensureAccount](bool registering) {
         return [this, ensureAccount, registering](const QJsonObject& p, const Responder& r) {
             const QString password = p.value(QStringLiteral("password")).toString();
@@ -695,47 +729,119 @@ void Daemon::registerMethods()
         // The real username is only known once the server responds; this
         // placeholder is renamed after a successful sign-in.
         const QString placeholder = QStringLiteral("oauth-%1").arg(it.key());
+        const std::int64_t previousAccountId = m_active;
         auto account = m_store.findAccount(host, static_cast<quint16>(port), placeholder);
-        const bool isNewAccount = !account.has_value();
         if (!account) {
             Account a{0, host, static_cast<quint16>(port), placeholder, {}, 0};
+            for (const auto& other : m_store.accounts()) {
+                if (other.host.compare(host, Qt::CaseInsensitive) == 0 && other.port == port
+                    && !other.trustedFingerprint.isEmpty()) {
+                    a.trustedFingerprint = other.trustedFingerprint;
+                    break;
+                }
+            }
             a.id = m_store.addAccount(a);
             if (!a.id) {
                 r.error(e::StorageError, QStringLiteral("could not save account"));
                 return;
             }
+            if (!a.trustedFingerprint.isEmpty())
+                m_store.setTrustedFingerprint(a.id, a.trustedFingerprint);
             account = a;
         }
-        startAccount(*account);
         const std::int64_t accountId = account->id;
+        Link& oauthLink = linkFor(accountId);
+        // A placeholder has no stable user identity yet. Wait to create its
+        // device key until we know it is a genuinely new local account.
+        oauthLink.conn->start(*account);
         const proto::OAuthProvider provider = it.value();
-        OAuthLoginFlow::start(*m_conn, provider, OAuthLoginFlow::Mode::Login,
-            [this, accountId, isNewAccount, r](bool ok, const QString& code, const QString& message) {
-            if (!ok) {
-                // An untrusted certificate is not a dead end: the account
-                // stays put, exactly like a normal login would, so the
-                // client's certificate-trust flow can resume it. Anything
-                // else means a placeholder account made just for this
-                // attempt is useless; leaving it around would keep retrying
-                // an unreachable/misconfigured host forever in the
-                // background, with no way back to the login screen while
-                // it's active.
-                if (isNewAccount && code != e::CertificateError) {
-                    const Responder none(nullptr, nullptr, 0);
-                    dispatch(QStringLiteral("account.remove"), {{"account", QString::number(accountId)}}, none);
+        OAuthLoginFlow::start(*oauthLink.conn, provider, OAuthLoginFlow::Mode::Login,
+            [this, accountId, previousAccountId, r](bool ok, const QString& code, const QString& message) {
+                auto linkIt = m_links.find(accountId);
+                if (linkIt == m_links.end()) {
+                    r.error(e::NotFound, QStringLiteral("sign-in account was removed"));
+                    return;
                 }
-                r.error(code, message);
-                return;
-            }
-            const QString realUsername = m_conn->lastAuthUsername();
-            if (!realUsername.isEmpty()) {
-                m_store.setUsername(accountId, realUsername);
-                if (auto a = m_store.account(accountId))
-                    m_conn->updateAccount(*a);
-            }
-            const auto a = m_store.account(accountId);
-            r.ok({{"account", accountJson(a.value_or(Account{}))}});
-        });
+                ServerConnection* oauthConn = linkIt->second.conn.get();
+                const auto discardPlaceholder = [this, accountId, previousAccountId](std::int64_t preferredAccountId) {
+                    if (m_active == accountId)
+                        activate(preferredAccountId && m_store.account(preferredAccountId) ? preferredAccountId
+                                : previousAccountId != accountId && m_store.account(previousAccountId)
+                                ? previousAccountId
+                                : 0);
+                    if (auto placeholderLink = m_links.find(accountId); placeholderLink != m_links.end()) {
+                        placeholderLink->second.e2e->forget();
+                        placeholderLink->second.conn->stop();
+                    }
+                    m_credentials->remove(QStringLiteral("refresh/%1").arg(accountId), {});
+                    m_store.removeAccount(accountId);
+                    QTimer::singleShot(0, this, [this, accountId] {
+                        m_links.erase(accountId);
+                        scheduleStatus();
+                    });
+                    scheduleStatus();
+                };
+                if (!ok) {
+                    // Keep a certificate-error placeholder so the trust dialog
+                    // can resume it. All other failed attempts must retire the
+                    // temporary account without touching the server account.
+                    if (code != e::CertificateError) {
+                        discardPlaceholder(0);
+                    } else if (code == e::CertificateError) {
+                        activate(accountId);
+                    }
+                    r.error(code, message);
+                    return;
+                }
+                const QString realUsername = oauthConn->lastAuthUsername();
+                if (!realUsername.isEmpty()) {
+                    const auto current = m_store.account(accountId);
+                    const auto existing
+                        = current ? m_store.findAccount(current->host, current->port, realUsername) : std::nullopt;
+                    if (existing && existing->id != accountId) {
+                        // Keep the existing row: it owns local settings and E2E trust.
+                        // Move the fresh refresh token before retiring the temporary link.
+                        const QString oldKey = QStringLiteral("refresh/%1").arg(accountId);
+                        const QString newKey = QStringLiteral("refresh/%1").arg(existing->id);
+                        m_credentials->read(oldKey,
+                            [this, existing = *existing, discardPlaceholder, newKey, r](
+                                bool readOk, const QString& token, const QString&) {
+                                if (!readOk || token.isEmpty()) {
+                                    discardPlaceholder(existing.id);
+                                    r.error(e::StorageError, QStringLiteral("could not preserve the sign-in session"));
+                                    return;
+                                }
+                                m_credentials->write(newKey, token,
+                                    [this, existing, discardPlaceholder, r](bool writeOk, const QString&) {
+                                        if (!writeOk) {
+                                            discardPlaceholder(existing.id);
+                                            r.error(
+                                                e::StorageError, QStringLiteral("could not save the sign-in session"));
+                                            return;
+                                        }
+                                        discardPlaceholder(existing.id);
+                                        auto& link = linkFor(existing.id);
+                                        if (link.conn->state() != ServerConnection::State::Connected)
+                                            startLink(link, existing);
+                                        activate(existing.id);
+                                        r.ok({{"account", accountJson(existing)}});
+                                    });
+                            });
+                        return;
+                    }
+                    if (!m_store.setUsername(accountId, realUsername)) {
+                        r.error(e::StorageError, QStringLiteral("could not save account name"));
+                        return;
+                    }
+                    if (auto a = m_store.account(accountId))
+                        oauthConn->updateAccount(*a);
+                }
+                const auto a = m_store.account(accountId);
+                if (auto newLink = m_links.find(accountId); newLink != m_links.end())
+                    newLink->second.e2e->load(accountId);
+                activate(accountId);
+                r.ok({{"account", accountJson(a.value_or(Account{}))}});
+            });
     };
     m[QStringLiteral("account.oauthLink")] = [this](const QJsonObject& p, const Responder& r) {
         if (!requireConnected(r))

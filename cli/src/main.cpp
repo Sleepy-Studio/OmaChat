@@ -54,6 +54,7 @@ Status
 Accounts
   account list                            * marks the active one; all stay connected
   account switch ACCOUNT_ID               make another account the active one
+  account forget-duplicate ACCOUNT_ID     forget a verified old OAuth duplicate on this device
   account login HOST[:PORT] USERNAME      prompts for the password (or --password-stdin)
   account register HOST[:PORT] USERNAME [--display-name NAME]
   account logout
@@ -320,6 +321,10 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.method = QStringLiteral("account.remove");
             inv.params = {{"account", args.at(2).toLongLong()}};
             inv.print = simpleOk(QStringLiteral("account removed"));
+        } else if (sub == u"forget-duplicate" && need(3)) {
+            inv.method = QStringLiteral("account.forgetDuplicate");
+            inv.params = {{"account", args.at(2).toLongLong()}};
+            inv.print = simpleOk(QStringLiteral("local duplicate forgotten"));
         } else {
             usageError = QStringLiteral("unknown account command");
             return std::nullopt;

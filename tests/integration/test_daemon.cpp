@@ -492,6 +492,10 @@ TEST_F(DaemonFixture, SeveralAccountsStayConnectedAndSwitchInstantly)
     ASSERT_FALSE(secondId.isEmpty());
     EXPECT_EQ(alice->daemon().statusJson().value("account").toObject().value("username").toString(),
         QStringLiteral("alice2"));
+    const auto alreadyActive = alice->call(QStringLiteral("account.switch"), {{"account", secondId}});
+    ASSERT_TRUE(alreadyActive.ok);
+    EXPECT_FALSE(alreadyActive.result.value("left_voice").toBool());
+    EXPECT_EQ(alice->daemon().statusJson().value("account").toObject().value("id").toString(), secondId);
 
     // Activity on the background account is counted, not broadcast as messages.
     ASSERT_TRUE(bob->call(QStringLiteral("message.send"), {{"channel", "general"}, {"content", "hey @alice"}}).ok);
@@ -546,6 +550,20 @@ TEST_F(DaemonFixture, AccountDeletionRequiresServerConfirmation)
     ASSERT_TRUE(stillRegistered.connect());
     ASSERT_TRUE(stillRegistered.hello());
     EXPECT_TRUE(stillRegistered.login("alice", "alice-password"));
+}
+
+TEST_F(DaemonFixture, ForgetDuplicateRequiresTheSameRemoteUser)
+{
+    ASSERT_TRUE(alice->registerOn(server, QStringLiteral("alice"), QStringLiteral("alice-password")));
+    const QString firstId = alice->daemon().statusJson().value("account").toObject().value("id").toString();
+    ASSERT_TRUE(alice->registerOn(server, QStringLiteral("oauth-other"), QStringLiteral("other-password")));
+    const QString otherId = alice->daemon().statusJson().value("account").toObject().value("id").toString();
+    ASSERT_TRUE(alice->call(QStringLiteral("account.switch"), {{"account", firstId}}).ok);
+
+    const auto result = alice->call(QStringLiteral("account.forgetDuplicate"), {{"account", otherId}});
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.errorCode, QStringLiteral("BadRequest"));
+    EXPECT_EQ(alice->daemon().statusJson().value("accounts").toArray().size(), 2);
 }
 
 TEST_F(DaemonFixture, ConversationsAreEndToEndEncrypted)

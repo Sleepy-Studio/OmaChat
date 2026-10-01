@@ -85,13 +85,14 @@ void AppController::loginWithOAuth(const QString& host, int port, const QString&
     }
     m_authBusy = true;
     m_authError.clear();
-    m_addingAccount = false;
     emit authChanged();
     // This opens the user's browser and can take a while; the daemon reports
     // back once the whole flow (or a timeout) finishes.
     m_link.request(QStringLiteral("account.oauthLogin"), {{"host", host.trimmed()}, {"port", port}, {"provider", provider}},
         [this](const ipc::Reply& r) {
             m_authBusy = false;
+            if (r.ok || r.errorCode == u"CertificateError")
+                m_addingAccount = false;
             m_authError = r.ok || r.errorCode == u"CertificateError" ? QString() : r.errorMessage;
             emit authChanged();
         }, kOAuthFlowTimeoutMs);

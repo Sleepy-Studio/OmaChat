@@ -197,6 +197,14 @@ void ChatServer::handleOAuthLink(Session& s, std::uint64_t rid, const proto::OAu
                 replyOk(*sp, rid);
                 return;
             }
+            const auto identities = m_store.oauthIdentitiesForUser(userId);
+            if (std::any_of(identities.begin(), identities.end(),
+                    [&providerName](const auto& identity) { return identity.provider == providerName; })) {
+                replyError(*sp, rid, proto::ERROR_CONFLICT,
+                    QStringLiteral("a %1 account is already linked; unlink it before linking another")
+                        .arg(providerName));
+                return;
+            }
             const OAuthIdentityRecord identity{
                 m_ids.next(), userId, providerName, profile->id, profile->username, now()};
             if (!m_store.insertOAuthIdentity(identity)) {

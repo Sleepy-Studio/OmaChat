@@ -434,14 +434,12 @@ void ServerConnection::sendCredentials()
                     done(false, code, msg);
                 return;
             }
-            handleAuthReply(reply);
-            if (done)
-                done(true, QString(), QString());
+            handleAuthReply(reply, done);
         },
         30000);
 }
 
-void ServerConnection::handleAuthReply(const proto::Envelope& reply)
+void ServerConnection::handleAuthReply(const proto::Envelope& reply, AuthCallback done)
 {
     if (reply.has_error()) {
         setState(State::Reconnecting, ipc::errors::NetworkError, QString::fromStdString(reply.error().message()));
@@ -454,13 +452,19 @@ void ServerConnection::handleAuthReply(const proto::Envelope& reply)
     m_sessionId = r.session_id();
     m_accessExpiresAt = r.access_expires_at();
     if (!r.refresh_token().empty()) {
-        m_credentials.write(refreshKey(), QString::fromStdString(r.refresh_token()), [](bool ok, const QString& err) {
-            if (!ok)
-                OMA_WARN("auth", "could not store session in keyring; you will need to log in again", {"error", err});
-        });
+        m_credentials.write(
+            refreshKey(), QString::fromStdString(r.refresh_token()), [this, done](bool ok, const QString& err) {
+                if (!ok)
+                    OMA_WARN(
+                        "auth", "could not store session in keyring; you will need to log in again", {"error", err});
+                if (done)
+                    QTimer::singleShot(0, this, [done] { done(true, QString(), QString()); });
+            });
     }
     emit authenticated(r.user().id());
     resync();
+    if (r.refresh_token().empty() && done)
+        QTimer::singleShot(0, this, [done] { done(true, QString(), QString()); });
 }
 
 void ServerConnection::resync(std::function<void(bool)> done)
