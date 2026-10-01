@@ -237,10 +237,14 @@ void AppController::selectChannel(const QString& id)
         m_selectedServer = QStringLiteral("home");
     else if (server != u"0" && server != m_selectedServer)
         m_selectedServer = server;
-    if (id != m_selectedChannel)
+    const bool sameChannel = id == m_selectedChannel;
+    if (!sameChannel)
         cancelReply();
     m_selectedChannel = id;
-    m_messages.setChannel(id);
+    if (sameChannel && !m_messages.anchorMessageId().isEmpty())
+        m_messages.reload();
+    else
+        m_messages.setChannel(id);
     markRead(id);
     rebuildServers();
     rebuildChannels();
@@ -544,10 +548,26 @@ void AppController::search(const QString& query, bool wholeServer)
     }
     const QJsonObject params = wholeServer ? QJsonObject{{"server", m_selectedServer}, {"query", query}, {"limit", 50}}
                                            : QJsonObject{{"channel", m_selectedChannel}, {"query", query}};
-    call(QStringLiteral("message.search"), params, [this](const QJsonObject& r) {
+    const auto generation = ++m_searchGeneration;
+    m_searchBusy = true;
+    m_searchError.clear();
+    m_searchResults.setRows({});
+    m_searchMessages.clear();
+    emit searchStateChanged();
+    m_link.request(QStringLiteral("message.search"), params, [this, generation](const ipc::Reply& reply) {
+        if (generation != m_searchGeneration)
+            return;
+        m_searchBusy = false;
+        if (!reply.ok) {
+            m_searchError = reply.errorMessage.isEmpty() ? reply.errorCode : reply.errorMessage;
+            emit searchStateChanged();
+            return;
+        }
         QList<QVariantMap> rows;
-        for (const auto& v : r.value(QStringLiteral("messages")).toArray()) {
+        for (const auto& v : reply.result.value(QStringLiteral("messages")).toArray()) {
             const QJsonObject m = v.toObject();
+            const QString messageId = m.value(QStringLiteral("id")).toString();
+            m_searchMessages.insert(messageId, m);
             const auto when
                 = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(m.value(QStringLiteral("timestamp")).toDouble()));
             const QString channelId = m.value(QStringLiteral("channel_id")).toString();
@@ -559,14 +579,29 @@ void AppController::search(const QString& query, bool wholeServer)
                 {"time", QLocale().toString(when, QLocale::ShortFormat)}});
         }
         m_searchResults.setRows(std::move(rows));
-        if (m_searchResults.count() == 0)
-            showNotice(tr("No messages found"));
+        emit searchStateChanged();
     });
 }
 
 void AppController::clearSearch()
 {
+    ++m_searchGeneration;
+    m_searchBusy = false;
+    m_searchError.clear();
     m_searchResults.setRows({});
+    m_searchMessages.clear();
+    emit searchStateChanged();
+}
+
+bool AppController::openSearchResult(const QString& messageId)
+{
+    const QJsonObject message = m_searchMessages.value(messageId);
+    const QString channelId = message.value(QStringLiteral("channel_id")).toString();
+    if (message.isEmpty() || channelId.isEmpty() || !m_channelsById.contains(channelId))
+        return false;
+    selectChannel(channelId);
+    m_messages.openAt(channelId, message);
+    return true;
 }
 
 // ----------------------------------------------------------------- voice

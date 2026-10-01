@@ -202,9 +202,30 @@ void MessageListModel::setChannel(const QString& channelId)
     reload();
 }
 
+void MessageListModel::openAt(const QString& channelId, const QJsonObject& message)
+{
+    const QString messageId = sid(message, "id");
+    if (channelId.isEmpty() || messageId.isEmpty())
+        return;
+    ++m_generation;
+    m_channel = channelId;
+    m_anchorMessageId = messageId;
+    beginResetModel();
+    m_items = {Item{
+        message, m_hooks.render ? m_hooks.render(message.value(QStringLiteral("content")).toString()) : QString()}};
+    endResetModel();
+    m_error.clear();
+    m_loading = false;
+    m_hasMore = true;
+    emit countChanged();
+    emit loadingChanged();
+    fetchMore({});
+}
+
 void MessageListModel::reload()
 {
     ++m_generation;
+    m_anchorMessageId.clear();
     beginResetModel();
     m_items.clear();
     endResetModel();
@@ -217,6 +238,20 @@ void MessageListModel::reload()
         fetchMore({});
 }
 
+void MessageListModel::retry()
+{
+    if (m_anchorMessageId.isEmpty()) {
+        reload();
+        return;
+    }
+    if (m_loading || m_error.isEmpty())
+        return;
+    m_error.clear();
+    m_hasMore = true;
+    emit loadingChanged();
+    fetchMore({});
+}
+
 void MessageListModel::touchNeighbours(int row)
 {
     for (int r = std::max(0, row - 1); r <= std::min(static_cast<int>(m_items.size()) - 1, row + 1); ++r) {
@@ -227,7 +262,7 @@ void MessageListModel::touchNeighbours(int row)
 
 void MessageListModel::addMessage(const QJsonObject& m)
 {
-    if (sid(m, "channel_id") != m_channel || rowOf(sid(m, "id")) >= 0)
+    if (!m_anchorMessageId.isEmpty() || sid(m, "channel_id") != m_channel || rowOf(sid(m, "id")) >= 0)
         return;
     beginInsertRows({}, 0, 0);
     m_items.prepend(
@@ -257,6 +292,10 @@ void MessageListModel::updateMessage(const QJsonObject& m)
 
 void MessageListModel::removeMessage(const QString& id)
 {
+    if (id == m_anchorMessageId) {
+        reload();
+        return;
+    }
     const int row = rowOf(id);
     if (row < 0)
         return;

@@ -18,6 +18,7 @@ class MessageListModel : public QAbstractListModel {
     Q_PROPERTY(bool hasMore READ hasMore NOTIFY loadingChanged)
     Q_PROPERTY(QString error READ error NOTIFY loadingChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(QString anchorMessageId READ anchorMessageId NOTIFY loadingChanged)
 public:
     enum Role {
         IdRole = Qt::UserRole + 1,
@@ -63,8 +64,11 @@ public:
     void fetchMore(const QModelIndex& parent) override;
 
     void setChannel(const QString& channelId);
+    void openAt(const QString& channelId, const QJsonObject& message);
     QString channelId() const { return m_channel; }
-    void reload();
+    QString anchorMessageId() const { return m_anchorMessageId; }
+    Q_INVOKABLE void reload();
+    Q_INVOKABLE void retry();
 
     void addMessage(const QJsonObject& m); // new message pushed by the daemon
     void updateMessage(const QJsonObject& m);
@@ -97,6 +101,7 @@ private:
 
     Hooks m_hooks;
     QString m_channel;
+    QString m_anchorMessageId;
     QList<Item> m_items;
     bool m_loading = false;
     bool m_hasMore = false;

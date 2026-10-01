@@ -29,7 +29,8 @@ add_executable(omachat_unit_tests
 )
 if(OMACHAT_BUILD_CLIENT)
     target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp
-        unit/test_audio_levels.cpp ../client/src/views/AudioLevels.cpp)
+        unit/test_audio_levels.cpp unit/test_message_list_model.cpp
+        ../client/src/views/AudioLevels.cpp ../client/src/models/MessageListModel.cpp)
     target_include_directories(omachat_unit_tests PRIVATE ../client/src)
     target_link_libraries(omachat_unit_tests PRIVATE omachat_client_text Qt6::Multimedia)
 endif()

@@ -1,7 +1,21 @@
 # Development status
 
 Handoff notes for whoever picks this up next (human or agent). Last updated
-2026-09-29. "Current source" below means `main`.
+2026-10-01. "Current source" below means `main`.
+
+## 0.2.2 conversation UI release
+
+The conversation view now has responsive channel and member drawers, a visible
+send action, keyboard access to message actions and search results, useful empty
+and error states, and search results that open at the matched message. The UI
+improvement plan and remaining visual checks are in
+[`ui-ux-improvement-plan.md`](ui-ux-improvement-plan.md).
+
+The build, QML lint, unit suite, and compact and wide offscreen screenshot
+checks passed during development. A clean `omachat 0.2.2-1` package build
+passed all 185 tests, including integration tests. Physical pointer and
+keyboard checks, light theme, 1.5× scaling, and active voice layout still
+need a manual pass.
 
 ## Working tree: hosted instance operator console
 
@@ -25,7 +39,8 @@ have not been performed. Source is uncommitted, uninstalled, and undeployed.
 ## Where things are
 
 - Remote: `github.com/Sleepy-Studio/OmaChat` (**public** as of 2026-09-28), branch `main`.
-- Latest tagged release: **0.2.1** (`v0.2.1`), tagged 2026-09-29. It bundles
+- Latest tagged release: **0.2.2** (`v0.2.2`), tagged 2026-10-01. It adds the
+  conversation UI improvements above. The previous 0.2.1 release bundled
   everything added since 0.2.0 — OAuth, profiles, server-side account
   deletion, Discord history import, inline media playback, custom server
   emoji, audio level metering, and the CI/GUI screenshot and single-command

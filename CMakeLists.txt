@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(OmaChat
-    VERSION 0.2.0
+    VERSION 0.2.2
     DESCRIPTION "Native voice, text, and screen streaming chat for Omarchy"
     LANGUAGES CXX)
 

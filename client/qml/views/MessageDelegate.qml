@@ -30,6 +30,8 @@ Item {
     required property string e2e
 
     property bool editing: false
+    property bool searchMatch: false
+    readonly property bool keyboardCurrent: root.ListView.isCurrentItem && root.ListView.view.activeFocus
     signal editRequested(string id)
 
     readonly property bool hovered: hover.hovered || actions.hovered
@@ -38,7 +40,8 @@ Item {
     implicitHeight: column.implicitHeight
 
     Accessible.role: Accessible.ListItem
-    Accessible.name: authorName + ", " + timeText + ": " + content
+    Accessible.name: (searchMatch ? qsTr("Search match. ") : "") + authorName + ", " + timeText + ": " + content
+                     + (keyboardCurrent ? qsTr(". Press Enter for message actions") : "")
 
     HoverHandler { id: hover }
 
@@ -69,9 +72,19 @@ Item {
             Layout.fillWidth: true
             Layout.topMargin: root.groupStart ? Theme.px(10) : 0
             implicitHeight: body.implicitHeight + Theme.px(root.groupStart ? 6 : 3)
-            color: root.editing ? Theme.selection
+            color: root.searchMatch ? Theme.selection
+                 : root.editing ? Theme.selection
                  : root.mentionsMe ? Qt.rgba(Theme.mention.r, Theme.mention.g, Theme.mention.b, 0.10)
                  : (root.hovered ? Theme.surface : "transparent")
+            border.width: root.keyboardCurrent ? Theme.px(2) : 0
+            border.color: Theme.accent
+
+            Rectangle {
+                visible: root.searchMatch
+                width: Theme.px(3)
+                height: parent.height
+                color: Theme.accent
+            }
 
             Rectangle {
                 visible: root.mentionsMe

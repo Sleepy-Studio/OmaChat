@@ -148,6 +148,8 @@ class AppController : public QObject {
     Q_PROPERTY(omachat::client::RowListModel* members READ members CONSTANT)
     Q_PROPERTY(omachat::client::RowListModel* switcher READ switcher CONSTANT)
     Q_PROPERTY(omachat::client::RowListModel* searchResults READ searchResults CONSTANT)
+    Q_PROPERTY(bool searchBusy READ searchBusy NOTIFY searchStateChanged)
+    Q_PROPERTY(QString searchError READ searchError NOTIFY searchStateChanged)
     Q_PROPERTY(omachat::client::MessageListModel* messages READ messages CONSTANT)
 
     // settings
@@ -293,6 +295,8 @@ public:
     RowListModel* members() { return &m_members; }
     RowListModel* switcher() { return &m_switcher; }
     RowListModel* searchResults() { return &m_searchResults; }
+    bool searchBusy() const { return m_searchBusy; }
+    QString searchError() const { return m_searchError; }
     MessageListModel* messages() { return &m_messages; }
 
     QVariantMap shortcuts() const;
@@ -343,6 +347,7 @@ public:
     // wholeServer searches every readable channel of the selected server.
     Q_INVOKABLE void search(const QString& query, bool wholeServer = false);
     Q_INVOKABLE void clearSearch();
+    Q_INVOKABLE bool openSearchResult(const QString& messageId);
 
     Q_INVOKABLE void joinVoice(const QString& channelId);
     Q_INVOKABLE void leaveVoice();
@@ -479,6 +484,7 @@ signals:
     void replyChanged();
     void typingChanged();
     void noticeChanged();
+    void searchStateChanged();
     void configChanged();
     void audioChanged();
     void attachmentsChanged();
@@ -600,6 +606,10 @@ private:
     RowListModel m_members;
     RowListModel m_switcher;
     RowListModel m_searchResults;
+    QHash<QString, QJsonObject> m_searchMessages;
+    bool m_searchBusy = false;
+    QString m_searchError;
+    quint64 m_searchGeneration = 0;
     MessageListModel m_messages;
 };
 

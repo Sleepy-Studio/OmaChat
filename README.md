@@ -270,7 +270,7 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
 
 ## Status: 0.2 (early)
 
-`v0.2.1` is the latest tag; see [the development status](docs/status.md) for
+`v0.2.2` is the latest tag; see [the development status](docs/status.md) for
 its verification and release plan.
 
 Working and tested (see `ctest`): accounts, sessions and resume, TLS with

@@ -9,7 +9,10 @@ Rectangle {
     color: Theme.background
 
     property bool membersVisible: true
+    property bool showChannelsButton: false
     signal toggleMembers()
+    signal toggleChannels()
+    signal browseChannels()
     signal openSearch()
     signal openChannelDetails(string channelId)
 
@@ -46,6 +49,13 @@ Rectangle {
                 anchors.leftMargin: Theme.px(16)
                 anchors.rightMargin: Theme.px(8)
                 spacing: Theme.px(8)
+
+                IconButton {
+                    visible: pane.showChannelsButton
+                    iconName: "server"
+                    tip: qsTr("Browse channels (%1)").arg(App.shortcuts["focus_channels"] || "Ctrl+L")
+                    onClicked: pane.toggleChannels()
+                }
 
                 Icon {
                     name: App.selectedChannelType === "group_dm" ? "users" : App.homeSelected ? "at" : "hash"
@@ -167,6 +177,37 @@ Rectangle {
             }
         }
 
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: Theme.px(36)
+            visible: App.messages.anchorMessageId.length > 0
+            color: Theme.surface
+            border.color: Theme.border
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: Theme.px(16)
+                anchors.rightMargin: Theme.px(8)
+                Text {
+                    Layout.fillWidth: true
+                    text: App.messages.error.length > 0
+                          ? qsTr("Could not load earlier messages: %1").arg(App.messages.error)
+                          : qsTr("Viewing search match and earlier messages")
+                    color: Theme.text
+                    font.pixelSize: Theme.px(12)
+                    elide: Text.ElideRight
+                }
+                FlatButton {
+                    visible: App.messages.error.length > 0
+                    text: qsTr("Retry")
+                    onClicked: App.messages.retry()
+                }
+                FlatButton {
+                    text: qsTr("Return to latest")
+                    onClicked: App.messages.reload()
+                }
+            }
+        }
+
         // -------------------------------------------------------- messages
         Item {
             Layout.fillWidth: true
@@ -184,14 +225,25 @@ Rectangle {
                 boundsBehavior: Flickable.StopAtBounds
                 activeFocusOnTab: true
                 keyNavigationEnabled: true
+                Keys.onReturnPressed: if (currentItem) openMenu(currentItem, true)
+                Keys.onEnterPressed: if (currentItem) openMenu(currentItem, true)
+                Keys.onSpacePressed: if (currentItem) openMenu(currentItem, true)
+                Keys.onMenuPressed: if (currentItem) openMenu(currentItem, true)
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                 Accessible.role: Accessible.List
                 Accessible.name: qsTr("Messages in %1").arg(App.selectedChannelName)
 
                 // One shared menu/dialog instead of one per delegate.
-                function openMenu(target) {
+                function openMenu(target, keyboard = false) {
                     messageMenu.target = target
-                    messageMenu.popup()
+                    if (keyboard) {
+                        const position = target.mapToItem(pane, Theme.px(46), 0)
+                        messageMenu.x = Math.max(Theme.px(8), Math.min(position.x, pane.width - Theme.px(208)))
+                        messageMenu.y = Math.max(Theme.px(8), Math.min(position.y, pane.height - Theme.px(280)))
+                        messageMenu.open()
+                    } else {
+                        messageMenu.popup()
+                    }
                 }
                 function confirmDelete(id) {
                     deleteConfirm.messageId = id
@@ -201,6 +253,7 @@ Rectangle {
                 delegate: MessageDelegate {
                     width: ListView.view.width
                     editing: editState.messageId === messageId
+                    searchMatch: App.messages.anchorMessageId === messageId
                     onEditRequested: id => {
                         editState.messageId = id
                         composer.beginEdit(id, content)
@@ -258,6 +311,8 @@ Rectangle {
                 title: App.homeSelected ? qsTr("No direct messages") : qsTr("No channel selected")
                 subtitle: App.homeSelected ? qsTr("Right-click someone in a server's member list and choose “Message”.")
                                            : qsTr("Pick a channel on the left, or press %1 to jump anywhere.").arg(App.shortcuts["quick_switcher"] || "Ctrl+K")
+                actionText: App.homeSelected ? qsTr("Open a server") : qsTr("Browse channels")
+                onActionRequested: pane.browseChannels()
             }
 
             EmptyState {
@@ -268,6 +323,14 @@ Rectangle {
                 subtitle: App.messages.error.length > 0 ? App.messages.error
                         : (App.canSend ? qsTr("Say hello — the first message starts the conversation.")
                                        : qsTr("You can read this channel but not post in it."))
+                actionText: App.messages.error.length > 0 ? qsTr("Retry")
+                          : App.canSend ? qsTr("Write a message") : ""
+                onActionRequested: {
+                    if (App.messages.error.length > 0)
+                        App.messages.retry()
+                    else
+                        composer.focusInput()
+                }
             }
 
             // Jump to latest
@@ -275,7 +338,8 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.margins: Theme.px(12)
-                visible: messages.visible && !messages.nearLatest && messages.contentHeight > messages.height * 1.5
+                visible: messages.visible && App.messages.anchorMessageId.length === 0
+                         && !messages.nearLatest && messages.contentHeight > messages.height * 1.5
                 text: qsTr("Jump to latest")
                 onClicked: {
                     messages.positionViewAtBeginning()

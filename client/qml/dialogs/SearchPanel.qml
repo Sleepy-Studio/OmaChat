@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -7,6 +9,7 @@ import OmaChat
 // supports it, every channel of the current server you can read.
 Dialog {
     id: dialog
+    property bool hasSearched: false
     readonly property bool canSearchServer: !App.homeSelected && App.capabilities.indexOf("search.server") >= 0
     property bool wholeServer: false
     readonly property bool searchingServer: wholeServer && canSearchServer
@@ -18,9 +21,23 @@ Dialog {
 
     onAboutToShow: {
         query.text = ""
+        hasSearched = false
         App.clearSearch()
     }
     onOpened: query.forceActiveFocus()
+
+    function submit() {
+        if (query.text.trim().length === 0 || App.searchBusy)
+            return
+        hasSearched = true
+        App.search(query.text, dialog.searchingServer)
+    }
+
+    function activate(index) {
+        const row = App.searchResults.get(index)
+        if (row.itemId && App.openSearchResult(row.itemId))
+            dialog.close()
+    }
 
     contentItem: ColumnLayout {
         spacing: Theme.px(8)
@@ -37,9 +54,24 @@ Dialog {
                 font.pixelSize: Theme.px(14)
                 Accessible.name: dialog.title
                 background: Rectangle { radius: Theme.px(6); color: Theme.surfaceAlt; border.color: Theme.border }
-                onAccepted: App.search(text, dialog.searchingServer)
+                onTextChanged: {
+                    dialog.hasSearched = false
+                    App.clearSearch()
+                }
+                onAccepted: dialog.submit()
+                Keys.onDownPressed: {
+                    if (results.count > 0) {
+                        results.currentIndex = 0
+                        results.forceActiveFocus()
+                    }
+                }
             }
-            FlatButton { text: qsTr("Search"); primary: true; onClicked: App.search(query.text, dialog.searchingServer) }
+            FlatButton {
+                text: qsTr("Search")
+                primary: true
+                enabled: query.text.trim().length > 0 && !App.searchBusy
+                onClicked: dialog.submit()
+            }
         }
         RowLayout {
             visible: dialog.canSearchServer
@@ -52,18 +84,39 @@ Dialog {
                     primary: dialog.wholeServer === modelData.server
                     onClicked: {
                         dialog.wholeServer = modelData.server
-                        if (query.text.trim().length > 0)
+                        if (query.text.trim().length > 0 && dialog.hasSearched)
                             App.search(query.text, dialog.searchingServer)
                     }
                 }
             }
         }
-        ListView {
+        Text {
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(contentHeight, Theme.px(420))
+            visible: dialog.hasSearched
+            text: App.searchBusy ? qsTr("Searching…")
+                : App.searchError.length > 0 ? qsTr("Search failed: %1. Try again.").arg(App.searchError)
+                : App.searchResults.count === 0 ? qsTr("No matching messages")
+                : qsTr("%n result(s). Choose one to view it with earlier messages.", "", App.searchResults.count)
+            color: App.searchError.length > 0 ? Theme.danger : Theme.textMuted
+            font.pixelSize: Theme.px(12)
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+        ListView {
+            id: results
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(Math.max(contentHeight, Theme.px(80)), Theme.px(420))
             model: App.searchResults
             clip: true
             spacing: Theme.px(2)
+            activeFocusOnTab: count > 0
+            keyNavigationEnabled: true
+            Keys.onReturnPressed: dialog.activate(currentIndex)
+            Keys.onEnterPressed: dialog.activate(currentIndex)
+            Keys.onSpacePressed: dialog.activate(currentIndex)
+            Accessible.role: Accessible.List
+            Accessible.name: qsTr("Search results")
             delegate: Rectangle {
                 id: result
                 required property string itemId
@@ -72,10 +125,14 @@ Dialog {
                 required property string author
                 required property string preview
                 required property string time
+                required property int index
                 width: ListView.view.width
                 implicitHeight: col.implicitHeight + Theme.px(12)
                 radius: Theme.px(4)
-                color: area.containsMouse ? Theme.raised : "transparent"
+                color: result.ListView.isCurrentItem && results.activeFocus ? Theme.selection
+                     : area.containsMouse ? Theme.raised : "transparent"
+                Accessible.role: Accessible.ListItem
+                Accessible.name: author + ", " + time + ": " + preview
                 Column {
                     id: col
                     anchors.left: parent.left
@@ -110,14 +167,14 @@ Dialog {
                         if (mouse.button === Qt.RightButton) {
                             App.copyText(result.preview)
                         } else {
-                            App.selectChannel(result.channelId)
-                            dialog.close()
+                            results.currentIndex = result.index
+                            dialog.activate(result.index)
                         }
                     }
                 }
                 ToolTip.visible: area.containsMouse
                 ToolTip.delay: 800
-                ToolTip.text: qsTr("Click to open the channel, right-click to copy")
+                ToolTip.text: qsTr("Open this message, or right-click to copy its preview")
             }
         }
     }

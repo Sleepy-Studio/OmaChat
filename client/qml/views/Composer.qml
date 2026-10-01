@@ -40,8 +40,11 @@ Item {
             finishEdit()
             return
         }
-        if (App.sendComposer(text))
+        if (App.sendComposer(text)) {
             input.text = ""
+            if (App.messages.anchorMessageId.length > 0)
+                App.messages.reload()
+        }
     }
 
     // Tab completion state: cycles through candidates on repeated Tab.
@@ -224,7 +227,7 @@ Item {
             ScrollView {
                 id: scroll
                 anchors.fill: parent
-                anchors.rightMargin: Theme.px(36)
+                anchors.rightMargin: Theme.px(144)
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                 TextArea {
@@ -302,13 +305,28 @@ Item {
 
             IconButton {
                 id: attachButton
-                anchors.right: parent.right
+                anchors.right: sendButton.left
                 anchors.bottom: parent.bottom
                 anchors.margins: Theme.px(4)
                 iconName: "paperclip"
                 tip: App.attachmentsSupported ? qsTr("Attach files") : qsTr("This server does not accept attachments")
                 enabled: App.canSend && App.attachmentsSupported && composer.editingId.length === 0
                 onClicked: filePicker.open()
+            }
+
+            FlatButton {
+                id: sendButton
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: Theme.px(4)
+                primary: true
+                text: composer.editingId.length > 0 ? qsTr("Save") : qsTr("Send")
+                enabled: composer.editingId.length > 0 ? input.text.trim().length > 0
+                       : App.canSend && (input.text.trim().length > 0 || App.pendingFiles.length > 0)
+                onClicked: composer.submit()
+                ToolTip.visible: hovered
+                ToolTip.text: composer.editingId.length > 0 ? qsTr("Save edit with Enter")
+                              : qsTr("Send with Enter; Shift+Enter adds a line")
             }
 
             DropArea {
@@ -335,6 +353,15 @@ Item {
                     border.width: 2
                 }
             }
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: input.activeFocus && input.enabled
+            text: composer.editingId.length > 0 ? qsTr("Enter to save · Esc to cancel")
+                  : qsTr("Enter to send · Shift+Enter for a new line")
+            color: Theme.textMuted
+            font.pixelSize: Theme.px(11)
         }
     }
 }

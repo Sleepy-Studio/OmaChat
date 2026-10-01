@@ -1,13 +1,67 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import OmaChat
 
-// Dense four-pane desktop layout with a full-width status bar.
+// Dense desktop layout; secondary panes become drawers when space is tight.
 Item {
     id: root
 
-    property bool showMembers: width > Theme.px(980)
+    property bool membersRequested: true
+    readonly property bool compactChannels: width < Theme.px(850)
+    readonly property bool dockMembers: width >= Theme.px(1080) && membersRequested
+
+    function openChannels() {
+        if (compactChannels)
+            channelsDrawer.open()
+        else {
+            const currentSidebar = sidebarDock.item as ChannelSidebar
+            if (currentSidebar)
+                currentSidebar.focusList()
+        }
+    }
+
+    function toggleMembers() {
+        if (width < Theme.px(1080)) {
+            if (membersDrawer.opened)
+                membersDrawer.close()
+            else
+                membersDrawer.open()
+        } else {
+            membersRequested = !membersRequested
+        }
+    }
+
+    onCompactChannelsChanged: if (!compactChannels) channelsDrawer.close()
+    onDockMembersChanged: if (dockMembers) membersDrawer.close()
+
+    Component {
+        id: sidebarContent
+        ChannelSidebar {
+            onCreateChannel: parentId => {
+                createChannelDialog.parentId = parentId
+                createChannelDialog.open()
+            }
+            onOpenServerSettings: serverSettings.open()
+            onNewGroup: peoplePicker.openCreate()
+            onAddToGroup: id => peoplePicker.openAdd(id, App.channelRecipients(id))
+            onRenameGroup: (id, name) => {
+                renameGroupDialog.channelId = id
+                renameGroupDialog.open()
+                renameGroupDialog.value = name
+            }
+            onOpenChannelPermissions: (id, name) => channelPermissions.openFor(id, name)
+            onOpenChannelSettings: id => channelSettings.openFor(id)
+            onOpenChannelDetails: id => channelDetails.openFor(id)
+        }
+    }
+
+    Connections {
+        target: App
+        function onSelectionChanged() { channelsDrawer.close(); membersDrawer.close() }
+    }
 
     // Application-focused push-to-talk: key events bubble up here from any
     // focused child that does not consume them (the composer ignores F-keys).
@@ -28,7 +82,7 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        StatusBanner { Layout.fillWidth: true }
+        StatusBanner { id: statusBanner; Layout.fillWidth: true }
 
         RowLayout {
             Layout.fillWidth: true
@@ -43,25 +97,13 @@ Item {
                 onJoinServer: joinServerDialog.open()
             }
 
-            ChannelSidebar {
-                id: sidebar
+            Loader {
+                id: sidebarDock
+                active: !root.compactChannels
                 Layout.fillHeight: true
                 Layout.preferredWidth: Theme.px(236)
-                onCreateChannel: parentId => {
-                    createChannelDialog.parentId = parentId
-                    createChannelDialog.open()
-                }
-                onOpenServerSettings: serverSettings.open()
-                onNewGroup: peoplePicker.openCreate()
-                onAddToGroup: id => peoplePicker.openAdd(id, App.channelRecipients(id))
-                onRenameGroup: (id, name) => {
-                    renameGroupDialog.channelId = id
-                    renameGroupDialog.open()
-                    renameGroupDialog.value = name
-                }
-                onOpenChannelPermissions: (id, name) => channelPermissions.openFor(id, name)
-                onOpenChannelSettings: id => channelSettings.openFor(id)
-                onOpenChannelDetails: id => channelDetails.openFor(id)
+                visible: active
+                sourceComponent: sidebarContent
             }
 
             ColumnLayout {
@@ -81,8 +123,16 @@ Item {
                     visible: !(streams.visible && streams.expanded)
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    membersVisible: root.showMembers
-                    onToggleMembers: root.showMembers = !root.showMembers
+                    membersVisible: root.dockMembers || membersDrawer.opened
+                    showChannelsButton: root.compactChannels
+                    onToggleChannels: root.openChannels()
+                    onBrowseChannels: {
+                        if (App.homeSelected)
+                            switcher.open()
+                        else
+                            root.openChannels()
+                    }
+                    onToggleMembers: root.toggleMembers()
                     onOpenSearch: searchPanel.open()
                     onOpenChannelDetails: id => channelDetails.openFor(id)
                 }
@@ -91,11 +141,12 @@ Item {
             MemberList {
                 Layout.fillHeight: true
                 Layout.preferredWidth: Theme.px(220)
-                visible: root.showMembers
+                visible: root.dockMembers
             }
         }
 
         BottomBar {
+            id: bottomBar
             Layout.fillWidth: true
             onOpenSettings: settingsDialog.open()
         }
@@ -124,7 +175,7 @@ Item {
     }
     Shortcut {
         sequence: App.shortcuts["focus_channels"] || "Ctrl+L"
-        onActivated: sidebar.focusList()
+        onActivated: root.openChannels()
     }
     Shortcut {
         sequence: App.shortcuts["search"] || "Ctrl+F"
@@ -163,6 +214,44 @@ Item {
     }
 
     // --------------------------------------------------------------- dialogs
+    Popup {
+        id: channelsDrawer
+        parent: Overlay.overlay
+        x: Theme.px(62)
+        y: statusBanner.height
+        width: Math.min(Theme.px(280), root.width - x - Theme.px(24))
+        height: root.height - y - bottomBar.height
+        padding: 0
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: Theme.surface; border.color: Theme.border }
+        contentItem: Loader {
+            active: channelsDrawer.visible
+            sourceComponent: sidebarContent
+            onLoaded: {
+                const currentSidebar = item as ChannelSidebar
+                if (currentSidebar)
+                    currentSidebar.focusList()
+            }
+        }
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animationMs } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationMs } }
+    }
+    Popup {
+        id: membersDrawer
+        parent: Overlay.overlay
+        x: root.width - width
+        y: statusBanner.height
+        width: Math.min(Theme.px(250), root.width - Theme.px(80))
+        height: root.height - y - bottomBar.height
+        padding: 0
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: Theme.surface; border.color: Theme.border }
+        contentItem: MemberList {}
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animationMs } }
+        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationMs } }
+    }
     QuickSwitcher { id: switcher }
     SettingsDialog { id: settingsDialog }
     CommandHelp { id: commandHelp }

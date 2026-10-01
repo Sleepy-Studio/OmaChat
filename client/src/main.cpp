@@ -95,12 +95,16 @@ int main(int argc, char** argv)
                 }
             });
 
-    // The screenshot mode is a self-contained render smoke test. It must not
-    // start a user service or depend on a running daemon in CI.
-    if (!parser.isSet(screenshot))
+    // CI screenshots stay self-contained. A developer can opt into an
+    // isolated running daemon to capture real chat at different sizes.
+    if (!parser.isSet(screenshot) || qEnvironmentVariableIsSet("OMACHAT_SCREENSHOT_LIVE"))
         controller.start();
 
     if (parser.isSet(screenshot) && window) {
+        const int width = qEnvironmentVariableIntValue("OMACHAT_SCREENSHOT_WIDTH");
+        const int height = qEnvironmentVariableIntValue("OMACHAT_SCREENSHOT_HEIGHT");
+        if (width > 0 && height > 0)
+            window->resize(width, height);
         const QString path = parser.value(screenshot);
         QTimer::singleShot(qEnvironmentVariableIntValue("OMACHAT_SCREENSHOT_DELAY_MS") > 0
                 ? qEnvironmentVariableIntValue("OMACHAT_SCREENSHOT_DELAY_MS")

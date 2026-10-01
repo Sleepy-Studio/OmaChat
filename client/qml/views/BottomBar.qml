@@ -7,6 +7,7 @@ import OmaChat
 Rectangle {
     id: bar
     signal openSettings()
+    readonly property bool compact: width < Theme.px(900)
 
     implicitHeight: Theme.px(52)
     color: Theme.surfaceAlt
@@ -21,7 +22,7 @@ Rectangle {
 
         // Identity + presence
         Rectangle {
-            Layout.preferredWidth: Theme.px(220)
+            Layout.preferredWidth: bar.compact ? Theme.px(46) : Theme.px(220)
             Layout.fillHeight: true
             Layout.topMargin: Theme.px(6)
             Layout.bottomMargin: Theme.px(6)
@@ -40,6 +41,7 @@ Rectangle {
                     size: Theme.px(32)
                 }
                 ColumnLayout {
+                    visible: !bar.compact
                     spacing: 0
                     Layout.fillWidth: true
                     Text {
@@ -77,7 +79,7 @@ Rectangle {
             Layout.fillHeight: true
             Layout.topMargin: Theme.px(6)
             Layout.bottomMargin: Theme.px(6)
-            Layout.preferredWidth: Theme.px(300)
+            Layout.preferredWidth: bar.compact ? Math.min(Theme.px(300), bar.width * 0.5) : Theme.px(300)
             radius: Theme.px(6)
             color: Theme.surface
             border.color: Theme.border

@@ -3,9 +3,12 @@ import QtQuick.Layouts
 import OmaChat
 
 ColumnLayout {
+    id: root
     property string icon: "message"
     property string title
     property string subtitle
+    property string actionText: ""
+    signal actionRequested()
 
     spacing: Theme.px(8)
     width: Math.min(parent ? parent.width - Theme.px(48) : Theme.px(400), Theme.px(420))
@@ -32,5 +35,12 @@ ColumnLayout {
         color: Theme.textMuted
         font.pixelSize: Theme.px(13)
         wrapMode: Text.Wrap
+    }
+    FlatButton {
+        visible: root.actionText.length > 0
+        Layout.alignment: Qt.AlignHCenter
+        primary: true
+        text: root.actionText
+        onClicked: root.actionRequested()
     }
 }
