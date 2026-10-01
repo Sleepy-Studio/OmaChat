@@ -190,13 +190,15 @@ void AppController::requestPreview(const QString& attachmentId, const QString& f
 {
     if (size > kMaxPreviewBytes || m_previews.contains(attachmentId) || m_previewRequests.contains(attachmentId))
         return;
-    m_previewRequests.insert(attachmentId); // one attempt per session, even if it fails
+    m_previewRequests.insert(attachmentId);
     m_link.request(
         QStringLiteral("attachment.download"),
         {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}, {"size", size}},
         [this, attachmentId](const ipc::Reply& r) {
-            if (!r.ok)
+            if (!r.ok) {
+                m_previewRequests.remove(attachmentId);
                 return;
+            }
             m_previews.insert(attachmentId, QUrl::fromLocalFile(r.result.value(QStringLiteral("path")).toString()));
             emit previewsChanged();
         },

@@ -616,6 +616,13 @@ QString AppController::selectedServerDescription() const
     return m_serversById.value(m_selectedServer).value(QStringLiteral("description")).toString();
 }
 
+QString AppController::selectedServerBannerId() const
+{
+    if (homeSelected())
+        return {};
+    return m_serversById.value(m_selectedServer).value(QStringLiteral("banner_attachment_id")).toString();
+}
+
 QVariantMap AppController::serverDetails(const QString& id) const
 {
     return m_serversById.value(id).toVariantMap();

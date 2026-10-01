@@ -421,7 +421,26 @@ TEST_F(Fixture, ServerIdentityAndArtworkVisibleToMembers)
             iconForBob = s.icon_attachment_id() == assetId;
     EXPECT_TRUE(iconForBob);
 
+    // Banner assignment follows the same upload and member-visibility path.
+    ticket = alice->call(begin);
+    ASSERT_TRUE(ticket && ticket->has_upload_ticket());
+    const auto bannerId = ticket->upload_ticket().attachment_id();
+    chunk.mutable_upload_chunk()->set_attachment_id(bannerId);
+    ASSERT_TRUE(alice->call(chunk)->has_ok());
+    finish.mutable_finish_upload()->set_attachment_id(bannerId);
+    ASSERT_TRUE(alice->call(finish)->has_attachment());
+    details->set_set_icon(false);
+    details->set_set_banner(true);
+    details->set_banner_attachment_id(bannerId);
+    changed = alice->call(update);
+    ASSERT_TRUE(changed && changed->has_server());
+    EXPECT_EQ(changed->server().banner_attachment_id(), bannerId);
+    download.mutable_download()->set_attachment_id(bannerId);
+    ASSERT_TRUE(bob->call(download)->has_file_chunk());
+    ASSERT_TRUE(outsider->call(download)->has_error());
+
     details->set_set_icon(true);
+    details->set_set_banner(false);
     details->set_icon_attachment_id(0);
     changed = alice->call(update);
     ASSERT_TRUE(changed && changed->has_server());

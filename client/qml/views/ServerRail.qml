@@ -42,7 +42,8 @@ Rectangle {
                 required property bool selected
                 required property bool inVoice
                 required property int index
-                property string iconId: model.iconAttachmentId || ""
+                required property string iconAttachmentId
+                readonly property string iconId: iconAttachmentId
                 Component.onCompleted: {
                     if (!isHome && iconId && iconId !== "0")
                         App.requestPreview(iconId, "server-icon.png", 0)
@@ -90,6 +91,7 @@ Rectangle {
                         color: entry.selected ? Theme.accentText : Theme.text
                     }
                     Image {
+                        id: serverIcon
                         anchors.fill: parent
                         visible: !entry.isHome && entry.iconId && entry.iconId !== "0"
                                  && source.toString().length > 0 && status === Image.Ready
@@ -99,8 +101,7 @@ Rectangle {
                     }
                     Text {
                         anchors.centerIn: parent
-                        visible: !entry.isHome && !(entry.iconId && entry.iconId !== "0"
-                                 && (App.previews[entry.iconId] || "").length > 0)
+                        visible: !entry.isHome && !serverIcon.visible
                         text: entry.initials
                         color: entry.selected ? Theme.accentText : Theme.text
                         font.pixelSize: Theme.px(15)

@@ -91,6 +91,7 @@ class AppController : public QObject {
     Q_PROPERTY(QString discordImportStatus READ discordImportStatus NOTIFY discordImportChanged)
     Q_PROPERTY(QString selectedServerName READ selectedServerName NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedServerDescription READ selectedServerDescription NOTIFY selectionChanged)
+    Q_PROPERTY(QString selectedServerBannerId READ selectedServerBannerId NOTIFY selectionChanged)
     Q_PROPERTY(bool homeSelected READ homeSelected NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelId READ selectedChannelId NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedChannelName READ selectedChannelName NOTIFY selectionChanged)
@@ -224,6 +225,7 @@ public:
     QString discordImportStatus() const { return m_discordImportStatus; }
     QString selectedServerName() const;
     QString selectedServerDescription() const;
+    QString selectedServerBannerId() const;
     QVariantMap serverDetails(const QString& id) const;
     bool homeSelected() const { return m_selectedServer == u"home"; }
     QString selectedChannelId() const { return m_selectedChannel; }

@@ -24,6 +24,22 @@ Rectangle {
         list.currentIndex = i >= 0 ? i : 0
     }
 
+    function loadServerBanner() {
+        const id = App.selectedServerBannerId
+        if (!App.homeSelected && id && id !== "0")
+            App.requestPreview(id, "server-banner.png", 0)
+    }
+
+    Component.onCompleted: loadServerBanner()
+    Connections {
+        target: App
+        function onSelectionChanged() { sidebar.loadServerBanner() }
+        function onServerDataChanged(id) {
+            if (id === App.selectedServerId)
+                sidebar.loadServerBanner()
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -80,6 +96,17 @@ Rectangle {
                 height: 1
                 color: Theme.border
             }
+        }
+
+        Image {
+            id: serverBanner
+            Layout.fillWidth: true
+            Layout.preferredHeight: Theme.px(84)
+            visible: !App.homeSelected && status === Image.Ready
+            source: App.selectedServerBannerId && App.selectedServerBannerId !== "0"
+                    ? (App.previews[App.selectedServerBannerId] || "") : ""
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
         }
 
         ListView {
