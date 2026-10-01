@@ -129,6 +129,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList pendingFiles READ pendingFiles NOTIFY attachmentsChanged)
     Q_PROPERTY(QVariantList uploads READ uploads NOTIFY attachmentsChanged)
     Q_PROPERTY(QVariantMap previews READ previews NOTIFY previewsChanged)
+    Q_PROPERTY(QVariantMap videoThumbnails READ videoThumbnails NOTIFY videoThumbnailsChanged)
     Q_PROPERTY(bool attachmentsSupported READ attachmentsSupported NOTIFY statusChanged)
     // Every saved account (status.accounts): id, host, username, state, active, unread, mentions.
     Q_PROPERTY(QVariantList accounts READ accounts NOTIFY statusChanged)
@@ -256,6 +257,7 @@ public:
     QVariantList pendingFiles() const { return m_pendingFiles; }
     QVariantList uploads() const;
     QVariantMap previews() const { return m_previews; }
+    QVariantMap videoThumbnails() const { return m_videoThumbnails; }
     bool attachmentsSupported() const { return maxUploadBytes() > 0; }
     QVariantList accounts() const { return m_status.value(QStringLiteral("accounts")).toArray().toVariantList(); }
     int backgroundUnread() const
@@ -423,6 +425,7 @@ public:
     Q_INVOKABLE void removePendingFile(int index);
     Q_INVOKABLE void requestPreview(const QString& attachmentId, const QString& filename, double size);
     Q_INVOKABLE void requestMedia(const QString& attachmentId, const QString& filename);
+    Q_INVOKABLE void requestVideoThumbnail(const QString& attachmentId, const QString& filename, double size);
     Q_INVOKABLE void saveAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void openAttachment(const QString& attachmentId, const QString& filename, double size);
     Q_INVOKABLE void openVideoAttachment(const QString& attachmentId, const QString& filename);
@@ -479,6 +482,7 @@ signals:
     void audioChanged();
     void attachmentsChanged();
     void previewsChanged();
+    void videoThumbnailsChanged();
     void rolesChanged();
     void emojiListChanged();
     void safetyChanged();
@@ -579,6 +583,9 @@ private:
     QHash<QString, QJsonObject> m_uploads; // transfer id -> progress
     QVariantMap m_previews; // attachment id -> local file URL
     QSet<QString> m_previewRequests;
+    QVariantMap m_videoThumbnails; // attachment id -> local JPEG URL
+    QSet<QString> m_videoThumbnailRequests;
+    QSet<QString> m_pendingVideoOpens;
 
     QVariantList m_inputDevices;
     QVariantList m_outputDevices;

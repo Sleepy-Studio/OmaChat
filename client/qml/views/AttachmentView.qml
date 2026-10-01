@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import OmaChat
 
-// One attachment inside a message. Small images load a preview through the
-// daemon's cache; GIFs play inline. Everything else is a file card.
+// One attachment inside a message. Images and videos show previews;
+// audio and other files open with the desktop's default handler.
 Item {
     id: root
 
@@ -15,13 +15,17 @@ Item {
     readonly property bool isGif: isImage && String(attachment.mime_type).toLowerCase() === "image/gif"
     readonly property bool isAudio: String(attachment.mime_type).startsWith("audio/")
     readonly property bool isVideo: String(attachment.mime_type).startsWith("video/")
-    readonly property bool isMedia: isAudio || isVideo
     readonly property string previewUrl: App.previews[attachment.id] || ""
+    readonly property string thumbnailUrl: App.videoThumbnails[attachment.id] || ""
+    readonly property bool thumbnailFailed: App.videoThumbnails[attachment.id] === false
 
-    implicitWidth: isImage ? imageBox.width : (isMedia ? mediaPlayer.implicitWidth : card.width)
-    implicitHeight: isImage ? imageBox.height : (isMedia ? mediaPlayer.implicitHeight : card.height)
+    implicitWidth: isImage ? imageBox.width : (isVideo ? videoBox.width : card.width)
+    implicitHeight: isImage ? imageBox.height : (isVideo ? videoBox.height : card.height)
 
-    Component.onCompleted: if (isImage) App.requestPreview(attachment.id, attachment.filename, attachment.size)
+    Component.onCompleted: {
+        if (isImage) App.requestPreview(attachment.id, attachment.filename, attachment.size)
+        else if (isVideo) App.requestVideoThumbnail(attachment.id, attachment.filename, attachment.size)
+    }
 
     Accessible.role: Accessible.Button
     Accessible.name: qsTr("Attachment %1, %2").arg(attachment.filename).arg(App.formatSize(attachment.size))
@@ -45,7 +49,7 @@ Item {
             id: image
             anchors.fill: parent
             visible: !root.isGif
-            source: root.isGif ? "" : root.previewUrl
+            source: root.isImage && !root.isGif ? root.previewUrl : ""
             asynchronous: true
             fillMode: Image.PreserveAspectFit
             // A single source dimension bounds the decode without changing
@@ -92,22 +96,64 @@ Item {
         HoverHandler { id: imageHover }
     }
 
-    // ---------------------------------------------------------------- media
-    MediaPlayer {
-        id: mediaPlayer
-        visible: root.isMedia
-        isVideo: root.isVideo
-        filename: root.attachment.filename || ""
-        source: root.previewUrl
-        maxWidth: root.maxWidth
-        onPlayRequested: App.requestMedia(root.attachment.id, root.attachment.filename)
-        onOpenRequested: App.openVideoAttachment(root.attachment.id, root.attachment.filename)
+    // ---------------------------------------------------------------- video
+    Rectangle {
+        id: videoBox
+        visible: root.isVideo
+        width: Math.min(Theme.px(400), root.maxWidth)
+        height: width * 9 / 16
+        radius: Theme.px(6)
+        color: Theme.surface
+        border.color: Theme.border
+        clip: true
+
+        Image {
+            anchors.fill: parent
+            source: root.isVideo ? root.thumbnailUrl : ""
+            asynchronous: true
+            fillMode: Image.PreserveAspectCrop
+        }
+
+        Text {
+            anchors.centerIn: parent
+            visible: root.thumbnailUrl.length === 0
+            width: parent.width - Theme.px(24)
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideMiddle
+            color: Theme.textMuted
+            font.pixelSize: Theme.px(12)
+            text: root.thumbnailFailed ? root.attachment.filename : qsTr("Loading video preview…")
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Theme.px(42)
+            height: width
+            radius: width / 2
+            color: Qt.rgba(0, 0, 0, 0.65)
+            visible: root.thumbnailUrl.length > 0
+            Icon {
+                anchors.centerIn: parent
+                name: "play"
+                size: Theme.px(20)
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: App.openVideoAttachment(root.attachment.id, root.attachment.filename)
+        }
+        ToolTip.visible: videoHover.hovered
+        ToolTip.delay: 600
+        ToolTip.text: qsTr("Open %1 in MPV").arg(root.attachment.filename)
+        HoverHandler { id: videoHover }
     }
 
     // ----------------------------------------------------------------- file
     Rectangle {
         id: card
-        visible: !root.isImage && !root.isMedia
+        visible: !root.isImage && !root.isVideo
         width: Math.min(Theme.px(360), root.maxWidth)
         height: Theme.px(52)
         radius: Theme.px(6)
@@ -121,7 +167,7 @@ Item {
             anchors.left: parent.left
             anchors.leftMargin: Theme.px(12)
             anchors.verticalCenter: parent.verticalCenter
-            name: "file"
+            name: root.isAudio ? "speaker" : "file"
             size: Theme.px(24)
         }
         Column {
