@@ -380,8 +380,8 @@ public:
         const QString& topic, const QString& description, const QUrl& iconFile, const QUrl& bannerFile);
     Q_INVOKABLE void deleteChannel(const QString& id);
     Q_INVOKABLE void setTopic(const QString& topic);
-    Q_INVOKABLE void updateChannelDetails(const QString& id, const QString& name, const QString& topic,
-        const QString& description);
+    Q_INVOKABLE void updateChannelDetails(
+        const QString& id, const QString& name, const QString& topic, const QString& description);
     Q_INVOKABLE void setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl);
     Q_INVOKABLE QVariantMap channelDetails(const QString& id) const { return channel(id).toVariantMap(); }
     Q_INVOKABLE QVariantList channelCategories() const;
@@ -428,6 +428,7 @@ public:
     Q_INVOKABLE void requestVideoThumbnail(const QString& attachmentId, const QString& filename, double size);
     Q_INVOKABLE void saveAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void openAttachment(const QString& attachmentId, const QString& filename, double size);
+    Q_INVOKABLE void openAudioAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void openVideoAttachment(const QString& attachmentId, const QString& filename);
     Q_INVOKABLE void cancelTransfer(const QString& transferId);
     Q_INVOKABLE QString formatSize(double bytes) const;
@@ -585,6 +586,8 @@ private:
     QSet<QString> m_previewRequests;
     QVariantMap m_videoThumbnails; // attachment id -> local JPEG URL
     QSet<QString> m_videoThumbnailRequests;
+    QSet<QString> m_pendingMediaRequests;
+    QSet<QString> m_pendingAudioOpens;
     QSet<QString> m_pendingVideoOpens;
 
     QVariantList m_inputDevices;

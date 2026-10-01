@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 import OmaChat
 
-// One attachment inside a message. Images and videos show previews;
-// audio and other files open with the desktop's default handler.
+// One attachment inside a message. Media has in-chat controls; its preview
+// surface also opens the file in the desktop player.
 Item {
     id: root
 
@@ -15,12 +15,13 @@ Item {
     readonly property bool isGif: isImage && String(attachment.mime_type).toLowerCase() === "image/gif"
     readonly property bool isAudio: String(attachment.mime_type).startsWith("audio/")
     readonly property bool isVideo: String(attachment.mime_type).startsWith("video/")
+    readonly property bool isMedia: isAudio || isVideo
     readonly property string previewUrl: App.previews[attachment.id] || ""
     readonly property string thumbnailUrl: App.videoThumbnails[attachment.id] || ""
     readonly property bool thumbnailFailed: App.videoThumbnails[attachment.id] === false
 
-    implicitWidth: isImage ? imageBox.width : (isVideo ? videoBox.width : card.width)
-    implicitHeight: isImage ? imageBox.height : (isVideo ? videoBox.height : card.height)
+    implicitWidth: isImage ? imageBox.width : (isMedia ? mediaPlayer.implicitWidth : card.width)
+    implicitHeight: isImage ? imageBox.height : (isMedia ? mediaPlayer.implicitHeight : card.height)
 
     Component.onCompleted: {
         if (isImage) App.requestPreview(attachment.id, attachment.filename, attachment.size)
@@ -96,64 +97,26 @@ Item {
         HoverHandler { id: imageHover }
     }
 
-    // ---------------------------------------------------------------- video
-    Rectangle {
-        id: videoBox
-        visible: root.isVideo
-        width: Math.min(Theme.px(400), root.maxWidth)
-        height: width * 9 / 16
-        radius: Theme.px(6)
-        color: Theme.surface
-        border.color: Theme.border
-        clip: true
-
-        Image {
-            anchors.fill: parent
-            source: root.isVideo ? root.thumbnailUrl : ""
-            asynchronous: true
-            fillMode: Image.PreserveAspectCrop
-        }
-
-        Text {
-            anchors.centerIn: parent
-            visible: root.thumbnailUrl.length === 0
-            width: parent.width - Theme.px(24)
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideMiddle
-            color: Theme.textMuted
-            font.pixelSize: Theme.px(12)
-            text: root.thumbnailFailed ? root.attachment.filename : qsTr("Loading video preview…")
-        }
-
-        Rectangle {
-            anchors.centerIn: parent
-            width: Theme.px(42)
-            height: width
-            radius: width / 2
-            color: Qt.rgba(0, 0, 0, 0.65)
-            visible: root.thumbnailUrl.length > 0
-            Icon {
-                anchors.centerIn: parent
-                name: "play"
-                size: Theme.px(20)
-            }
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: App.openVideoAttachment(root.attachment.id, root.attachment.filename)
-        }
-        ToolTip.visible: videoHover.hovered
-        ToolTip.delay: 600
-        ToolTip.text: qsTr("Open %1 in MPV").arg(root.attachment.filename)
-        HoverHandler { id: videoHover }
+    // ---------------------------------------------------------------- media
+    MediaPlayer {
+        id: mediaPlayer
+        visible: root.isMedia
+        isVideo: root.isVideo
+        filename: root.attachment.filename || ""
+        source: root.isMedia ? root.previewUrl : ""
+        thumbnail: root.isVideo ? root.thumbnailUrl : ""
+        thumbnailFailed: root.thumbnailFailed
+        maxWidth: root.maxWidth
+        onPlayRequested: App.requestMedia(root.attachment.id, root.attachment.filename)
+        onOpenRequested: root.isVideo
+                         ? App.openVideoAttachment(root.attachment.id, root.attachment.filename)
+                         : App.openAudioAttachment(root.attachment.id, root.attachment.filename)
     }
 
     // ----------------------------------------------------------------- file
     Rectangle {
         id: card
-        visible: !root.isImage && !root.isVideo
+        visible: !root.isImage && !root.isMedia
         width: Math.min(Theme.px(360), root.maxWidth)
         height: Theme.px(52)
         radius: Theme.px(6)

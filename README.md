@@ -22,7 +22,9 @@ assistants, bots or LLM features.
   with an offline operator tool for existing servers
 - File attachments: picker, drag and drop, pasted images, aspect-correct inline
   previews with animated GIF playback and first-frame video thumbnails;
-  audio opens in the desktop's default player and video opens in MPV (installed separately);
+  audio and video have in-chat playback controls, audio has a level visualizer,
+  and the preview surfaces open audio in the desktop's default player or video
+  in MPV (installed separately);
   transfers continue after a dropped connection
 - Markdown subset (`**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
   fenced code blocks, `> quotes`, links) rendered through a sanitizer —

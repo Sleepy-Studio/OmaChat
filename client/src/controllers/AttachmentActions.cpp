@@ -11,8 +11,8 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
-#include <QFileInfo>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QMimeData>
@@ -213,16 +213,28 @@ void AppController::requestMedia(const QString& attachmentId, const QString& fil
 {
     if (m_previews.contains(attachmentId) || m_previewRequests.contains(attachmentId))
         return;
+    if (m_videoThumbnailRequests.contains(attachmentId)) {
+        m_pendingMediaRequests.insert(attachmentId);
+        return;
+    }
     m_previewRequests.insert(attachmentId);
     m_link.request(
         QStringLiteral("attachment.download"), {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}},
-        [this, attachmentId](const ipc::Reply& r) {
+        [this, attachmentId, filename](const ipc::Reply& r) {
+            m_previewRequests.remove(attachmentId);
             if (!r.ok) {
-                m_previewRequests.remove(attachmentId);
+                if (m_pendingAudioOpens.remove(attachmentId))
+                    showNotice(tr("Cannot open %1: %2").arg(filename, r.errorMessage), true);
+                if (m_pendingVideoOpens.remove(attachmentId))
+                    openVideoAttachment(attachmentId, filename);
                 return;
             }
             m_previews.insert(attachmentId, QUrl::fromLocalFile(r.result.value(QStringLiteral("path")).toString()));
             emit previewsChanged();
+            if (m_pendingAudioOpens.remove(attachmentId))
+                openAudioAttachment(attachmentId, filename);
+            if (m_pendingVideoOpens.remove(attachmentId))
+                openVideoAttachment(attachmentId, filename);
         },
         0);
 }
@@ -239,7 +251,8 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
         return;
     }
 
-    const QString key = QString::fromLatin1(QCryptographicHash::hash(attachmentId.toUtf8(), QCryptographicHash::Sha256).toHex());
+    const QString key
+        = QString::fromLatin1(QCryptographicHash::hash(attachmentId.toUtf8(), QCryptographicHash::Sha256).toHex());
     const QString thumbnail = directory + u'/' + key + QStringLiteral(".jpg");
     if (QFileInfo(thumbnail).isFile()) {
         m_videoThumbnails.insert(attachmentId, QUrl::fromLocalFile(thumbnail));
@@ -248,13 +261,16 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
     }
 
     m_videoThumbnailRequests.insert(attachmentId);
-    m_link.request(QStringLiteral("attachment.download"),
+    m_link.request(
+        QStringLiteral("attachment.download"),
         {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}, {"size", size}},
         [this, attachmentId, filename, ffmpeg, thumbnail](const ipc::Reply& r) {
             if (!r.ok) {
                 m_videoThumbnailRequests.remove(attachmentId);
                 m_videoThumbnails.insert(attachmentId, false);
                 emit videoThumbnailsChanged();
+                if (m_pendingMediaRequests.remove(attachmentId))
+                    requestMedia(attachmentId, filename);
                 if (m_pendingVideoOpens.remove(attachmentId))
                     openVideoAttachment(attachmentId, filename);
                 return;
@@ -264,12 +280,15 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
                 m_videoThumbnailRequests.remove(attachmentId);
                 m_videoThumbnails.insert(attachmentId, false);
                 emit videoThumbnailsChanged();
+                if (m_pendingMediaRequests.remove(attachmentId))
+                    requestMedia(attachmentId, filename);
                 if (m_pendingVideoOpens.remove(attachmentId))
                     openVideoAttachment(attachmentId, filename);
                 return;
             }
             m_previews.insert(attachmentId, QUrl::fromLocalFile(path));
             emit previewsChanged();
+            m_pendingMediaRequests.remove(attachmentId);
             if (m_pendingVideoOpens.remove(attachmentId))
                 openVideoAttachment(attachmentId, filename);
             auto* process = new QProcess(this);
@@ -286,8 +305,8 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
                     }
                     process->deleteLater();
                 });
-            connect(process, &QProcess::errorOccurred, this,
-                [this, process, attachmentId](QProcess::ProcessError error) {
+            connect(
+                process, &QProcess::errorOccurred, this, [this, process, attachmentId](QProcess::ProcessError error) {
                     if (error == QProcess::FailedToStart) {
                         m_videoThumbnailRequests.remove(attachmentId);
                         m_videoThumbnails.insert(attachmentId, false);
@@ -295,15 +314,16 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
                         process->deleteLater();
                     }
                 });
-            process->start(ffmpeg, {QStringLiteral("-nostdin"), QStringLiteral("-v"), QStringLiteral("error"),
-                QStringLiteral("-threads"), QStringLiteral("1"), QStringLiteral("-i"), path,
-                QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-vf"),
-                QStringLiteral("scale=640:-2"), QStringLiteral("-y"), thumbnail});
+            process->start(ffmpeg,
+                {QStringLiteral("-nostdin"), QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-threads"),
+                    QStringLiteral("1"), QStringLiteral("-i"), path, QStringLiteral("-frames:v"), QStringLiteral("1"),
+                    QStringLiteral("-vf"), QStringLiteral("scale=640:-2"), QStringLiteral("-y"), thumbnail});
             QTimer::singleShot(15000, process, [process] {
                 if (process->state() != QProcess::NotRunning)
                     process->kill();
             });
-        }, 0);
+        },
+        0);
 }
 
 void AppController::saveAttachment(const QString& attachmentId, const QString& filename)
@@ -344,6 +364,22 @@ void AppController::openAttachment(const QString& attachmentId, const QString& f
         0);
 }
 
+void AppController::openAudioAttachment(const QString& attachmentId, const QString& filename)
+{
+    const QString cached = m_previews.value(attachmentId).toUrl().toLocalFile();
+    if (QFileInfo(cached).isFile()) {
+        if (safeToOpen(cached)) {
+            if (!QDesktopServices::openUrl(QUrl::fromLocalFile(cached)))
+                showNotice(tr("No application could open %1.").arg(filename), true);
+        } else {
+            saveAttachment(attachmentId, filename);
+        }
+        return;
+    }
+    m_pendingAudioOpens.insert(attachmentId);
+    requestMedia(attachmentId, filename);
+}
+
 void AppController::openVideoAttachment(const QString& attachmentId, const QString& filename)
 {
     const QString mpv = QStandardPaths::findExecutable(QStringLiteral("mpv"));
@@ -357,7 +393,7 @@ void AppController::openVideoAttachment(const QString& attachmentId, const QStri
             showNotice(tr("Could not start MPV for %1.").arg(filename), true);
         return;
     }
-    if (m_videoThumbnailRequests.contains(attachmentId)) {
+    if (m_videoThumbnailRequests.contains(attachmentId) || m_previewRequests.contains(attachmentId)) {
         m_pendingVideoOpens.insert(attachmentId);
         return;
     }

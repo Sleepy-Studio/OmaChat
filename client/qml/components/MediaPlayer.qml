@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import QtMultimedia
+import QtMultimedia as Multimedia
 import OmaChat
 
 // Inline audio/video attachment player. Media is downloaded on demand.
@@ -9,9 +9,13 @@ Item {
 
     property string source: "" // file:// url once downloaded, empty until then
     property string filename: ""
+    property string thumbnail: ""
+    property bool thumbnailFailed: false
     property bool isVideo: false
     property real maxWidth: Theme.px(400)
+    property bool pendingPlay: false
     readonly property bool ready: root.source.length > 0
+    readonly property bool playing: player.playbackState === Multimedia.MediaPlayer.PlayingState
     readonly property bool rotatedVideo: Math.abs(videoOutput.orientation % 180) === 90
     readonly property real videoAspect: videoOutput.sourceRect.height > 0
         ? (rotatedVideo ? videoOutput.sourceRect.height / videoOutput.sourceRect.width
@@ -27,7 +31,22 @@ Item {
     signal playRequested()
     signal openRequested()
 
-    onSourceChanged: levels.reset()
+    function startPendingPlayback() {
+        if (!root.pendingPlay || !root.ready)
+            return
+        if (player.mediaStatus === Multimedia.MediaPlayer.EndOfMedia)
+            player.setPosition(0)
+        if (player.mediaStatus === Multimedia.MediaPlayer.LoadedMedia
+                || player.mediaStatus === Multimedia.MediaPlayer.BufferedMedia
+                || player.mediaStatus === Multimedia.MediaPlayer.BufferingMedia
+                || player.mediaStatus === Multimedia.MediaPlayer.EndOfMedia)
+            player.play()
+    }
+
+    onSourceChanged: {
+        levels.reset()
+        Qt.callLater(root.startPendingPlayback)
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -36,21 +55,36 @@ Item {
         border.color: Theme.border
         clip: true
 
-        MediaPlayer {
+        Multimedia.MediaPlayer {
             id: player
             source: root.ready ? root.source : ""
-            audioOutput: AudioOutput { id: audioOutput }
+            audioOutput: Multimedia.AudioOutput { id: audioOutput }
             audioBufferOutput: root.isVideo ? null : levels.output
             videoOutput: root.isVideo ? videoOutput : null
+            onMediaStatusChanged: root.startPendingPlayback()
+            onPlaybackStateChanged: {
+                if (playbackState === Multimedia.MediaPlayer.PlayingState)
+                    root.pendingPlay = false
+            }
+            onErrorOccurred: root.pendingPlay = false
         }
 
         AudioLevels { id: levels }
 
-        VideoOutput {
+        Image {
+            anchors.fill: parent
+            visible: root.isVideo && (player.playbackState === Multimedia.MediaPlayer.StoppedState && player.position === 0)
+            source: root.isVideo ? root.thumbnail : ""
+            asynchronous: true
+            fillMode: Image.PreserveAspectCrop
+        }
+
+        Multimedia.VideoOutput {
             id: videoOutput
             anchors.fill: parent
             visible: root.isVideo && root.ready
-            fillMode: VideoOutput.PreserveAspectFit
+                     && (player.playbackState !== Multimedia.MediaPlayer.StoppedState || player.position > 0)
+            fillMode: Multimedia.VideoOutput.PreserveAspectFit
         }
 
         MouseArea {
@@ -65,15 +99,14 @@ Item {
         }
 
         Text {
-            visible: root.isVideo && !root.ready
+            visible: root.isVideo && root.thumbnail.length === 0
             anchors.centerIn: parent
             width: parent.width - Theme.px(20)
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideMiddle
             color: Theme.textMuted
             font.pixelSize: Theme.px(12)
-            text: root.filename.length > 0 ? root.filename + "\n" + qsTr("Click to open in MPV")
-                                           : qsTr("Click to open in MPV")
+            text: root.thumbnailFailed ? root.filename : qsTr("Loading video preview…")
         }
 
         Item {
@@ -118,6 +151,15 @@ Item {
                     }
                 }
             }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.openRequested()
+                ToolTip.visible: containsMouse
+                ToolTip.delay: 600
+                ToolTip.text: qsTr("Open in default media player")
+            }
         }
 
         // -------------------------------------------------------- controls
@@ -142,17 +184,19 @@ Item {
                 anchors.left: parent.left
                 anchors.leftMargin: Theme.px(6)
                 anchors.verticalCenter: parent.verticalCenter
-                iconName: player.playbackState === MediaPlayer.PlayingState ? "pause" : "play"
-                tip: player.playbackState === MediaPlayer.PlayingState ? qsTr("Pause") : qsTr("Play")
+                iconName: player.playbackState === Multimedia.MediaPlayer.PlayingState ? "pause" : "play"
+                tip: player.playbackState === Multimedia.MediaPlayer.PlayingState ? qsTr("Pause") : qsTr("Play")
                 onClicked: {
-                    if (!root.ready) {
-                        root.playRequested()
-                        return
-                    }
-                    if (player.playbackState === MediaPlayer.PlayingState)
+                    if (root.playing) {
+                        root.pendingPlay = false
                         player.pause()
-                    else
-                        player.play()
+                    } else {
+                        root.pendingPlay = true
+                        if (root.ready)
+                            root.startPendingPlayback()
+                        else
+                            root.playRequested()
+                    }
                 }
             }
 
@@ -163,7 +207,7 @@ Item {
                 visible: !root.ready
                 color: Theme.textFaint
                 font.pixelSize: Theme.px(12)
-                text: qsTr("Tap to load")
+                text: root.pendingPlay ? qsTr("Loading…") : qsTr("Play in chat")
             }
 
             Slider {
@@ -193,7 +237,7 @@ Item {
         }
 
         Text {
-            visible: player.error !== MediaPlayer.NoError && root.ready
+            visible: player.error !== Multimedia.MediaPlayer.NoError && root.ready
             anchors.centerIn: parent
             color: Theme.danger
             font.pixelSize: Theme.px(12)
