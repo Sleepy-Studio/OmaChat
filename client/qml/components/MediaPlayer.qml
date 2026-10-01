@@ -38,11 +38,9 @@ Item {
             return
         if (player.mediaStatus === Multimedia.MediaPlayer.EndOfMedia)
             player.setPosition(0)
-        if (player.mediaStatus === Multimedia.MediaPlayer.LoadedMedia
-                || player.mediaStatus === Multimedia.MediaPlayer.BufferedMedia
-                || player.mediaStatus === Multimedia.MediaPlayer.BufferingMedia
-                || player.mediaStatus === Multimedia.MediaPlayer.EndOfMedia)
-            player.play()
+        // Qt can queue play while the source is still loading. Waiting for a
+        // loaded status leaves the first press idle for some cached videos.
+        player.play()
     }
 
     onSourceChanged: {
@@ -105,7 +103,7 @@ Item {
         }
 
         Text {
-            visible: root.isVideo && root.thumbnail.length === 0
+            visible: root.isVideo && root.thumbnail.length === 0 && !videoOutput.visible
             anchors.centerIn: parent
             width: parent.width - Theme.px(20)
             horizontalAlignment: Text.AlignHCenter
