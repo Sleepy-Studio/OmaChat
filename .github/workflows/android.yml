@@ -51,6 +51,9 @@ jobs:
         run: |
           sdkmanager 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
           sudo chmod a+rw /dev/kvm
+          export ANDROID_USER_HOME="$RUNNER_TEMP/omachat-android"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           echo no | avdmanager create avd --force --name omachat-ci --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
           "$ANDROID_HOME/emulator/emulator" -avd omachat-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -accel on > /tmp/omachat-emulator.log 2>&1 &
           emulator_pid=$!
