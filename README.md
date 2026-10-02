@@ -257,6 +257,10 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
 
 ## Development
 
+- **Running a local build against a real server:** see
+  [docs/development.md](docs/development.md) and `./run-local.sh` — same
+  account and hosted server as the installed package, without replacing
+  `/usr/bin`.
 - Tests: `ctest --test-dir build -L unit|integration|fuzz`. Integration
   tests run a real TLS server and real daemons in-process (null audio
   device) and push a synthetic tone through the full voice path.
