@@ -17,7 +17,7 @@ ApplicationWindow {
     color: Theme.background
 
     font.family: Theme.fontFamily
-    font.pixelSize: Theme.px(14)
+    font.pixelSize: Metrics.px(14)
 
     // Palette for stock controls (ToolTip, BusyIndicator, ScrollBar, ...).
     palette.window: Theme.background
@@ -70,10 +70,10 @@ ApplicationWindow {
         visible: App.notice.length > 0
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: Theme.px(72)
-        width: Math.min(noticeText.implicitWidth + Theme.px(28), parent.width - Theme.px(40))
-        height: noticeText.implicitHeight + Theme.px(16)
-        radius: Theme.px(6)
+        anchors.bottomMargin: Metrics.px(72)
+        width: Math.min(noticeText.implicitWidth + Metrics.px(28), parent.width - Metrics.px(40))
+        height: noticeText.implicitHeight + Metrics.px(16)
+        radius: Metrics.px(6)
         color: Theme.raised
         border.color: App.noticeIsError ? Theme.danger : Theme.border
         z: 100
@@ -84,11 +84,11 @@ ApplicationWindow {
         Text {
             id: noticeText
             anchors.centerIn: parent
-            width: Math.min(implicitWidth, window.width - Theme.px(68))
+            width: Math.min(implicitWidth, window.width - Metrics.px(68))
             text: App.notice
             wrapMode: Text.Wrap
             color: App.noticeIsError ? Theme.danger : Theme.text
-            font.pixelSize: Theme.px(13)
+            font.pixelSize: Metrics.px(13)
         }
         MouseArea {
             anchors.fill: parent

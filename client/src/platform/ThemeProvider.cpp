@@ -138,7 +138,7 @@ void ThemeProvider::derive(const QColor& bg, const QColor& fg, const QColor& acc
     m_selection = selection.isValid() ? selection : mix(bg, accent, 0.25);
     m_border = mix(bg, toward, m_dark ? 0.12 : 0.15);
     m_text = readable(fg, m_surface);
-    m_textMuted = readable(mix(fg, bg, 0.35), m_surface, 4.5);
+    m_textMuted = readable(mix(fg, bg, 0.35), m_raised, 4.5);
     m_textFaint = readable(mix(fg, bg, 0.55), m_surface, 3.0);
     m_accent = readable(accent, m_surface, 3.0);
     m_accentText = luminance(m_accent) > 0.4 ? QColor(0x10, 0x10, 0x10) : QColor(Qt::white);

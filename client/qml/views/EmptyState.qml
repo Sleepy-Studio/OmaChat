@@ -10,13 +10,13 @@ ColumnLayout {
     property string actionText: ""
     signal actionRequested()
 
-    spacing: Theme.px(8)
-    width: Math.min(parent ? parent.width - Theme.px(48) : Theme.px(400), Theme.px(420))
+    spacing: Metrics.px(8)
+    width: Math.min(parent ? parent.width - Metrics.px(48) : Metrics.px(400), Metrics.px(420))
 
     Icon {
         Layout.alignment: Qt.AlignHCenter
         name: parent.icon
-        size: Theme.px(36)
+        size: Metrics.px(36)
         color: Theme.textFaint
     }
     Text {
@@ -24,7 +24,7 @@ ColumnLayout {
         horizontalAlignment: Text.AlignHCenter
         text: parent.title
         color: Theme.text
-        font.pixelSize: Theme.px(16)
+        font.pixelSize: Metrics.px(16)
         font.bold: true
         wrapMode: Text.Wrap
     }
@@ -33,7 +33,7 @@ ColumnLayout {
         horizontalAlignment: Text.AlignHCenter
         text: parent.subtitle
         color: Theme.textMuted
-        font.pixelSize: Theme.px(13)
+        font.pixelSize: Metrics.px(13)
         wrapMode: Text.Wrap
     }
     FlatButton {

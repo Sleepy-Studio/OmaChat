@@ -40,15 +40,15 @@ Rectangle {
         // ---------------------------------------------------------- header
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: Theme.px(46)
+            implicitHeight: Metrics.px(46)
             color: Theme.background
             visible: App.selectedChannelId.length > 0
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(16)
-                anchors.rightMargin: Theme.px(8)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(16)
+                anchors.rightMargin: Metrics.px(8)
+                spacing: Metrics.px(8)
 
                 IconButton {
                     visible: pane.showChannelsButton
@@ -59,13 +59,13 @@ Rectangle {
 
                 Icon {
                     name: App.selectedChannelType === "group_dm" ? "users" : App.homeSelected ? "at" : "hash"
-                    size: Theme.px(20)
+                    size: Metrics.px(20)
                     color: Theme.textFaint
                 }
                 Text {
                     text: App.selectedChannelName
                     color: Theme.text
-                    font.pixelSize: Theme.px(15)
+                    font.pixelSize: Metrics.px(15)
                     font.bold: true
                     Accessible.role: Accessible.Heading
                     Accessible.name: text
@@ -73,7 +73,7 @@ Rectangle {
                 IconButton {
                     visible: App.selectedEncrypted
                     iconName: "lock"
-                    iconSize: Theme.px(15)
+                    iconSize: Metrics.px(15)
                     iconColor: Theme.success
                     tip: qsTr("End-to-end encrypted. Compare safety numbers")
                     onClicked: safetyDialog.open()
@@ -81,7 +81,7 @@ Rectangle {
                 Rectangle {
                     visible: topic.text.length > 0
                     width: 1
-                    height: Theme.px(20)
+                    height: Metrics.px(20)
                     color: Theme.border
                 }
                 Text {
@@ -89,7 +89,7 @@ Rectangle {
                     Layout.fillWidth: true
                     text: App.selectedChannelTopic
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                     elide: Text.ElideRight
                     MouseArea {
                         anchors.fill: parent
@@ -135,7 +135,7 @@ Rectangle {
 
         Image {
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.px(88)
+            Layout.preferredHeight: Metrics.px(88)
             visible: App.selectedChannelBannerId.length > 0 && App.selectedChannelBannerId !== "0" && status === Image.Ready
             source: App.previews[App.selectedChannelBannerId] || ""
             fillMode: Image.PreserveAspectCrop
@@ -147,26 +147,26 @@ Rectangle {
         // sharing after alt-tabbing to another app.
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: Theme.px(32)
+            implicitHeight: Metrics.px(32)
             visible: App.sharingScreen
             color: Theme.accent
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(16)
-                anchors.rightMargin: Theme.px(8)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(16)
+                anchors.rightMargin: Metrics.px(8)
+                spacing: Metrics.px(8)
 
                 Icon {
                     name: "monitor"
-                    size: Theme.px(15)
+                    size: Metrics.px(15)
                     color: Theme.accentText
                 }
                 Text {
                     Layout.fillWidth: true
                     text: qsTr("You are sharing your screen")
                     color: Theme.accentText
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     font.bold: true
                     elide: Text.ElideRight
                 }
@@ -179,21 +179,21 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: Theme.px(36)
+            implicitHeight: Metrics.px(36)
             visible: App.messages.anchorMessageId.length > 0
             color: Theme.surface
             border.color: Theme.border
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(16)
-                anchors.rightMargin: Theme.px(8)
+                anchors.leftMargin: Metrics.px(16)
+                anchors.rightMargin: Metrics.px(8)
                 Text {
                     Layout.fillWidth: true
                     text: App.messages.error.length > 0
                           ? qsTr("Could not load earlier messages: %1").arg(App.messages.error)
                           : qsTr("Viewing search match and earlier messages")
                     color: Theme.text
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     elide: Text.ElideRight
                 }
                 FlatButton {
@@ -221,7 +221,7 @@ Rectangle {
                 verticalLayoutDirection: ListView.BottomToTop
                 clip: true
                 reuseItems: true
-                cacheBuffer: Theme.px(600)
+                cacheBuffer: Metrics.px(600)
                 boundsBehavior: Flickable.StopAtBounds
                 activeFocusOnTab: true
                 keyNavigationEnabled: true
@@ -257,9 +257,9 @@ Rectangle {
                 function openMenu(target, keyboard = false) {
                     messageMenu.target = target
                     if (keyboard) {
-                        const position = target.mapToItem(pane, Theme.px(46), 0)
-                        messageMenu.x = Math.max(Theme.px(8), Math.min(position.x, pane.width - Theme.px(208)))
-                        messageMenu.y = Math.max(Theme.px(8), Math.min(position.y, pane.height - Theme.px(280)))
+                        const position = target.mapToItem(pane, Metrics.px(46), 0)
+                        messageMenu.x = Math.max(Metrics.px(8), Math.min(position.x, pane.width - Metrics.px(208)))
+                        messageMenu.y = Math.max(Metrics.px(8), Math.min(position.y, pane.height - Metrics.px(280)))
                         messageMenu.open()
                     } else {
                         messageMenu.popup()
@@ -280,38 +280,38 @@ Rectangle {
                     }
                 }
 
-                header: Item { width: 1; height: Theme.px(10) }
+                header: Item { width: 1; height: Metrics.px(10) }
 
                 footer: Item {
                     width: messages.width
-                    height: App.messages.hasMore || App.messages.loading ? Theme.px(40)
-                          : (App.messages.count > 0 ? welcome.implicitHeight + Theme.px(32) : 0)
+                    height: App.messages.hasMore || App.messages.loading ? Metrics.px(40)
+                          : (App.messages.count > 0 ? welcome.implicitHeight + Metrics.px(32) : 0)
                     BusyIndicator {
                         anchors.centerIn: parent
                         running: App.messages.loading
                         visible: running
-                        implicitWidth: Theme.px(24)
-                        implicitHeight: Theme.px(24)
+                        implicitWidth: Metrics.px(24)
+                        implicitHeight: Metrics.px(24)
                     }
                     Column {
                         id: welcome
                         visible: !App.messages.hasMore && !App.messages.loading && App.messages.count > 0
                         anchors.left: parent.left
-                        anchors.leftMargin: Theme.px(16)
+                        anchors.leftMargin: Metrics.px(16)
                         anchors.bottom: parent.bottom
-                        anchors.bottomMargin: Theme.px(8)
-                        spacing: Theme.px(4)
+                        anchors.bottomMargin: Metrics.px(8)
+                        spacing: Metrics.px(4)
                         Text {
                             text: App.homeSelected ? App.selectedChannelName : qsTr("Welcome to #%1").arg(App.selectedChannelName)
                             color: Theme.text
-                            font.pixelSize: Theme.px(20)
+                            font.pixelSize: Metrics.px(20)
                             font.bold: true
                         }
                         Text {
                             text: App.homeSelected ? qsTr("This is the beginning of your direct messages.")
                                                    : qsTr("This is the start of the channel.")
                             color: Theme.textMuted
-                            font.pixelSize: Theme.px(13)
+                            font.pixelSize: Metrics.px(13)
                         }
                     }
                 }
@@ -357,7 +357,7 @@ Rectangle {
             FlatButton {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.margins: Theme.px(12)
+                anchors.margins: Metrics.px(12)
                 visible: messages.visible && App.messages.anchorMessageId.length === 0
                          && !messages.nearLatest && messages.contentHeight > messages.height * 1.5
                 text: qsTr("Jump to latest")
@@ -370,11 +370,11 @@ Rectangle {
 
         Text {
             Layout.fillWidth: true
-            Layout.leftMargin: Theme.px(16)
-            Layout.preferredHeight: Theme.px(18)
+            Layout.leftMargin: Metrics.px(16)
+            Layout.preferredHeight: Metrics.px(18)
             text: App.typingText
             color: Theme.textMuted
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
             font.italic: true
             elide: Text.ElideRight
             Accessible.role: Accessible.StaticText

@@ -1,7 +1,7 @@
 find_package(GTest REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Test)
 if(OMACHAT_BUILD_CLIENT)
-    find_package(Qt6 6.8 REQUIRED COMPONENTS Multimedia)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Multimedia Quick)
 endif()
 include(GoogleTest)
 
@@ -38,6 +38,24 @@ omachat_set_warnings(omachat_unit_tests)
 target_link_libraries(omachat_unit_tests PRIVATE
     omachat_shared omachat_daemon_core omachat_server_core GTest::gtest Qt6::Test)
 gtest_discover_tests(omachat_unit_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS unit)
+
+# The real QML singleton factory must reuse the instance configured by main().
+if(OMACHAT_BUILD_CLIENT)
+    qt_policy(SET QTP0004 NEW)
+    qt_add_executable(omachat_theme_tests gui/test_theme.cpp)
+    set_source_files_properties(../client/qml/Metrics.qml PROPERTIES
+        QT_QML_SINGLETON_TYPE TRUE QT_RESOURCE_ALIAS Metrics.qml)
+    qt_add_qml_module(omachat_theme_tests
+        URI OmaChatThemeTest
+        VERSION 1.0
+        SOURCES ../client/src/platform/ThemeProvider.cpp ../client/src/platform/ThemeProvider.hpp
+        QML_FILES ../client/qml/Metrics.qml)
+    target_include_directories(omachat_theme_tests PRIVATE ../client/src ../client/src/platform)
+    target_link_libraries(omachat_theme_tests PRIVATE
+        GTest::gtest Qt6::Quick omachat_shared)
+    omachat_set_warnings(omachat_theme_tests)
+    gtest_discover_tests(omachat_theme_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS gui)
+endif()
 
 # Integration tests: real server, real TLS, real daemons (null audio device).
 add_executable(omachat_integration_tests

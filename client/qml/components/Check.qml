@@ -8,16 +8,16 @@ CheckBox {
 
     property string description
 
-    font.pixelSize: Theme.px(13)
-    spacing: Theme.px(8)
-    padding: Theme.px(2)
+    font.pixelSize: Metrics.px(13)
+    spacing: Metrics.px(8)
+    padding: Metrics.px(2)
 
     indicator: Rectangle {
         x: control.leftPadding
-        y: control.topPadding + Theme.px(1)
-        implicitWidth: Theme.px(16)
-        implicitHeight: Theme.px(16)
-        radius: Theme.px(3)
+        y: control.topPadding + Metrics.px(1)
+        implicitWidth: Metrics.px(16)
+        implicitHeight: Metrics.px(16)
+        radius: Metrics.px(3)
         color: control.checked ? Theme.accent : Theme.surfaceAlt
         border.color: control.visualFocus ? Theme.text : (control.checked ? Theme.accent : Theme.border)
         border.width: control.visualFocus ? 2 : 1
@@ -27,7 +27,7 @@ CheckBox {
             visible: control.checked
             text: "✓"
             color: Theme.accentText
-            font.pixelSize: Theme.px(11)
+            font.pixelSize: Metrics.px(11)
             font.bold: true
         }
     }
@@ -44,7 +44,7 @@ CheckBox {
             visible: control.description.length > 0
             text: control.description
             color: Theme.textFaint
-            font.pixelSize: Theme.px(11)
+            font.pixelSize: Metrics.px(11)
         }
     }
 }

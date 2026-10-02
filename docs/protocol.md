@@ -216,7 +216,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | screen sharing | `stream.start {audio?}` (answers after the desktop picker; no timeout), `stream.stop`, `stream.watch {user}` → `{path}`, `stream.unwatch {user}`, `stream.stats`, `video.settings`, `video.set` |
 | audio | `audio.devices`, `audio.settings`, `audio.set`, `audio.user_volume` |
 | moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update` (fields left out are kept), `role.delete`, `role.assign`, `override.set {channel, role \| user, allow, deny, remove?}`, `override.list` |
-| ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.reload` |
+| ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.set_ui`, `config.reload` |
 
 `account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
 
@@ -287,3 +287,7 @@ disconnected, error`. Keys are only ever added in minor releases.
 ## Android additions
 
 See [mobile protocol changes](mobile-protocol-changes.md) for additive capability-negotiated durable message operations, read markers, voice ownership and server instance identity. Existing control framing remains unchanged.
+
+`config.set_ui` accepts optional `scale` (number, 0.5–3.0) and
+`reduced_motion` (boolean). It atomically saves these preferences and returns
+the saved values; invalid input or failed storage leaves the existing preferences intact.

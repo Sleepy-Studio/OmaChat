@@ -16,7 +16,7 @@ Item {
     signal editFinished()
     signal editLastRequested()
 
-    implicitHeight: column.implicitHeight + Theme.px(16)
+    implicitHeight: column.implicitHeight + Metrics.px(16)
 
     function focusInput() { input.forceActiveFocus() }
 
@@ -91,35 +91,35 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.leftMargin: Theme.px(16)
-        anchors.rightMargin: Theme.px(16)
-        anchors.bottomMargin: Theme.px(12)
+        anchors.leftMargin: Metrics.px(16)
+        anchors.rightMargin: Metrics.px(16)
+        anchors.bottomMargin: Metrics.px(12)
         spacing: 0
 
         // Reply / edit banner
         Rectangle {
             visible: App.replyToId.length > 0 || composer.editingId.length > 0
             Layout.fillWidth: true
-            implicitHeight: Theme.px(30)
+            implicitHeight: Metrics.px(30)
             color: Theme.surface
-            radius: Theme.px(6)
+            radius: Metrics.px(6)
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(10)
-                anchors.rightMargin: Theme.px(4)
-                Icon { name: composer.editingId.length > 0 ? "edit" : "reply"; size: Theme.px(14) }
+                anchors.leftMargin: Metrics.px(10)
+                anchors.rightMargin: Metrics.px(4)
+                Icon { name: composer.editingId.length > 0 ? "edit" : "reply"; size: Metrics.px(14) }
                 Text {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     text: composer.editingId.length > 0 ? qsTr("Editing message — Enter to save, Esc to cancel")
                                                         : qsTr("Replying to %1").arg(App.replyToPreview)
                 }
                 IconButton {
-                    implicitWidth: Theme.px(24)
-                    implicitHeight: Theme.px(24)
-                    iconSize: Theme.px(14)
+                    implicitWidth: Metrics.px(24)
+                    implicitHeight: Metrics.px(24)
+                    iconSize: Metrics.px(14)
                     iconName: "x"
                     tip: qsTr("Cancel")
                     onClicked: composer.editingId.length > 0 ? composer.finishEdit() : App.cancelReply()
@@ -131,44 +131,44 @@ Item {
         Flow {
             visible: App.pendingFiles.length > 0
             Layout.fillWidth: true
-            Layout.bottomMargin: Theme.px(6)
-            spacing: Theme.px(6)
+            Layout.bottomMargin: Metrics.px(6)
+            spacing: Metrics.px(6)
             Repeater {
                 model: App.pendingFiles
                 delegate: Rectangle {
                     required property var modelData
                     required property int index
-                    implicitHeight: Theme.px(30)
-                    implicitWidth: Math.min(chipRow.implicitWidth + Theme.px(12), Theme.px(280))
-                    radius: Theme.px(6)
+                    implicitHeight: Metrics.px(30)
+                    implicitWidth: Math.min(chipRow.implicitWidth + Metrics.px(12), Metrics.px(280))
+                    radius: Metrics.px(6)
                     color: Theme.surface
                     border.color: Theme.border
                     Row {
                         id: chipRow
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
-                        anchors.leftMargin: Theme.px(8)
-                        spacing: Theme.px(6)
-                        Icon { name: "file"; size: Theme.px(14); anchors.verticalCenter: parent.verticalCenter }
+                        anchors.leftMargin: Metrics.px(8)
+                        spacing: Metrics.px(6)
+                        Icon { name: "file"; size: Metrics.px(14); anchors.verticalCenter: parent.verticalCenter }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(implicitWidth, Theme.px(170))
+                            width: Math.min(implicitWidth, Metrics.px(170))
                             elide: Text.ElideMiddle
                             color: Theme.text
-                            font.pixelSize: Theme.px(12)
+                            font.pixelSize: Metrics.px(12)
                             text: modelData.name
                         }
                         Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            color: Theme.textFaint
-                            font.pixelSize: Theme.px(11)
+                            color: Theme.textMuted
+                            font.pixelSize: Metrics.px(11)
                             text: App.formatSize(modelData.size)
                         }
                         IconButton {
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitWidth: Theme.px(20)
-                            implicitHeight: Theme.px(20)
-                            iconSize: Theme.px(12)
+                            implicitWidth: Metrics.px(20)
+                            implicitHeight: Metrics.px(20)
+                            iconSize: Metrics.px(12)
                             iconName: "x"
                             tip: qsTr("Remove %1").arg(modelData.name)
                             onClicked: App.removePendingFile(index)
@@ -184,13 +184,13 @@ Item {
             delegate: RowLayout {
                 required property var modelData
                 Layout.fillWidth: true
-                Layout.bottomMargin: Theme.px(4)
-                spacing: Theme.px(8)
+                Layout.bottomMargin: Metrics.px(4)
+                spacing: Metrics.px(8)
                 Text {
-                    Layout.preferredWidth: Theme.px(180)
+                    Layout.preferredWidth: Metrics.px(180)
                     elide: Text.ElideMiddle
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     text: modelData.waiting ? qsTr("%1 continues when reconnected").arg(modelData.name)
                                             : qsTr("Uploading %1").arg(modelData.name)
                 }
@@ -201,14 +201,14 @@ Item {
                     value: modelData.transferred
                 }
                 Text {
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    color: Theme.textMuted
+                    font.pixelSize: Metrics.px(11)
                     text: App.formatSize(modelData.transferred) + " / " + App.formatSize(modelData.total)
                 }
                 IconButton {
-                    implicitWidth: Theme.px(22)
-                    implicitHeight: Theme.px(22)
-                    iconSize: Theme.px(12)
+                    implicitWidth: Metrics.px(22)
+                    implicitHeight: Metrics.px(22)
+                    iconSize: Metrics.px(12)
                     iconName: "x"
                     tip: qsTr("Cancel upload")
                     onClicked: App.cancelTransfer(modelData.id)
@@ -218,8 +218,8 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: Math.min(input.implicitHeight, Theme.px(220)) + Theme.px(4)
-            radius: Theme.px(8)
+            implicitHeight: Math.min(input.implicitHeight, Metrics.px(220)) + Metrics.px(4)
+            radius: Metrics.px(8)
             color: Theme.surfaceAlt
             border.width: input.activeFocus ? 1 : 0
             border.color: Theme.border
@@ -227,7 +227,7 @@ Item {
             ScrollView {
                 id: scroll
                 anchors.fill: parent
-                anchors.rightMargin: Theme.px(144)
+                anchors.rightMargin: Metrics.px(144)
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                 TextArea {
@@ -239,13 +239,13 @@ Item {
                                    : App.selectedChannelType === "group_dm" ? qsTr("Message %1").arg(App.selectedChannelName)
                                    : App.homeSelected ? qsTr("Message @%1").arg(App.selectedChannelName)
                                    : qsTr("Message #%1").arg(App.selectedChannelName)
-                    placeholderTextColor: Theme.textFaint
+                    placeholderTextColor: Theme.textMuted
                     selectionColor: Theme.accent
                     selectedTextColor: Theme.accentText
-                    font.pixelSize: Theme.px(14)
-                    leftPadding: Theme.px(12)
-                    topPadding: Theme.px(10)
-                    bottomPadding: Theme.px(10)
+                    font.pixelSize: Metrics.px(14)
+                    leftPadding: Metrics.px(12)
+                    topPadding: Metrics.px(10)
+                    bottomPadding: Metrics.px(10)
                     background: null
                     Accessible.name: placeholderText
 
@@ -286,7 +286,7 @@ Item {
                 id: emojiButton
                 anchors.right: attachButton.left
                 anchors.bottom: parent.bottom
-                anchors.margins: Theme.px(4)
+                anchors.margins: Metrics.px(4)
                 iconName: "smile"
                 tip: qsTr("Insert emoji")
                 enabled: App.canSend
@@ -295,7 +295,7 @@ Item {
                 EmojiPicker {
                     id: composerEmojiPicker
                     x: parent.width - width
-                    y: -height - Theme.px(4)
+                    y: -height - Metrics.px(4)
                     onEmojiSelected: glyph => {
                         input.insert(input.cursorPosition, glyph)
                         input.forceActiveFocus()
@@ -307,7 +307,7 @@ Item {
                 id: attachButton
                 anchors.right: sendButton.left
                 anchors.bottom: parent.bottom
-                anchors.margins: Theme.px(4)
+                anchors.margins: Metrics.px(4)
                 iconName: "paperclip"
                 tip: App.attachmentsSupported ? qsTr("Attach files") : qsTr("This server does not accept attachments")
                 enabled: App.canSend && App.attachmentsSupported && composer.editingId.length === 0
@@ -318,7 +318,7 @@ Item {
                 id: sendButton
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.margins: Theme.px(4)
+                anchors.margins: Metrics.px(4)
                 primary: true
                 text: composer.editingId.length > 0 ? qsTr("Save") : qsTr("Send")
                 enabled: composer.editingId.length > 0 ? input.text.trim().length > 0
@@ -347,7 +347,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     visible: parent.containsDrag
-                    radius: Theme.px(8)
+                    radius: Metrics.px(8)
                     color: "transparent"
                     border.color: Theme.accent
                     border.width: 2
@@ -361,7 +361,7 @@ Item {
             text: composer.editingId.length > 0 ? qsTr("Enter to save · Esc to cancel")
                   : qsTr("Enter to send · Shift+Enter for a new line")
             color: Theme.textMuted
-            font.pixelSize: Theme.px(11)
+            font.pixelSize: Metrics.px(11)
         }
     }
 }

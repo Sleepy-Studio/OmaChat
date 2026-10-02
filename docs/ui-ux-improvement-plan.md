@@ -1,6 +1,6 @@
 # OmaChat UI/UX improvement plan
 
-Last reviewed: 2026-10-01. The first conversation-flow pass is implemented in the working tree; later priorities remain planned.
+Last reviewed: 2026-10-02. Conversation-flow improvements shipped in v0.2.2. The first desktop accessibility continuation is implemented; later priorities remain planned.
 
 ## Implementation status
 
@@ -9,6 +9,44 @@ Last reviewed: 2026-10-01. The first conversation-flow pass is implemented in th
 - **Still to validate:** Physical pointer and keyboard click-through for drawers, sending, and search; a current light-theme and 1.5× scale pass; voice controls while an actual call is connected. No installed package or hosted deployment was changed.
 
 For repeatable visual checks, `omachat --screenshot /tmp/omachat.png` remains the self-contained CI smoke test. Set `OMACHAT_SCREENSHOT_LIVE=1` with `OMACHAT_SOCKET` pointing to an isolated test daemon to capture real chat; `OMACHAT_SCREENSHOT_WIDTH`, `OMACHAT_SCREENSHOT_HEIGHT`, and `OMACHAT_SCREENSHOT_DELAY_MS` control the capture. Do not point this mode at a production account for test fixtures.
+
+## Desktop accessibility continuation — 2026-10-02
+
+Settings now exposes an Appearance tab with live interface scale, reduced motion,
+reset, and persistent save/error feedback. Preferences are saved atomically by
+`config.set_ui`; invalid requests and failed writes retain the prior state.
+Saved app scale now uses the same app metrics at launch and during edits, while
+Qt retains the user's desktop display scaling.
+
+This uncovered two existing scale/motion bugs: QML preferred ThemeProvider's
+accessible default constructor over its factory, creating a second provider;
+and C++ `Theme.px()` did not establish a binding dependency on scale. QML now
+uses the instance configured by main(), and the small `Metrics.px()` singleton
+reads `Theme.scale` inside each binding. Existing metric calls use that helper.
+A regression exercises the real QML factory, startup values, live metric changes,
+reduced motion, and engine ownership. Qt's construction rule is documented in
+[QML_SINGLETON](https://doc.qt.io/qt-6/qqmlintegration-h.html#QML_SINGLETON).
+
+Small text in Settings, message metadata, and the composer now uses `textMuted`.
+That token meets 4.5:1 against the normal background, sidebar, input, and raised
+surfaces in the built-in dark palette and the test light palette. A complete
+all-theme and selected/disabled-state audit remains open.
+
+Use `OMACHAT_SCREENSHOT_SETTINGS=1` with the existing live-sandbox screenshot
+mode to capture the actual Settings dialog. The capture waits for its transition.
+Final validation: native build and **199/199 CTest tests** pass, including the
+real QML singleton/live-metric/contrast tests and daemon preference validation,
+reload, and failed-save rollback. Both QML lint targets finish successfully;
+existing warnings elsewhere remain. A temporary native QtTest driver against
+an isolated real daemon exercises keyboard scale changes, keyboard reduced
+motion, saved preferences, and pointer reset. Actual 1200×760/100% and
+720×460/150% dark/light captures are checked; compact Settings uses a section
+picker and keeps Reset visible. A Wayland sandbox launch and Settings capture
+also succeed (the compositor chooses the final window size; a nonfatal portal
+registration warning remains). Full desktop workflow and physical two-machine
+voice/screen-sharing acceptance are still open.
+
+No installed package or hosted server is changed by this source continuation.
 
 ## Product direction
 

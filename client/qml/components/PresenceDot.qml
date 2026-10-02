@@ -8,7 +8,7 @@ Rectangle {
     id: dot
 
     property string status: "offline"
-    property real size: Theme.px(10)
+    property real size: Metrics.px(10)
 
     width: size
     height: size

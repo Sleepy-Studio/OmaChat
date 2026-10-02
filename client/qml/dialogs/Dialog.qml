@@ -14,12 +14,12 @@ Popup {
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-    padding: Theme.px(20)
-    width: Math.min(Theme.px(460), (parent ? parent.width : 800) - Theme.px(40))
+    padding: Metrics.px(20)
+    width: Math.min(Metrics.px(460), (parent ? parent.width : 800) - Metrics.px(40))
 
 
     background: Rectangle {
-        radius: Theme.px(8)
+        radius: Metrics.px(8)
         color: Theme.surface
         border.color: Theme.border
     }

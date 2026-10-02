@@ -11,8 +11,8 @@ Popup {
 
     signal emojiSelected(string glyph)
 
-    width: Theme.px(320)
-    height: Theme.px(360)
+    width: Metrics.px(320)
+    height: Metrics.px(360)
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -54,13 +54,13 @@ Popup {
     }
 
     background: Rectangle {
-        radius: Theme.px(8)
+        radius: Metrics.px(8)
         color: Theme.raised
         border.color: Theme.border
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(8)
+        spacing: Metrics.px(8)
 
         Field {
             id: search
@@ -71,18 +71,18 @@ Popup {
         Row {
             visible: App.serverEmoji.length > 0
             Layout.fillWidth: true
-            spacing: Theme.px(10)
+            spacing: Metrics.px(10)
             Text {
                 text: qsTr("Unicode")
                 color: root._showCustom ? Theme.textFaint : Theme.accent
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 font.bold: !root._showCustom
                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root._showCustom = false }
             }
             Text {
                 text: qsTr("Server")
                 color: root._showCustom ? Theme.accent : Theme.textFaint
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 font.bold: root._showCustom
                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root._showCustom = true }
             }
@@ -91,14 +91,14 @@ Popup {
         Row {
             visible: !root._showCustom && search.text.length === 0 && root._recent.length > 0
             Layout.fillWidth: true
-            spacing: Theme.px(4)
+            spacing: Metrics.px(4)
             SectionLabel { text: qsTr("Recent"); anchors.verticalCenter: parent.verticalCenter }
         }
 
         Flow {
             visible: !root._showCustom && search.text.length === 0 && root._recent.length > 0
             Layout.fillWidth: true
-            spacing: Theme.px(2)
+            spacing: Metrics.px(2)
             Repeater {
                 model: root._recent
                 delegate: emojiButton
@@ -111,8 +111,8 @@ Popup {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            cellWidth: Theme.px(36)
-            cellHeight: Theme.px(36)
+            cellWidth: Metrics.px(36)
+            cellHeight: Metrics.px(36)
             model: root._showCustom ? [] : root._filtered
             delegate: emojiButton
         }
@@ -123,8 +123,8 @@ Popup {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            cellWidth: Theme.px(36)
-            cellHeight: Theme.px(36)
+            cellWidth: Metrics.px(36)
+            cellHeight: Metrics.px(36)
             model: root._showCustom ? root._filteredCustom : []
             delegate: customEmojiButton
         }
@@ -133,9 +133,9 @@ Popup {
     Component {
         id: emojiButton
         Rectangle {
-            width: Theme.px(34)
-            height: Theme.px(34)
-            radius: Theme.px(4)
+            width: Metrics.px(34)
+            height: Metrics.px(34)
+            radius: Metrics.px(4)
             color: hover.hovered ? Theme.selection : "transparent"
             readonly property string glyph: typeof modelData === "string" ? modelData : modelData.glyph
             readonly property string tip: typeof modelData === "string" ? "" : modelData.shortcode
@@ -144,7 +144,7 @@ Popup {
 
             Text {
                 anchors.centerIn: parent
-                font.pixelSize: Theme.px(20)
+                font.pixelSize: Metrics.px(20)
                 text: parent.glyph
             }
             MouseArea {
@@ -163,9 +163,9 @@ Popup {
         Rectangle {
             id: cell
             required property var modelData
-            width: Theme.px(34)
-            height: Theme.px(34)
-            radius: Theme.px(4)
+            width: Metrics.px(34)
+            height: Metrics.px(34)
+            radius: Metrics.px(4)
             color: chover.hovered ? Theme.selection : "transparent"
 
             Component.onCompleted: App.requestMedia(modelData.attachment_id, modelData.name)
@@ -173,8 +173,8 @@ Popup {
 
             Image {
                 anchors.centerIn: parent
-                width: Theme.px(22)
-                height: Theme.px(22)
+                width: Metrics.px(22)
+                height: Metrics.px(22)
                 fillMode: Image.PreserveAspectFit
                 source: App.previews[cell.modelData.attachment_id] || ""
             }

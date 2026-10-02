@@ -7,38 +7,38 @@ import OmaChat
 Rectangle {
     id: bar
     signal openSettings()
-    readonly property bool compact: width < Theme.px(900)
+    readonly property bool compact: width < Metrics.px(900)
 
-    implicitHeight: Theme.px(52)
+    implicitHeight: Metrics.px(52)
     color: Theme.surfaceAlt
 
     Rectangle { width: parent.width; height: 1; color: Theme.border }
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: Theme.px(10)
-        anchors.rightMargin: Theme.px(10)
-        spacing: Theme.px(12)
+        anchors.leftMargin: Metrics.px(10)
+        anchors.rightMargin: Metrics.px(10)
+        spacing: Metrics.px(12)
 
         // Identity + presence
         Rectangle {
-            Layout.preferredWidth: bar.compact ? Theme.px(46) : Theme.px(220)
+            Layout.preferredWidth: bar.compact ? Metrics.px(46) : Metrics.px(220)
             Layout.fillHeight: true
-            Layout.topMargin: Theme.px(6)
-            Layout.bottomMargin: Theme.px(6)
-            radius: Theme.px(6)
+            Layout.topMargin: Metrics.px(6)
+            Layout.bottomMargin: Metrics.px(6)
+            radius: Metrics.px(6)
             color: idArea.containsMouse ? Theme.raised : "transparent"
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(6)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(6)
+                spacing: Metrics.px(8)
                 Avatar {
                     userId: App.selfId
                     name: App.selfName
                     avatarUrl: App.selfAvatarUrl
                     status: App.selfStatus
                     speaking: App.transmitting
-                    size: Theme.px(32)
+                    size: Metrics.px(32)
                 }
                 ColumnLayout {
                     visible: !bar.compact
@@ -48,7 +48,7 @@ Rectangle {
                         Layout.fillWidth: true
                         text: App.selfName
                         color: Theme.text
-                        font.pixelSize: Theme.px(13)
+                        font.pixelSize: Metrics.px(13)
                         font.bold: true
                         elide: Text.ElideRight
                     }
@@ -58,7 +58,7 @@ Rectangle {
                             : App.selfStatus === "idle" ? qsTr("Idle")
                             : App.selfStatus === "online" ? qsTr("Online") : qsTr("Offline")
                         color: Theme.textMuted
-                        font.pixelSize: Theme.px(11)
+                        font.pixelSize: Metrics.px(11)
                         elide: Text.ElideRight
                     }
                 }
@@ -77,20 +77,20 @@ Rectangle {
         Rectangle {
             visible: App.voiceJoined || App.voicePending
             Layout.fillHeight: true
-            Layout.topMargin: Theme.px(6)
-            Layout.bottomMargin: Theme.px(6)
-            Layout.preferredWidth: bar.compact ? Math.min(Theme.px(300), bar.width * 0.5) : Theme.px(300)
-            radius: Theme.px(6)
+            Layout.topMargin: Metrics.px(6)
+            Layout.bottomMargin: Metrics.px(6)
+            Layout.preferredWidth: bar.compact ? Math.min(Metrics.px(300), bar.width * 0.5) : Metrics.px(300)
+            radius: Metrics.px(6)
             color: Theme.surface
             border.color: Theme.border
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(10)
-                anchors.rightMargin: Theme.px(4)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(10)
+                anchors.rightMargin: Metrics.px(4)
+                spacing: Metrics.px(8)
                 Rectangle {
-                    width: Theme.px(8)
+                    width: Metrics.px(8)
                     height: width
                     radius: width / 2
                     color: App.voiceConnected ? Theme.success : Theme.warning
@@ -103,7 +103,7 @@ Rectangle {
                         text: App.voicePending ? qsTr("Joining voice…")
                             : App.voiceConnected ? qsTr("Voice connected") : qsTr("Voice connecting…")
                         color: App.voiceConnected ? Theme.success : Theme.warning
-                        font.pixelSize: Theme.px(12)
+                        font.pixelSize: Metrics.px(12)
                         font.bold: true
                         elide: Text.ElideRight
                     }
@@ -112,7 +112,7 @@ Rectangle {
                         text: App.voiceChannelName + (App.voiceServerName.length > 0 ? " / " + App.voiceServerName : "")
                               + (App.inputMode === "ptt" ? (App.pttActive ? qsTr(" · transmitting") : qsTr(" · push to talk")) : "")
                         color: Theme.textMuted
-                        font.pixelSize: Theme.px(11)
+                        font.pixelSize: Metrics.px(11)
                         elide: Text.ElideRight
                     }
                 }
@@ -131,9 +131,9 @@ Rectangle {
                     }
                     IconButton {
                         visible: !App.sharingScreen
-                        implicitWidth: Theme.px(18)
+                        implicitWidth: Metrics.px(18)
                         iconName: "chevron-down"
-                        iconSize: Theme.px(10)
+                        iconSize: Metrics.px(10)
                         tip: qsTr("Screen share options")
                         enabled: !App.shareStarting
                         onClicked: shareOptionsMenu.popup()

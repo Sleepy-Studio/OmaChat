@@ -7,10 +7,26 @@ import OmaChat
 Dialog {
     id: dialog
     title: qsTr("Settings")
-    width: Math.min(Theme.px(640), (parent ? parent.width : 800) - Theme.px(40))
-    height: Math.min(Theme.px(560), (parent ? parent.height : 600) - Theme.px(40))
+    width: Math.min(Metrics.px(640), (parent ? parent.width : 800) - Metrics.px(40))
+    height: Math.min(Metrics.px(560), (parent ? parent.height : 600) - Metrics.px(40))
+
+    function syncAppearance() {
+        if (!App.uiSaving) {
+            interfaceScale.currentIndex = interfaceScale.indexOfValue(Theme.scale)
+            reduceMotion.checked = Theme.reducedMotion
+        }
+    }
+    Connections {
+        target: App
+        function onConfigChanged() { dialog.syncAppearance() }
+    }
+    Connections {
+        target: Theme
+        function onChanged() { dialog.syncAppearance() }
+    }
 
     onAboutToShow: {
+        syncAppearance()
         App.refreshAudio()
         App.refreshOAuthIdentities()
         profileName.text = App.selfName
@@ -21,12 +37,12 @@ Dialog {
     component Row2: RowLayout {
         property alias label: lbl.text
         Layout.fillWidth: true
-        spacing: Theme.px(12)
+        spacing: Metrics.px(12)
         Text {
             id: lbl
-            Layout.preferredWidth: Theme.px(170)
+            Layout.preferredWidth: Metrics.px(170)
             color: Theme.text
-            font.pixelSize: Theme.px(13)
+            font.pixelSize: Metrics.px(13)
             wrapMode: Text.Wrap
         }
     }
@@ -34,10 +50,10 @@ Dialog {
     component Combo: ComboBox {
         id: combo
         Layout.fillWidth: true
-        implicitHeight: Theme.px(32)
+        implicitHeight: Metrics.px(32)
         textRole: "name"
         valueRole: "id"
-        font.pixelSize: Theme.px(13)
+        font.pixelSize: Metrics.px(13)
         palette.button: Theme.surfaceAlt
         palette.buttonText: Theme.text
         palette.window: Theme.raised
@@ -47,40 +63,57 @@ Dialog {
     }
 
     component Toggle: Switch {
-        font.pixelSize: Theme.px(13)
+        id: toggle
+        font.pixelSize: Metrics.px(13)
         palette.base: Theme.surfaceAlt
         contentItem: Text {
-            leftPadding: parent.indicator.width + Theme.px(8)
-            text: parent.text
+            leftPadding: toggle.indicator.width + Metrics.px(8)
+            text: toggle.text
             color: Theme.text
-            font: parent.font
+            font: toggle.font
             verticalAlignment: Text.AlignVCenter
         }
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(10)
+        spacing: Metrics.px(10)
 
         RowLayout {
-            Text { text: dialog.title; color: Theme.text; font.pixelSize: Theme.px(16); font.bold: true; Layout.fillWidth: true }
+            Text { text: dialog.title; color: Theme.text; font.pixelSize: Metrics.px(16); font.bold: true; Layout.fillWidth: true }
             IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: dialog.close() }
+        }
+
+        Combo {
+            id: settingsSection
+            visible: dialog.availableWidth < Metrics.px(520)
+            model: [
+                { id: 0, name: qsTr("Appearance") }, { id: 1, name: qsTr("Voice & Audio") },
+                { id: 2, name: qsTr("Screen sharing") }, { id: 3, name: qsTr("Notifications") },
+                { id: 4, name: qsTr("Account") }
+            ]
+            currentIndex: tabs.currentIndex
+            onActivated: tabs.currentIndex = currentIndex
+            Accessible.name: qsTr("Settings section")
         }
 
         TabBar {
             id: tabs
+            visible: !settingsSection.visible
             Layout.fillWidth: true
             background: Rectangle { color: "transparent" }
             Repeater {
-                model: [qsTr("Voice & Audio"), qsTr("Screen sharing"), qsTr("Notifications"), qsTr("Account")]
+                model: [qsTr("Appearance"), qsTr("Voice & Audio"), qsTr("Screen sharing"), qsTr("Notifications"), qsTr("Account")]
                 delegate: TabButton {
+                    id: settingsTab
                     required property string modelData
                     text: modelData
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                     contentItem: Text {
-                        text: parent.text
-                        font: parent.font
-                        color: parent.checked ? Theme.text : Theme.textMuted
+                        text: settingsTab.text
+                        font: settingsTab.font
+                        color: settingsTab.checked ? Theme.text : Theme.textMuted
                         horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideRight
                     }
                     background: Rectangle {
                         color: "transparent"
@@ -88,7 +121,7 @@ Dialog {
                             anchors.bottom: parent.bottom
                             width: parent.width
                             height: 2
-                            color: parent.parent.checked ? Theme.accent : Theme.border
+                            color: settingsTab.checked ? Theme.accent : Theme.border
                         }
                     }
                 }
@@ -96,16 +129,84 @@ Dialog {
         }
 
         StackLayout {
+            Layout.minimumHeight: 0
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: tabs.currentIndex
 
-            // ---------------------------------------------------- audio
+            // ------------------------------------------------ appearance
             ScrollView {
+                Layout.minimumHeight: 0
                 clip: true
                 ColumnLayout {
-                    width: dialog.availableWidth - Theme.px(12)
-                    spacing: Theme.px(12)
+                    width: dialog.availableWidth - Metrics.px(12)
+                    spacing: Metrics.px(12)
+                    Row2 {
+                        label: qsTr("Interface scale")
+                        Combo {
+                            id: interfaceScale
+                            objectName: "interfaceScale"
+                            enabled: !App.uiSaving
+                            model: [
+                                { id: 0.75, name: "75%" }, { id: 1.0, name: qsTr("100% (default)") },
+                                { id: 1.25, name: "125%" }, { id: 1.5, name: "150%" },
+                                { id: 1.75, name: "175%" }, { id: 2.0, name: "200%" },
+                                { id: 2.5, name: "250%" }, { id: 3.0, name: "300%" }
+                            ]
+                            currentIndex: indexOfValue(Theme.scale)
+                            displayText: Math.round(Theme.scale * 100) + "%"
+                            onActivated: App.setUi(currentValue, Theme.reducedMotion)
+                            Accessible.name: qsTr("Interface scale")
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Toggle {
+                            id: reduceMotion
+                            objectName: "reduceMotion"
+                            Layout.fillWidth: true
+                            enabled: !App.uiSaving
+                            text: qsTr("Reduce motion")
+                            checked: Theme.reducedMotion
+                            onToggled: App.setUi(Theme.scale, checked)
+                            Accessible.name: qsTr("Reduce motion")
+                        }
+                        FlatButton {
+                            enabled: !App.uiSaving && (Theme.scale !== 1.0 || Theme.reducedMotion)
+                            objectName: "resetAppearance"
+                            text: qsTr("Reset")
+                            Accessible.name: qsTr("Reset appearance")
+                            onClicked: App.setUi(1.0, false)
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: Theme.textMuted
+                        font.pixelSize: Metrics.px(12)
+                        text: qsTr("Text and controls resize immediately. Changes are saved for the next launch. Reduce motion removes interface transitions.")
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: App.uiSaveStatus.length > 0
+                        wrapMode: Text.Wrap
+                        color: App.uiSaveFailed ? Theme.danger : Theme.textMuted
+                        font.pixelSize: Metrics.px(12)
+                        text: App.uiSaveStatus
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                    }
+
+                }
+            }
+
+            // ---------------------------------------------------- audio
+            ScrollView {
+                Layout.minimumHeight: 0
+                clip: true
+                ColumnLayout {
+                    width: dialog.availableWidth - Metrics.px(12)
+                    spacing: Metrics.px(12)
 
                     Row2 {
                         label: qsTr("Input device")
@@ -142,8 +243,8 @@ Dialog {
                         visible: App.inputMode === "ptt"
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        color: Theme.textFaint
-                        font.pixelSize: Theme.px(11)
+                        color: Theme.textMuted
+                        font.pixelSize: Metrics.px(11)
                         text: qsTr("In this window, hold %1. For a system-wide key, add to your Hyprland config:\n"
                                    + "bind = , F8, exec, omachatctl ptt begin\nbindr = , F8, exec, omachatctl ptt end")
                               .arg(App.shortcuts["push_to_talk"] || "F8")
@@ -162,7 +263,7 @@ Dialog {
                             onMoved: App.setAudio("vad_threshold_db", value)
                             Accessible.name: qsTr("Voice activity threshold")
                         }
-                        Text { text: Math.round(vad.value) + " dB"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                        Text { text: Math.round(vad.value) + " dB"; color: Theme.textMuted; font.pixelSize: Metrics.px(12) }
                     }
                     Row2 {
                         label: qsTr("Input volume")
@@ -176,7 +277,7 @@ Dialog {
                             onMoved: App.setAudio("input_volume", value / 100)
                             Accessible.name: qsTr("Input volume")
                         }
-                        Text { text: Math.round(inVol.value) + "%"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                        Text { text: Math.round(inVol.value) + "%"; color: Theme.textMuted; font.pixelSize: Metrics.px(12) }
                     }
                     Row2 {
                         label: qsTr("Output volume")
@@ -190,7 +291,7 @@ Dialog {
                             onMoved: App.setAudio("output_volume", value / 100)
                             Accessible.name: qsTr("Output volume")
                         }
-                        Text { text: Math.round(outVol.value) + "%"; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                        Text { text: Math.round(outVol.value) + "%"; color: Theme.textMuted; font.pixelSize: Metrics.px(12) }
                     }
                     Row2 {
                         label: qsTr("Voice bitrate")
@@ -225,8 +326,8 @@ Dialog {
                     Text {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        color: Theme.textFaint
-                        font.pixelSize: Theme.px(11)
+                        color: Theme.textMuted
+                        font.pixelSize: Metrics.px(11)
                         text: qsTr("Echo cancellation: use PipeWire's echo-cancel module and select its source above.")
                     }
                 }
@@ -234,7 +335,7 @@ Dialog {
 
             // ------------------------------------------ screen sharing
             ColumnLayout {
-                spacing: Theme.px(12)
+                spacing: Metrics.px(12)
                 Row2 {
                     label: qsTr("Resolution")
                     Combo {
@@ -283,8 +384,8 @@ Dialog {
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    color: Theme.textMuted
+                    font.pixelSize: Metrics.px(11)
                     text: qsTr("Opt in to share sound. It captures every other program's playback, even when you share one window; never OmaChat itself, so the "
                                + "call is not echoed back. Changes apply the next time you share. Automatic tries your GPU first and falls back to the CPU. "
                                + "Only the people in your voice channel who choose to watch receive your screen.")
@@ -294,7 +395,7 @@ Dialog {
 
             // ------------------------------------------- notifications
             ColumnLayout {
-                spacing: Theme.px(10)
+                spacing: Metrics.px(10)
                 Toggle {
                     text: qsTr("Direct messages")
                     checked: App.notificationSettings.messages === true
@@ -313,8 +414,8 @@ Dialog {
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    color: Theme.textMuted
+                    font.pixelSize: Metrics.px(11)
                     text: qsTr("Notifications are silenced while your status is Do not disturb, for muted channels, "
                                + "and for the channel you are currently reading.")
                 }
@@ -323,14 +424,15 @@ Dialog {
 
             // -------------------------------------------------- account
             ScrollView {
+                Layout.minimumHeight: 0
                 clip: true
                 ColumnLayout {
-                width: dialog.availableWidth - Theme.px(12)
-                spacing: Theme.px(10)
-                Text { text: qsTr("Profile"); color: Theme.text; font.pixelSize: Theme.px(14); font.bold: true }
+                width: dialog.availableWidth - Metrics.px(12)
+                spacing: Metrics.px(10)
+                Text { text: qsTr("Profile"); color: Theme.text; font.pixelSize: Metrics.px(14); font.bold: true }
                 RowLayout {
-                    Avatar { userId: App.selfId; name: App.selfName; avatarUrl: App.selfAvatarUrl; size: Theme.px(48) }
-                    Text { text: "@" + App.selfUsername; color: Theme.textMuted; font.pixelSize: Theme.px(12) }
+                    Avatar { userId: App.selfId; name: App.selfName; avatarUrl: App.selfAvatarUrl; size: Metrics.px(48) }
+                    Text { text: "@" + App.selfUsername; color: Theme.textMuted; font.pixelSize: Metrics.px(12) }
                 }
                 Field {
                     id: profileName
@@ -345,20 +447,20 @@ Dialog {
                     placeholder: qsTr("https://example.com/avatar.png")
                     hint: qsTr("External images are loaded from this address by people who can see your profile.")
                 }
-                Text { text: qsTr("Bio"); color: Theme.textMuted; font.pixelSize: Theme.px(11); font.bold: true }
+                Text { text: qsTr("Bio"); color: Theme.textMuted; font.pixelSize: Metrics.px(11); font.bold: true }
                 TextArea {
                     id: profileBio
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Theme.px(76)
+                    Layout.preferredHeight: Metrics.px(76)
                     wrapMode: TextEdit.Wrap
                     color: Theme.text
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                     placeholderText: qsTr("A little about you")
-                    background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: Theme.px(4) }
+                    background: Rectangle { color: Theme.surfaceAlt; border.color: Theme.border; radius: Metrics.px(4) }
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    Text { text: profileBio.length + "/300"; color: profileBio.length > 300 ? Theme.danger : Theme.textFaint; font.pixelSize: Theme.px(11); Layout.fillWidth: true }
+                    Text { text: profileBio.length + "/300"; color: profileBio.length > 300 ? Theme.danger : Theme.textMuted; font.pixelSize: Metrics.px(11); Layout.fillWidth: true }
                     FlatButton {
                         text: qsTr("Save profile")
                         enabled: App.capabilities.indexOf("profile.v1") >= 0
@@ -370,17 +472,17 @@ Dialog {
                 Text {
                     text: qsTr("Signed in as %1 (@%2)").arg(App.selfName).arg(App.selfUsername)
                     color: Theme.text
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                 }
                 Text {
                     text: qsTr("Server: %1:%2 · %3").arg(App.accountHost).arg(App.accountPort).arg(App.instanceName)
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                 }
                 Text {
                     text: qsTr("OmaChat %1").arg(App.version)
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    color: Theme.textMuted
+                    font.pixelSize: Metrics.px(11)
                 }
 
                 Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
@@ -388,7 +490,7 @@ Dialog {
                 Text {
                     text: qsTr("Sign-in methods")
                     color: Theme.text
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                     font.bold: true
                 }
 
@@ -405,11 +507,11 @@ Dialog {
                         required property var modelData
                         readonly property var identity: App.oauthIdentities.find(i => i.provider === providerRow.modelData.key)
                         Layout.fillWidth: true
-                        spacing: Theme.px(8)
+                        spacing: Metrics.px(8)
                         Text {
                             Layout.fillWidth: true
                             color: Theme.text
-                            font.pixelSize: Theme.px(13)
+                            font.pixelSize: Metrics.px(13)
                             text: providerRow.identity ? qsTr("%1 — linked as %2").arg(providerRow.modelData.label).arg(providerRow.identity.username)
                                            : providerRow.modelData.label
                         }
@@ -428,20 +530,20 @@ Dialog {
                     visible: App.oauthLinkMessage.length > 0
                     wrapMode: Text.Wrap
                     color: App.oauthLinkError ? Theme.danger : Theme.textMuted
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     text: App.oauthLinkMessage
                 }
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    color: Theme.textMuted
+                    font.pixelSize: Metrics.px(11)
                     text: qsTr("Linking opens your browser to sign in with that provider, then confirms it here. "
                                + "You can't unlink your last sign-in method without a password set.")
                 }
 
                 RowLayout {
-                    spacing: Theme.px(8)
+                    spacing: Metrics.px(8)
                     FlatButton {
                         danger: true
                         text: qsTr("Log out")

@@ -24,11 +24,11 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(14)
+        spacing: Metrics.px(14)
         Text {
             text: dialog.title
             color: Theme.text
-            font.pixelSize: Theme.px(16)
+            font.pixelSize: Metrics.px(16)
             font.bold: true
         }
         Field {
@@ -40,7 +40,7 @@ Dialog {
         }
         RowLayout {
             Layout.alignment: Qt.AlignRight
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             FlatButton { text: qsTr("Cancel"); onClicked: dialog.close() }
             FlatButton {
                 primary: true

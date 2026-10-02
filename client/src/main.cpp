@@ -27,8 +27,6 @@ int main(int argc, char** argv)
 
     QString configError;
     const auto config = config::ClientConfig::load(paths::configFile(), &configError);
-    if (config.ui.scale != 1.0 && !qEnvironmentVariableIsSet("QT_SCALE_FACTOR"))
-        qputenv("QT_SCALE_FACTOR", QByteArray::number(config.ui.scale));
 
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("omachat"));
@@ -61,7 +59,8 @@ int main(int argc, char** argv)
 
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
-    client::ThemeProvider theme;
+    client::ThemeProvider theme(nullptr);
+    theme.setScale(config.ui.scale);
     theme.setReducedMotion(config.ui.reducedMotion);
     client::AppController controller(config);
 
@@ -110,13 +109,26 @@ int main(int argc, char** argv)
                 ? qEnvironmentVariableIntValue("OMACHAT_SCREENSHOT_DELAY_MS")
                 : 2500,
             window, [window, path] {
-                const QImage frame = window->grabWindow();
-                if (frame.isNull() || !frame.save(path)) {
-                    std::fprintf(stderr, "omachat: could not save GUI screenshot\n");
-                    QCoreApplication::exit(1);
-                    return;
+                auto capture = [window, path] {
+                    const QImage frame = window->grabWindow();
+                    if (frame.isNull() || !frame.save(path)) {
+                        std::fprintf(stderr, "omachat: could not save GUI screenshot\n");
+                        QCoreApplication::exit(1);
+                        return;
+                    }
+                    QCoreApplication::quit();
+                };
+                if (qEnvironmentVariableIsSet("OMACHAT_SCREENSHOT_SETTINGS")) {
+                    auto* settings = window->findChild<QObject*>(QStringLiteral("settingsDialog"));
+                    if (!settings || !QMetaObject::invokeMethod(settings, "open")) {
+                        std::fprintf(stderr, "omachat: settings screenshot requires a connected sandbox account\n");
+                        QCoreApplication::exit(1);
+                        return;
+                    }
+                    QTimer::singleShot(client::ThemeProvider::instance()->animationMs() + 150, window, capture);
+                } else {
+                    capture();
                 }
-                QCoreApplication::quit();
             });
     }
     return app.exec();

@@ -54,15 +54,15 @@ Item {
         RowLayout {
             visible: root.dayStart
             Layout.fillWidth: true
-            Layout.topMargin: Theme.px(12)
-            Layout.bottomMargin: Theme.px(4)
-            Layout.leftMargin: Theme.px(16)
-            Layout.rightMargin: Theme.px(16)
+            Layout.topMargin: Metrics.px(12)
+            Layout.bottomMargin: Metrics.px(4)
+            Layout.leftMargin: Metrics.px(16)
+            Layout.rightMargin: Metrics.px(16)
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
             Text {
                 text: root.dayText
-                color: Theme.textFaint
-                font.pixelSize: Theme.px(11)
+                color: Theme.textMuted
+                font.pixelSize: Metrics.px(11)
                 font.bold: true
             }
             Rectangle { Layout.fillWidth: true; height: 1; color: Theme.border }
@@ -70,25 +70,25 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.topMargin: root.groupStart ? Theme.px(10) : 0
-            implicitHeight: body.implicitHeight + Theme.px(root.groupStart ? 6 : 3)
+            Layout.topMargin: root.groupStart ? Metrics.px(10) : 0
+            implicitHeight: body.implicitHeight + Metrics.px(root.groupStart ? 6 : 3)
             color: root.searchMatch ? Theme.selection
                  : root.editing ? Theme.selection
                  : root.mentionsMe ? Qt.rgba(Theme.mention.r, Theme.mention.g, Theme.mention.b, 0.10)
                  : (root.hovered ? Theme.surface : "transparent")
-            border.width: root.keyboardCurrent ? Theme.px(2) : 0
+            border.width: root.keyboardCurrent ? Metrics.px(2) : 0
             border.color: Theme.accent
 
             Rectangle {
                 visible: root.searchMatch
-                width: Theme.px(3)
+                width: Metrics.px(3)
                 height: parent.height
                 color: Theme.accent
             }
 
             Rectangle {
                 visible: root.mentionsMe
-                width: Theme.px(2)
+                width: Metrics.px(2)
                 height: parent.height
                 color: Theme.mention
             }
@@ -98,62 +98,62 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.topMargin: Theme.px(2)
-                anchors.leftMargin: Theme.px(16)
-                anchors.rightMargin: Theme.px(16)
-                spacing: Theme.px(2)
+                anchors.topMargin: Metrics.px(2)
+                anchors.leftMargin: Metrics.px(16)
+                anchors.rightMargin: Metrics.px(16)
+                spacing: Metrics.px(2)
 
                 // Reply reference
                 RowLayout {
                     visible: root.replyTo.length > 0
-                    Layout.leftMargin: Theme.px(46)
-                    spacing: Theme.px(6)
-                    Icon { name: "reply"; size: Theme.px(12); color: Theme.textFaint }
+                    Layout.leftMargin: Metrics.px(46)
+                    spacing: Metrics.px(6)
+                    Icon { name: "reply"; size: Metrics.px(12); color: Theme.textMuted }
                     Text {
                         Layout.fillWidth: true
                         text: root.replyPreview
                         color: Theme.textMuted
-                        font.pixelSize: Theme.px(12)
+                        font.pixelSize: Metrics.px(12)
                         elide: Text.ElideRight
                     }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: Theme.px(10)
+                    spacing: Metrics.px(10)
 
                     // Avatar column (fixed width keeps grouped text aligned)
                     Item {
                         Layout.alignment: Qt.AlignTop
-                        implicitWidth: Theme.px(36)
-                        implicitHeight: root.groupStart ? Theme.px(36) : Theme.px(18)
+                        implicitWidth: Metrics.px(36)
+                        implicitHeight: root.groupStart ? Metrics.px(36) : Metrics.px(18)
                         Avatar {
                             visible: root.groupStart
                             userId: root.authorId
                             name: root.authorName
-                            size: Theme.px(36)
+                            size: Metrics.px(36)
                         }
                         Text {
                             visible: !root.groupStart && root.hovered
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             text: root.timeText
-                            color: Theme.textFaint
-                            font.pixelSize: Theme.px(10)
+                            color: Theme.textMuted
+                            font.pixelSize: Metrics.px(10)
                         }
                     }
 
                     ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: Theme.px(2)
+                        spacing: Metrics.px(2)
 
                         RowLayout {
                             visible: root.groupStart
-                            spacing: Theme.px(8)
+                            spacing: Metrics.px(8)
                             Text {
                                 text: root.authorName
                                 color: root.authorColor
-                                font.pixelSize: Theme.px(14)
+                                font.pixelSize: Metrics.px(14)
                                 font.bold: true
                                 MouseArea {
                                     anchors.fill: parent
@@ -164,14 +164,14 @@ Item {
                             }
                             Text {
                                 text: root.timeText
-                                color: Theme.textFaint
-                                font.pixelSize: Theme.px(11)
+                                color: Theme.textMuted
+                                font.pixelSize: Metrics.px(11)
                             }
                             Icon {
                                 // Decrypted, but the sending device is not one we know for this person.
                                 visible: root.e2e === "unverified"
                                 name: "alert"
-                                size: Theme.px(13)
+                                size: Metrics.px(13)
                                 color: Theme.warning
                                 HoverHandler { id: unverifiedHover }
                                 ToolTip.visible: unverifiedHover.hovered
@@ -183,9 +183,9 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: qsTr("🔒 Encrypted for other devices. This device joined after the message was sent, or its key was lost.")
-                            color: Theme.textFaint
+                            color: Theme.textMuted
                             font.italic: true
-                            font.pixelSize: Theme.px(13)
+                            font.pixelSize: Metrics.px(13)
                         }
 
                         TextEdit {
@@ -201,7 +201,7 @@ Item {
                             color: Theme.text
                             selectionColor: Theme.accent
                             selectedTextColor: Theme.accentText
-                            font.pixelSize: Theme.px(14)
+                            font.pixelSize: Metrics.px(14)
                             onLinkActivated: link => App.openLink(link)
                             Accessible.ignored: true
 
@@ -218,14 +218,14 @@ Item {
                         Flow {
                             visible: root.attachments && root.attachments.length > 0
                             Layout.fillWidth: true
-                            Layout.topMargin: Theme.px(2)
-                            spacing: Theme.px(6)
+                            Layout.topMargin: Metrics.px(2)
+                            spacing: Metrics.px(6)
                             Repeater {
                                 model: root.attachments
                                 delegate: AttachmentView {
                                     required property var modelData
                                     attachment: modelData
-                                    maxWidth: body.width - Theme.px(46)
+                                    maxWidth: body.width - Metrics.px(46)
                                 }
                             }
                         }
@@ -233,15 +233,15 @@ Item {
                         Text {
                             visible: root.edited
                             text: qsTr("(edited)")
-                            color: Theme.textFaint
-                            font.pixelSize: Theme.px(10)
+                            color: Theme.textMuted
+                            font.pixelSize: Metrics.px(10)
                         }
 
                         // Reactions
                         Flow {
                             visible: root.reactions && root.reactions.length > 0
                             Layout.fillWidth: true
-                            spacing: Theme.px(4)
+                            spacing: Metrics.px(4)
                             Repeater {
                                 model: root.reactions
                                 delegate: Rectangle {
@@ -252,21 +252,21 @@ Item {
                                     readonly property var custom: isCustom
                                         ? App.customEmojiByName(modelData.emoji.slice(1, -1)) : ({})
                                     readonly property bool hasCustomImage: isCustom && custom && custom.attachment_id
-                                    implicitHeight: Theme.px(24)
-                                    implicitWidth: rrow.implicitWidth + Theme.px(14)
-                                    radius: Theme.px(6)
+                                    implicitHeight: Metrics.px(24)
+                                    implicitWidth: rrow.implicitWidth + Metrics.px(14)
+                                    radius: Metrics.px(6)
                                     color: modelData.me ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18) : Theme.surface
                                     border.color: modelData.me ? Theme.accent : Theme.border
                                     Component.onCompleted: if (hasCustomImage) App.requestMedia(custom.attachment_id, custom.name)
                                     Row {
                                         id: rrow
                                         anchors.centerIn: parent
-                                        spacing: Theme.px(4)
+                                        spacing: Metrics.px(4)
                                         Image {
                                             visible: pill.hasCustomImage
                                             anchors.verticalCenter: parent.verticalCenter
-                                            width: Theme.px(16)
-                                            height: Theme.px(16)
+                                            width: Metrics.px(16)
+                                            height: Metrics.px(16)
                                             fillMode: Image.PreserveAspectFit
                                             source: pill.hasCustomImage ? (App.previews[pill.custom.attachment_id] || "") : ""
                                         }
@@ -274,7 +274,7 @@ Item {
                                             anchors.verticalCenter: parent.verticalCenter
                                             text: (pill.hasCustomImage ? "" : pill.modelData.emoji + " ") + pill.modelData.count
                                             color: Theme.text
-                                            font.pixelSize: Theme.px(12)
+                                            font.pixelSize: Metrics.px(12)
                                         }
                                     }
                                     MouseArea {
@@ -297,12 +297,12 @@ Item {
                 readonly property bool hovered: actionsHover.hovered
                 visible: root.hovered && !root.editing
                 anchors.right: parent.right
-                anchors.rightMargin: Theme.px(16)
+                anchors.rightMargin: Metrics.px(16)
                 anchors.top: parent.top
-                anchors.topMargin: -Theme.px(14)
-                implicitWidth: actionRow.implicitWidth + Theme.px(4)
-                implicitHeight: Theme.px(30)
-                radius: Theme.px(6)
+                anchors.topMargin: -Metrics.px(14)
+                implicitWidth: actionRow.implicitWidth + Metrics.px(4)
+                implicitHeight: Metrics.px(30)
+                radius: Metrics.px(6)
                 color: Theme.raised
                 border.color: Theme.border
                 z: 5
@@ -311,14 +311,14 @@ Item {
                     id: actionRow
                     anchors.centerIn: parent
                     IconButton {
-                        implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15)
+                        implicitWidth: Metrics.px(28); implicitHeight: Metrics.px(26); iconSize: Metrics.px(15)
                         iconName: "smile"; tip: qsTr("Add reaction")
                         onClicked: reactionPicker.open()
                     }
-                    IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "reply"; tip: qsTr("Reply"); visible: App.canSend; onClicked: App.startReply(root.messageId) }
-                    IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "edit"; tip: qsTr("Edit"); visible: root.isOwn; onClicked: root.editRequested(root.messageId) }
-                    IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "copy"; tip: qsTr("Copy text"); onClicked: App.copyText(root.content) }
-                    IconButton { implicitWidth: Theme.px(28); implicitHeight: Theme.px(26); iconSize: Theme.px(15); iconName: "trash"; tip: qsTr("Delete"); danger: true; visible: root.canDelete; onClicked: root.ListView.view.confirmDelete(root.messageId) }
+                    IconButton { implicitWidth: Metrics.px(28); implicitHeight: Metrics.px(26); iconSize: Metrics.px(15); iconName: "reply"; tip: qsTr("Reply"); visible: App.canSend; onClicked: App.startReply(root.messageId) }
+                    IconButton { implicitWidth: Metrics.px(28); implicitHeight: Metrics.px(26); iconSize: Metrics.px(15); iconName: "edit"; tip: qsTr("Edit"); visible: root.isOwn; onClicked: root.editRequested(root.messageId) }
+                    IconButton { implicitWidth: Metrics.px(28); implicitHeight: Metrics.px(26); iconSize: Metrics.px(15); iconName: "copy"; tip: qsTr("Copy text"); onClicked: App.copyText(root.content) }
+                    IconButton { implicitWidth: Metrics.px(28); implicitHeight: Metrics.px(26); iconSize: Metrics.px(15); iconName: "trash"; tip: qsTr("Delete"); danger: true; visible: root.canDelete; onClicked: root.ListView.view.confirmDelete(root.messageId) }
                 }
             }
 
@@ -332,7 +332,7 @@ Item {
             EmojiPicker {
                 id: reactionPicker
                 x: parent.width - width
-                y: -height - Theme.px(4)
+                y: -height - Metrics.px(4)
                 onEmojiSelected: glyph => App.toggleReaction(root.messageId, glyph)
             }
         }

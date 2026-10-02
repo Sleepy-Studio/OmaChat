@@ -10,8 +10,8 @@ Dialog {
     property url iconFile
     property url bannerFile
     title: qsTr("Create channel")
-    width: Math.min(Theme.px(500), (parent ? parent.width : 800) - Theme.px(40))
-    height: Math.min(Theme.px(700), (parent ? parent.height : 800) - Theme.px(40))
+    width: Math.min(Metrics.px(500), (parent ? parent.width : 800) - Metrics.px(40))
+    height: Math.min(Metrics.px(700), (parent ? parent.height : 800) - Metrics.px(40))
 
     onAboutToShow: {
         nameField.text = ""
@@ -54,22 +54,22 @@ Dialog {
         property string hint
         Layout.fillWidth: true
         contentItem: Column {
-            leftPadding: option.indicator.width + Theme.px(8)
-            Text { text: option.text; color: Theme.text; font.pixelSize: Theme.px(14) }
-            Text { text: option.hint; color: Theme.textFaint; font.pixelSize: Theme.px(11) }
+            leftPadding: option.indicator.width + Metrics.px(8)
+            Text { text: option.text; color: Theme.text; font.pixelSize: Metrics.px(14) }
+            Text { text: option.hint; color: Theme.textFaint; font.pixelSize: Metrics.px(11) }
         }
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(10)
-        Text { text: dialog.title; color: Theme.text; font.pixelSize: Theme.px(16); font.bold: true }
+        spacing: Metrics.px(10)
+        Text { text: dialog.title; color: Theme.text; font.pixelSize: Metrics.px(16); font.bold: true }
         ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
             ColumnLayout {
                 width: parent.width
-                spacing: Theme.px(10)
+                spacing: Metrics.px(10)
                 TypeOption { id: textType; text: qsTr("Text"); hint: qsTr("Messages, links and code"); checked: true }
                 TypeOption { id: voiceType; text: qsTr("Voice"); hint: qsTr("Low-latency voice chat") }
                 TypeOption { id: categoryType; text: qsTr("Category"); hint: qsTr("Groups channels together") }
@@ -97,18 +97,18 @@ Dialog {
                     hint: qsTr("Short summary shown in the header")
                     input.maximumLength: 512
                 }
-                Text { text: qsTr("DESCRIPTION"); color: Theme.textMuted; font.pixelSize: Theme.px(11); font.bold: true }
+                Text { text: qsTr("DESCRIPTION"); color: Theme.textMuted; font.pixelSize: Metrics.px(11); font.bold: true }
                 TextArea {
                     id: descriptionField
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Theme.px(100)
+                    Layout.preferredHeight: Metrics.px(100)
                     wrapMode: TextEdit.Wrap
                     color: Theme.text
                     placeholderText: qsTr("What is this channel for?")
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                     background: Rectangle {
                         color: Theme.surfaceAlt
-                        radius: Theme.px(4)
+                        radius: Metrics.px(4)
                         border.color: descriptionField.activeFocus ? Theme.accent : Theme.border
                     }
                     Accessible.name: qsTr("Channel description")
@@ -117,7 +117,7 @@ Dialog {
                     Layout.alignment: Qt.AlignRight
                     text: descriptionField.length + "/2000"
                     color: descriptionField.length > 2000 ? Theme.danger : Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    font.pixelSize: Metrics.px(11)
                 }
                 RowLayout {
                     FlatButton { text: qsTr("Choose icon…"); onClicked: { artworkPicker.kind = "icon"; artworkPicker.open() } }
@@ -134,13 +134,13 @@ Dialog {
                     text: qsTr("Access follows this server's roles and channel permissions. Review it in Channel permissions after creation.")
                     wrapMode: Text.Wrap
                     color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    font.pixelSize: Metrics.px(11)
                 }
             }
         }
         RowLayout {
             Layout.alignment: Qt.AlignRight
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             FlatButton { text: qsTr("Cancel"); onClicked: dialog.close() }
             FlatButton {
                 primary: true

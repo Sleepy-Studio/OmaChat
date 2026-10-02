@@ -11,7 +11,7 @@ Rectangle {
     ListView {
         id: list
         anchors.fill: parent
-        anchors.topMargin: Theme.px(8)
+        anchors.topMargin: Metrics.px(8)
         model: App.members
         clip: true
         boundsBehavior: Flickable.StopAtBounds
@@ -25,9 +25,9 @@ Rectangle {
         section.delegate: SectionLabel {
             required property string section
             width: ListView.view.width
-            leftPadding: Theme.px(16)
-            topPadding: Theme.px(12)
-            bottomPadding: Theme.px(4)
+            leftPadding: Metrics.px(16)
+            topPadding: Metrics.px(12)
+            bottomPadding: Metrics.px(4)
             text: section.toUpperCase()
         }
 
@@ -44,10 +44,10 @@ Rectangle {
             required property bool speaking
             required property int index
 
-            width: ListView.view.width - Theme.px(12)
-            x: Theme.px(6)
-            height: Theme.px(40)
-            radius: Theme.px(4)
+            width: ListView.view.width - Metrics.px(12)
+            x: Metrics.px(6)
+            height: Metrics.px(40)
+            radius: Metrics.px(4)
             color: area.containsMouse ? Theme.raised : "transparent"
             border.width: list.activeFocus && list.currentIndex === index ? 2 : 0
             border.color: Theme.accent
@@ -59,26 +59,26 @@ Rectangle {
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(8)
-                anchors.rightMargin: Theme.px(8)
-                spacing: Theme.px(10)
+                anchors.leftMargin: Metrics.px(8)
+                anchors.rightMargin: Metrics.px(8)
+                spacing: Metrics.px(10)
                 Avatar {
                     userId: row.userId
                     name: row.name
                     avatarUrl: row.avatarUrl
                     status: row.status
                     speaking: row.speaking
-                    size: Theme.px(30)
+                    size: Metrics.px(30)
                 }
                 Text {
                     Layout.fillWidth: true
                     text: row.name
                     color: row.nameColor
-                    font.pixelSize: Theme.px(14)
+                    font.pixelSize: Metrics.px(14)
                     elide: Text.ElideRight
                 }
-                Icon { visible: row.isOwner; name: "crown"; size: Theme.px(13); color: Theme.warning }
-                Icon { visible: row.inVoice; name: "speaker"; size: Theme.px(13); color: row.speaking ? Theme.success : Theme.textFaint }
+                Icon { visible: row.isOwner; name: "crown"; size: Metrics.px(13); color: Theme.warning }
+                Icon { visible: row.inVoice; name: "speaker"; size: Metrics.px(13); color: row.speaking ? Theme.success : Theme.textFaint }
             }
 
             MouseArea {
@@ -137,12 +137,12 @@ Rectangle {
             return App.userProfile(userId)
         }
         title: qsTr("Profile")
-        width: Math.min(Theme.px(380), (parent ? parent.width : 420) - Theme.px(32))
+        width: Math.min(Metrics.px(380), (parent ? parent.width : 420) - Metrics.px(32))
         contentItem: ColumnLayout {
-            spacing: Theme.px(12)
+            spacing: Metrics.px(12)
             RowLayout {
                 Layout.fillWidth: true
-                Text { text: profileDialog.title; color: Theme.text; font.bold: true; font.pixelSize: Theme.px(16); Layout.fillWidth: true }
+                Text { text: profileDialog.title; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(16); Layout.fillWidth: true }
                 IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: profileDialog.close() }
             }
             Avatar {
@@ -150,7 +150,7 @@ Rectangle {
                 userId: profileDialog.userId
                 name: profileDialog.profile.display_name || ""
                 avatarUrl: profileDialog.profile.avatar_url || ""
-                size: Theme.px(72)
+                size: Metrics.px(72)
             }
             Text {
                 Layout.fillWidth: true
@@ -158,14 +158,14 @@ Rectangle {
                 text: profileDialog.profile.display_name || ""
                 color: Theme.text
                 font.bold: true
-                font.pixelSize: Theme.px(17)
+                font.pixelSize: Metrics.px(17)
             }
             Text {
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
                 text: "@" + (profileDialog.profile.username || "")
                 color: Theme.textMuted
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
             }
             Text {
                 Layout.fillWidth: true
@@ -174,7 +174,7 @@ Rectangle {
                     : profileDialog.profile.status === "idle" ? qsTr("Idle")
                     : profileDialog.profile.status === "online" ? qsTr("Online") : qsTr("Offline")
                 color: Theme.textMuted
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
             }
             Text {
                 Layout.fillWidth: true
@@ -182,7 +182,7 @@ Rectangle {
                 color: profileDialog.profile.bio ? Theme.text : Theme.textFaint
                 wrapMode: Text.Wrap
                 textFormat: Text.PlainText
-                font.pixelSize: Theme.px(13)
+                font.pixelSize: Metrics.px(13)
             }
             FlatButton {
                 Layout.alignment: Qt.AlignHCenter

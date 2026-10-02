@@ -4,6 +4,7 @@
 #include "controllers/AppController.hpp"
 
 #include "text/CommandParser.hpp"
+#include "platform/ThemeProvider.hpp"
 
 #include <QClipboard>
 #include <QDateTime>
@@ -1227,6 +1228,31 @@ void AppController::setAudio(const QString& key, const QVariant& value)
         m_audioSettings = r.result.toVariantMap();
         emit audioChanged();
     });
+}
+
+void AppController::setUi(double scale, bool reducedMotion)
+{
+    if (m_uiSaving)
+        return;
+    m_uiSaving = true;
+    m_uiSaveFailed = false;
+    m_uiSaveStatus = tr("Saving appearance…");
+    emit configChanged();
+    m_link.request(QStringLiteral("config.set_ui"),
+        {{"scale", scale}, {"reduced_motion", reducedMotion}}, [this](const ipc::Reply& r) {
+            m_uiSaving = false;
+            m_uiSaveFailed = !r.ok;
+            if (r.ok) {
+                m_config.ui.scale = r.result.value(QStringLiteral("scale")).toDouble(1.0);
+                m_config.ui.reducedMotion = r.result.value(QStringLiteral("reduced_motion")).toBool();
+                ThemeProvider::instance()->setScale(m_config.ui.scale);
+                ThemeProvider::instance()->setReducedMotion(m_config.ui.reducedMotion);
+                m_uiSaveStatus = tr("Appearance saved");
+            } else {
+                m_uiSaveStatus = tr("Could not save appearance: %1").arg(r.errorMessage);
+            }
+            emit configChanged();
+        });
 }
 
 void AppController::setNotification(const QString& key, bool enabled)

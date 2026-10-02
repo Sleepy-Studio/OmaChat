@@ -8,7 +8,7 @@ Item {
     id: root
 
     property var attachment: ({})
-    property real maxWidth: Theme.px(400)
+    property real maxWidth: Metrics.px(400)
 
     readonly property bool isImage: String(attachment.mime_type).startsWith("image/")
                                     && attachment.size <= 10 * 1024 * 1024
@@ -39,10 +39,10 @@ Item {
         readonly property real naturalHeight: root.isGif ? gif.implicitHeight : image.implicitHeight
         readonly property int imageStatus: root.isGif ? gif.status : image.status
         readonly property real aspect: naturalHeight > 0 ? naturalWidth / naturalHeight : 4 / 3
-        width: Math.min(Theme.px(400), root.maxWidth, Theme.px(300) * aspect,
-                        imageStatus === Image.Ready ? naturalWidth : Theme.px(240))
+        width: Math.min(Metrics.px(400), root.maxWidth, Metrics.px(300) * aspect,
+                        imageStatus === Image.Ready ? naturalWidth : Metrics.px(240))
         height: width / aspect
-        radius: Theme.px(6)
+        radius: Metrics.px(6)
         color: Theme.surface
         clip: true
 
@@ -55,7 +55,7 @@ Item {
             fillMode: Image.PreserveAspectFit
             // A single source dimension bounds the decode without changing
             // the image's aspect ratio.
-            sourceSize.width: Theme.px(800)
+            sourceSize.width: Metrics.px(800)
         }
 
         AnimatedImage {
@@ -68,17 +68,17 @@ Item {
             fillMode: Image.PreserveAspectFit
             // Qt scales GIF frames to sourceSize before PreserveAspectFit.
             // Setting both dimensions would force every GIF to 4:3.
-            sourceSize.width: Theme.px(800)
+            sourceSize.width: Metrics.px(800)
         }
 
         Text {
             anchors.centerIn: parent
             visible: imageBox.imageStatus !== Image.Ready
-            width: parent.width - Theme.px(16)
+            width: parent.width - Metrics.px(16)
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideMiddle
             color: Theme.textFaint
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
             text: imageBox.imageStatus === Image.Error ? qsTr("Cannot show %1").arg(root.attachment.filename)
                                                : root.attachment.filename
         }
@@ -117,9 +117,9 @@ Item {
     Rectangle {
         id: card
         visible: !root.isImage && !root.isMedia
-        width: Math.min(Theme.px(360), root.maxWidth)
-        height: Theme.px(52)
-        radius: Theme.px(6)
+        width: Math.min(Metrics.px(360), root.maxWidth)
+        height: Metrics.px(52)
+        radius: Metrics.px(6)
         color: cardHover.hovered ? Theme.surfaceAlt : Theme.surface
         border.color: Theme.border
 
@@ -128,28 +128,28 @@ Item {
         Icon {
             id: fileIcon
             anchors.left: parent.left
-            anchors.leftMargin: Theme.px(12)
+            anchors.leftMargin: Metrics.px(12)
             anchors.verticalCenter: parent.verticalCenter
             name: root.isAudio ? "speaker" : "file"
-            size: Theme.px(24)
+            size: Metrics.px(24)
         }
         Column {
             anchors.left: fileIcon.right
-            anchors.leftMargin: Theme.px(10)
+            anchors.leftMargin: Metrics.px(10)
             anchors.right: save.left
-            anchors.rightMargin: Theme.px(6)
+            anchors.rightMargin: Metrics.px(6)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.px(2)
+            spacing: Metrics.px(2)
             Text {
                 width: parent.width
                 elide: Text.ElideMiddle
                 color: Theme.accent
-                font.pixelSize: Theme.px(14)
+                font.pixelSize: Metrics.px(14)
                 text: root.attachment.filename
             }
             Text {
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(11)
+                font.pixelSize: Metrics.px(11)
                 text: App.formatSize(root.attachment.size)
             }
         }
@@ -161,7 +161,7 @@ Item {
         IconButton {
             id: save
             anchors.right: parent.right
-            anchors.rightMargin: Theme.px(8)
+            anchors.rightMargin: Metrics.px(8)
             anchors.verticalCenter: parent.verticalCenter
             iconName: "download"
             tip: qsTr("Save to Downloads")

@@ -15,16 +15,16 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.topMargin: Theme.px(8)
-        anchors.bottomMargin: Theme.px(8)
-        spacing: Theme.px(6)
+        anchors.topMargin: Metrics.px(8)
+        anchors.bottomMargin: Metrics.px(8)
+        spacing: Metrics.px(6)
 
         ListView {
             id: list
             Layout.fillWidth: true
             Layout.fillHeight: true
             model: App.servers
-            spacing: Theme.px(6)
+            spacing: Metrics.px(6)
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             keyNavigationEnabled: true
@@ -55,7 +55,7 @@ Rectangle {
                 }
 
                 width: ListView.view.width
-                height: Theme.px(44)
+                height: Metrics.px(44)
 
                 Accessible.role: Accessible.PageTab
                 Accessible.name: name + (mentions > 0 ? qsTr(", %n mention(s)", "", mentions) : unread ? qsTr(", unread") : "")
@@ -65,8 +65,8 @@ Rectangle {
                 Rectangle {
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Theme.px(4)
-                    height: entry.selected ? Theme.px(32) : (entry.unread ? Theme.px(8) : 0)
+                    width: Metrics.px(4)
+                    height: entry.selected ? Metrics.px(32) : (entry.unread ? Metrics.px(8) : 0)
                     radius: width / 2
                     color: Theme.text
                     Behavior on height { NumberAnimation { duration: Theme.animationMs } }
@@ -75,9 +75,9 @@ Rectangle {
                 Rectangle {
                     id: tile
                     anchors.centerIn: parent
-                    width: Theme.px(42)
-                    height: Theme.px(42)
-                    radius: entry.selected || area.containsMouse ? Theme.px(12) : width / 2
+                    width: Metrics.px(42)
+                    height: Metrics.px(42)
+                    radius: entry.selected || area.containsMouse ? Metrics.px(12) : width / 2
                     color: entry.selected ? Theme.accent : (area.containsMouse ? Theme.raised : Theme.surface)
                     border.width: list.activeFocus && list.currentIndex === entry.index ? 2 : 0
                     border.color: Theme.text
@@ -88,7 +88,7 @@ Rectangle {
                         anchors.centerIn: parent
                         visible: entry.isHome
                         name: "message"
-                        size: Theme.px(20)
+                        size: Metrics.px(20)
                         color: entry.selected ? Theme.accentText : Theme.text
                     }
                     Rectangle {
@@ -122,16 +122,16 @@ Rectangle {
                         visible: !entry.isHome && !serverIcon.visible
                         text: entry.initials
                         color: entry.selected ? Theme.accentText : Theme.text
-                        font.pixelSize: Theme.px(15)
+                        font.pixelSize: Metrics.px(15)
                         font.bold: true
                     }
                     Icon {
                         visible: entry.inVoice
                         anchors.right: parent.right
                         anchors.top: parent.top
-                        anchors.margins: -Theme.px(2)
+                        anchors.margins: -Metrics.px(2)
                         name: "speaker"
-                        size: Theme.px(13)
+                        size: Metrics.px(13)
                         color: Theme.success
                     }
                 }
@@ -140,8 +140,8 @@ Rectangle {
                     count: entry.mentions
                     anchors.right: tile.right
                     anchors.bottom: tile.bottom
-                    anchors.rightMargin: -Theme.px(4)
-                    anchors.bottomMargin: -Theme.px(2)
+                    anchors.rightMargin: -Metrics.px(4)
+                    anchors.bottomMargin: -Metrics.px(2)
                 }
 
                 MouseArea {
@@ -170,15 +170,15 @@ Rectangle {
 
         Rectangle {
             Layout.alignment: Qt.AlignHCenter
-            implicitWidth: Theme.px(30)
+            implicitWidth: Metrics.px(30)
             implicitHeight: 1
             color: Theme.border
         }
 
         IconButton {
             Layout.alignment: Qt.AlignHCenter
-            implicitWidth: Theme.px(42)
-            implicitHeight: Theme.px(42)
+            implicitWidth: Metrics.px(42)
+            implicitHeight: Metrics.px(42)
             iconName: "plus"
             iconColor: Theme.success
             tip: qsTr("Add a server")
@@ -188,14 +188,14 @@ Rectangle {
         // Accounts: every saved account stays connected; this picks the one shown.
         Item {
             Layout.alignment: Qt.AlignHCenter
-            Layout.bottomMargin: Theme.px(8)
-            implicitWidth: Theme.px(42)
-            implicitHeight: Theme.px(42)
+            Layout.bottomMargin: Metrics.px(8)
+            implicitWidth: Metrics.px(42)
+            implicitHeight: Metrics.px(42)
             Avatar {
                 anchors.centerIn: parent
                 userId: App.selfId
                 name: App.selfName
-                size: Theme.px(34)
+                size: Metrics.px(34)
             }
             Badge {
                 anchors.right: parent.right

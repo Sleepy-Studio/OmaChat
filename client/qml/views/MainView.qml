@@ -10,8 +10,8 @@ Item {
     id: root
 
     property bool membersRequested: true
-    readonly property bool compactChannels: width < Theme.px(850)
-    readonly property bool dockMembers: width >= Theme.px(1080) && membersRequested
+    readonly property bool compactChannels: width < Metrics.px(850)
+    readonly property bool dockMembers: width >= Metrics.px(1080) && membersRequested
 
     function openChannels() {
         if (compactChannels)
@@ -24,7 +24,7 @@ Item {
     }
 
     function toggleMembers() {
-        if (width < Theme.px(1080)) {
+        if (width < Metrics.px(1080)) {
             if (membersDrawer.opened)
                 membersDrawer.close()
             else
@@ -92,7 +92,7 @@ Item {
             ServerRail {
                 id: rail
                 Layout.fillHeight: true
-                Layout.preferredWidth: Theme.px(62)
+                Layout.preferredWidth: Metrics.px(62)
                 onCreateServer: createServerDialog.open()
                 onJoinServer: joinServerDialog.open()
             }
@@ -101,7 +101,7 @@ Item {
                 id: sidebarDock
                 active: !root.compactChannels
                 Layout.fillHeight: true
-                Layout.preferredWidth: Theme.px(236)
+                Layout.preferredWidth: Metrics.px(236)
                 visible: active
                 sourceComponent: sidebarContent
             }
@@ -140,7 +140,7 @@ Item {
 
             MemberList {
                 Layout.fillHeight: true
-                Layout.preferredWidth: Theme.px(220)
+                Layout.preferredWidth: Metrics.px(220)
                 visible: root.dockMembers
             }
         }
@@ -217,9 +217,9 @@ Item {
     Popup {
         id: channelsDrawer
         parent: Overlay.overlay
-        x: Theme.px(62)
+        x: Metrics.px(62)
         y: statusBanner.height
-        width: Math.min(Theme.px(280), root.width - x - Theme.px(24))
+        width: Math.min(Metrics.px(280), root.width - x - Metrics.px(24))
         height: root.height - y - bottomBar.height
         padding: 0
         focus: true
@@ -242,7 +242,7 @@ Item {
         parent: Overlay.overlay
         x: root.width - width
         y: statusBanner.height
-        width: Math.min(Theme.px(250), root.width - Theme.px(80))
+        width: Math.min(Metrics.px(250), root.width - Metrics.px(80))
         height: root.height - y - bottomBar.height
         padding: 0
         focus: true
@@ -253,7 +253,7 @@ Item {
         exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationMs } }
     }
     QuickSwitcher { id: switcher }
-    SettingsDialog { id: settingsDialog }
+    SettingsDialog { id: settingsDialog; objectName: "settingsDialog" }
     CommandHelp { id: commandHelp }
     SearchPanel { id: searchPanel }
     ServerSettingsDialog { id: serverSettings }

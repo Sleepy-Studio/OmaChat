@@ -48,7 +48,9 @@ class ThemeProvider : public QObject {
     Q_PROPERTY(int animationMs READ animationMs NOTIFY changed)
 
 public:
-    explicit ThemeProvider(QObject* parent = nullptr);
+    // Require an explicit parent so QML uses create(), rather than making a
+    // second default-constructed singleton that discards startup preferences.
+    explicit ThemeProvider(QObject* parent);
 
     static ThemeProvider* instance();
     static ThemeProvider* create(QQmlEngine*, QJSEngine*);
@@ -80,8 +82,6 @@ public:
     void setReducedMotion(bool r);
     int animationMs() const { return m_reducedMotion ? 0 : 120; }
 
-    // Scaled pixel helper for QML: Theme.px(8)
-    Q_INVOKABLE double px(double v) const { return v * m_scale; }
     // Deterministic per-user accent for avatars/names without role color.
     Q_INVOKABLE QColor userColor(const QString& id) const;
 

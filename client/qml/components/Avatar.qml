@@ -13,7 +13,7 @@ Item {
         return App.userProfile(userId).avatar_url || ""
     }
     property bool speaking: false
-    property real size: Theme.px(32)
+    property real size: Metrics.px(32)
 
     implicitWidth: size
     implicitHeight: size
@@ -23,7 +23,7 @@ Item {
         anchors.fill: parent
         radius: width / 2
         color: Theme.userColor(root.userId)
-        border.width: root.speaking ? Math.max(2, Theme.px(2)) : 0
+        border.width: root.speaking ? Math.max(2, Metrics.px(2)) : 0
         border.color: Theme.success
         clip: true
 
@@ -56,7 +56,7 @@ Item {
     PresenceDot {
         visible: root.status.length > 0
         status: root.status
-        size: Math.max(Theme.px(9), root.size * 0.32)
+        size: Math.max(Metrics.px(9), root.size * 0.32)
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: -1

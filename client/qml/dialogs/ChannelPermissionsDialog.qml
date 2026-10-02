@@ -12,8 +12,8 @@ Dialog {
     property string channelId
     property string channelName
     title: qsTr("Permissions for #%1").arg(channelName)
-    width: Math.min(Theme.px(700), (parent ? parent.width : 800) - Theme.px(40))
-    height: Math.min(Theme.px(580), (parent ? parent.height : 600) - Theme.px(40))
+    width: Math.min(Metrics.px(700), (parent ? parent.width : 800) - Metrics.px(40))
+    height: Math.min(Metrics.px(580), (parent ? parent.height : 600) - Metrics.px(40))
 
     // Target being edited: {targetType, targetId, name}
     property var target: null
@@ -76,50 +76,50 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(10)
+        spacing: Metrics.px(10)
 
         RowLayout {
-            Text { text: dialog.title; color: Theme.text; font.pixelSize: Theme.px(16); font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
+            Text { text: dialog.title; color: Theme.text; font.pixelSize: Metrics.px(16); font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
             IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: dialog.close() }
         }
 
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Theme.px(14)
+            spacing: Metrics.px(14)
 
             ColumnLayout {
-                Layout.preferredWidth: Theme.px(220)
+                Layout.preferredWidth: Metrics.px(220)
                 Layout.fillHeight: true
-                spacing: Theme.px(6)
+                spacing: Metrics.px(6)
 
                 ListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
                     model: App.channelOverrides
-                    spacing: Theme.px(2)
+                    spacing: Metrics.px(2)
                     delegate: Rectangle {
                         id: row
                         required property var modelData
                         width: ListView.view.width
-                        implicitHeight: Theme.px(32)
-                        radius: Theme.px(4)
+                        implicitHeight: Metrics.px(32)
+                        radius: Metrics.px(4)
                         readonly property bool current: dialog.target !== null && dialog.target.targetType === modelData.targetType
                                                         && dialog.target.targetId === modelData.targetId
                         color: current ? Theme.selection : area.containsMouse ? Theme.raised : "transparent"
                         MouseArea { id: area; anchors.fill: parent; hoverEnabled: true; onClicked: dialog.select(row.modelData) }
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: Theme.px(8)
-                            anchors.rightMargin: Theme.px(8)
-                            Icon { name: row.modelData.targetType === "user" ? "users" : "shield"; size: Theme.px(14) }
+                            anchors.leftMargin: Metrics.px(8)
+                            anchors.rightMargin: Metrics.px(8)
+                            Icon { name: row.modelData.targetType === "user" ? "users" : "shield"; size: Metrics.px(14) }
                             Text {
                                 Layout.fillWidth: true
                                 text: row.modelData.name
                                 color: Theme.text
                                 elide: Text.ElideRight
-                                font.pixelSize: Theme.px(13)
+                                font.pixelSize: Metrics.px(13)
                             }
                         }
                     }
@@ -130,17 +130,17 @@ Dialog {
                     wrapMode: Text.Wrap
                     text: qsTr("No overrides: this channel follows the server roles.")
                     color: Theme.textFaint
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                 }
                 ComboBox {
                     id: picker
                     Layout.fillWidth: true
-                    implicitHeight: Theme.px(32)
+                    implicitHeight: Metrics.px(32)
                     model: dialog.candidates
                     textRole: "label"
                     displayText: qsTr("Add a role or member…")
                     enabled: App.canManageRoles && dialog.candidates.length > 0
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                     palette.button: Theme.surfaceAlt
                     palette.buttonText: Theme.text
                     palette.window: Theme.raised
@@ -160,13 +160,13 @@ Dialog {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 visible: dialog.target !== null
-                spacing: Theme.px(8)
+                spacing: Metrics.px(8)
 
                 Text {
                     text: dialog.target ? dialog.target.name : ""
                     color: Theme.text
                     font.bold: true
-                    font.pixelSize: Theme.px(14)
+                    font.pixelSize: Metrics.px(14)
                 }
                 ScrollView {
                     Layout.fillWidth: true
@@ -174,7 +174,7 @@ Dialog {
                     clip: true
                     ColumnLayout {
                         width: parent.width
-                        spacing: Theme.px(4)
+                        spacing: Metrics.px(4)
                         Repeater {
                             // Server-wide permissions make no sense per channel.
                             model: App.permissionCatalog.filter(p => ["KICK_MEMBERS", "BAN_MEMBERS", "MANAGE_SERVER",
@@ -187,7 +187,7 @@ Dialog {
                                     Layout.fillWidth: true
                                     text: permRow.modelData.label
                                     color: Theme.text
-                                    font.pixelSize: Theme.px(13)
+                                    font.pixelSize: Metrics.px(13)
                                     elide: Text.ElideRight
                                 }
                                 TriState {

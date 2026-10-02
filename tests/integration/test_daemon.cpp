@@ -5,6 +5,7 @@
 #include "Harness.hpp"
 
 #include <QFile>
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -60,6 +61,43 @@ struct DaemonFixture : ::testing::Test {
 };
 
 } // namespace
+
+TEST_F(DaemonFixture, AppearanceSettingsValidateAndPersist)
+{
+    auto saved = alice->call(QStringLiteral("config.set_ui"), {{"scale", 1.5}, {"reduced_motion", true}});
+    ASSERT_TRUE(saved.ok) << saved.errorMessage.toStdString();
+    EXPECT_DOUBLE_EQ(saved.result.value("scale").toDouble(), 1.5);
+    EXPECT_TRUE(saved.result.value("reduced_motion").toBool());
+    const auto before = alice->call(QStringLiteral("config.get")).result;
+    for (const auto& invalid : {QJsonObject{{"scale", 4.0}}, QJsonObject{{"scale", "1.5"}},
+             QJsonObject{{"scale", 0.0}}, QJsonObject{{"scale", 1.0}, {"reduced_motion", "yes"}}}) {
+        const auto reply = alice->call(QStringLiteral("config.set_ui"), invalid);
+        EXPECT_FALSE(reply.ok);
+        EXPECT_EQ(reply.errorCode, QStringLiteral("BadRequest"));
+        EXPECT_EQ(alice->call(QStringLiteral("config.get")).result, before);
+    }
+    // Reload from disk, proving settings survived the IPC call and were saved.
+    ASSERT_TRUE(alice->call(QStringLiteral("config.reload")).ok);
+    EXPECT_EQ(alice->call(QStringLiteral("config.get")).result, before);
+    ASSERT_TRUE(alice->call(QStringLiteral("config.set_ui"), {{"reduced_motion", false}}).ok);
+    auto ui = alice->call(QStringLiteral("config.get")).result.value("ui").toObject();
+    EXPECT_DOUBLE_EQ(ui.value("scale").toDouble(), 1.5);
+    EXPECT_FALSE(ui.value("reduced_motion").toBool());
+    ASSERT_TRUE(alice->call(QStringLiteral("config.set_ui"), {{"scale", 1.0}}).ok);
+}
+
+TEST_F(DaemonFixture, AppearanceSaveFailureKeepsExistingSettings)
+{
+    const auto config = alice->call(QStringLiteral("config.get")).result;
+    const auto path = config.value("path").toString();
+    // A directory at the config pathname makes atomic replacement fail.
+    ASSERT_TRUE(QFile::remove(path) || !QFileInfo::exists(path));
+    ASSERT_TRUE(QDir().mkdir(path));
+    const auto reply = alice->call(QStringLiteral("config.set_ui"), {{"scale", 1.5}, {"reduced_motion", true}});
+    EXPECT_FALSE(reply.ok);
+    EXPECT_EQ(reply.errorCode, QStringLiteral("StorageError"));
+    EXPECT_EQ(alice->call(QStringLiteral("config.get")).result, config);
+}
 
 TEST_F(DaemonFixture, NotConfiguredStateIsExplicit)
 {

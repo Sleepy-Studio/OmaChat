@@ -162,6 +162,11 @@ void AppController::onDaemonConnected()
         m_config.notifications.messages = n.value(QStringLiteral("messages")).toBool(true);
         m_config.notifications.mentions = n.value(QStringLiteral("mentions")).toBool(true);
         m_config.notifications.voiceJoin = n.value(QStringLiteral("voice_join")).toBool(false);
+        const QJsonObject ui = r.result.value(QStringLiteral("ui")).toObject();
+        m_config.ui.scale = ui.value(QStringLiteral("scale")).toDouble(m_config.ui.scale);
+        m_config.ui.reducedMotion = ui.value(QStringLiteral("reduced_motion")).toBool(m_config.ui.reducedMotion);
+        ThemeProvider::instance()->setScale(m_config.ui.scale);
+        ThemeProvider::instance()->setReducedMotion(m_config.ui.reducedMotion);
         const QJsonObject sc = r.result.value(QStringLiteral("shortcuts")).toObject();
         for (auto it = sc.begin(); it != sc.end(); ++it)
             m_config.shortcuts.insert(it.key(), it.value().toString());

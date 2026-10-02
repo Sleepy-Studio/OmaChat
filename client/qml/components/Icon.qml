@@ -7,7 +7,7 @@ Item {
     id: root
 
     property string name
-    property real size: Theme.px(18)
+    property real size: Metrics.px(18)
     property color color: Theme.textMuted
 
     implicitWidth: size

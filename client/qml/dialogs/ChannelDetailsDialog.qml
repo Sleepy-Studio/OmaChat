@@ -9,8 +9,8 @@ Dialog {
     property var details: ({})
     signal editRequested(string channelId)
     title: details.name || qsTr("Channel details")
-    width: Math.min(Theme.px(520), (parent ? parent.width : 800) - Theme.px(40))
-    height: Math.min(Theme.px(380), (parent ? parent.height : 600) - Theme.px(40))
+    width: Math.min(Metrics.px(520), (parent ? parent.width : 800) - Metrics.px(40))
+    height: Math.min(Metrics.px(380), (parent ? parent.height : 600) - Metrics.px(40))
 
     function openFor(id) {
         channelId = id
@@ -36,10 +36,10 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(10)
+        spacing: Metrics.px(10)
         Image {
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.px(130)
+            Layout.preferredHeight: Metrics.px(130)
             visible: source.toString().length > 0 && status === Image.Ready
             source: App.previews[dialog.details.banner_attachment_id] || ""
             fillMode: Image.PreserveAspectCrop
@@ -50,8 +50,8 @@ Dialog {
             Image {
                 visible: source.toString().length > 0 && status === Image.Ready
                 source: App.previews[dialog.details.icon_attachment_id] || ""
-                Layout.preferredWidth: Theme.px(28)
-                Layout.preferredHeight: Theme.px(28)
+                Layout.preferredWidth: Metrics.px(28)
+                Layout.preferredHeight: Metrics.px(28)
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
             }
@@ -60,7 +60,7 @@ Dialog {
                 text: dialog.details.name || ""
                 color: Theme.text
                 font.bold: true
-                font.pixelSize: Theme.px(17)
+                font.pixelSize: Metrics.px(17)
                 elide: Text.ElideRight
                 Accessible.role: Accessible.Heading
             }

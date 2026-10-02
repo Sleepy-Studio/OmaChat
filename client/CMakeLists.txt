@@ -17,6 +17,8 @@ qt_add_executable(omachat
     src/main.cpp
 )
 
+set_source_files_properties(qml/Metrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(omachat
     URI OmaChat
     VERSION 1.0
@@ -34,6 +36,7 @@ qt_add_qml_module(omachat
         src/views/VideoFrameItem.hpp src/views/VideoFrameItem.cpp
         src/views/AudioLevels.hpp src/views/AudioLevels.cpp
     QML_FILES
+        qml/Metrics.qml
         qml/Main.qml
         qml/components/Icon.qml
         qml/components/IconButton.qml

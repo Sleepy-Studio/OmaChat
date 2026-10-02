@@ -9,7 +9,7 @@ Dialog {
     property string channelId
     property var details: ({})
     title: qsTr("Channel settings")
-    width: Math.min(Theme.px(560), (parent ? parent.width : 800) - Theme.px(40))
+    width: Math.min(Metrics.px(560), (parent ? parent.width : 800) - Metrics.px(40))
 
     function openFor(id) {
         channelId = id
@@ -56,11 +56,11 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(12)
+        spacing: Metrics.px(12)
         Text {
             text: dialog.title
             color: Theme.text
-            font.pixelSize: Theme.px(16)
+            font.pixelSize: Metrics.px(16)
             font.bold: true
         }
         Field {
@@ -89,21 +89,21 @@ Dialog {
         Text {
             text: qsTr("DESCRIPTION")
             color: Theme.textMuted
-            font.pixelSize: Theme.px(11)
+            font.pixelSize: Metrics.px(11)
             font.bold: true
         }
         ScrollView {
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.px(150)
+            Layout.preferredHeight: Metrics.px(150)
             TextArea {
                 id: descriptionField
                 wrapMode: TextEdit.Wrap
                 color: Theme.text
                 placeholderText: qsTr("What is this channel for? Add guidance and useful links.")
-                font.pixelSize: Theme.px(13)
+                font.pixelSize: Metrics.px(13)
                 background: Rectangle {
                     color: Theme.surfaceAlt
-                    radius: Theme.px(4)
+                    radius: Metrics.px(4)
                     border.color: descriptionField.activeFocus ? Theme.accent : Theme.border
                 }
                 Accessible.name: qsTr("Channel description")
@@ -113,16 +113,16 @@ Dialog {
             Layout.alignment: Qt.AlignRight
             text: descriptionField.length + "/2000"
             color: descriptionField.length > 2000 ? Theme.danger : Theme.textFaint
-            font.pixelSize: Theme.px(11)
+            font.pixelSize: Metrics.px(11)
         }
         RowLayout {
             Layout.fillWidth: true
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             Image {
                 source: dialog.details.icon_attachment_id && dialog.details.icon_attachment_id !== "0"
                         ? (App.previews[dialog.details.icon_attachment_id] || "") : ""
-                Layout.preferredWidth: Theme.px(36)
-                Layout.preferredHeight: Theme.px(36)
+                Layout.preferredWidth: Metrics.px(36)
+                Layout.preferredHeight: Metrics.px(36)
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
             }
@@ -140,7 +140,7 @@ Dialog {
             source: dialog.details.banner_attachment_id && dialog.details.banner_attachment_id !== "0"
                     ? (App.previews[dialog.details.banner_attachment_id] || "") : ""
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.px(76)
+            Layout.preferredHeight: Metrics.px(76)
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             visible: source.toString().length > 0

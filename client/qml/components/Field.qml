@@ -13,13 +13,13 @@ Column {
     property string label
     property string hint
 
-    spacing: Theme.px(4)
+    spacing: Metrics.px(4)
 
     Text {
         visible: root.label.length > 0
         text: root.label.toUpperCase()
         color: Theme.textMuted
-        font.pixelSize: Theme.px(11)
+        font.pixelSize: Metrics.px(11)
         font.bold: true
         font.letterSpacing: 0.4
     }
@@ -27,16 +27,16 @@ Column {
     TextField {
         id: input
         width: root.width
-        implicitHeight: Theme.px(34)
+        implicitHeight: Metrics.px(34)
         color: Theme.text
         placeholderTextColor: Theme.textFaint
         selectionColor: Theme.accent
         selectedTextColor: Theme.accentText
-        font.pixelSize: Theme.px(14)
-        leftPadding: Theme.px(10)
+        font.pixelSize: Metrics.px(14)
+        leftPadding: Metrics.px(10)
         Accessible.name: root.label
         background: Rectangle {
-            radius: Theme.px(4)
+            radius: Metrics.px(4)
             color: Theme.surfaceAlt
             border.width: input.activeFocus ? 2 : 1
             border.color: input.activeFocus ? Theme.accent : Theme.border
@@ -49,6 +49,6 @@ Column {
         text: root.hint
         wrapMode: Text.Wrap
         color: Theme.textFaint
-        font.pixelSize: Theme.px(11)
+        font.pixelSize: Metrics.px(11)
     }
 }

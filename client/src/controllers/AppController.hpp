@@ -161,6 +161,9 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList outputDevices READ outputDevices NOTIFY audioChanged)
     Q_PROPERTY(QVariantMap audioSettings READ audioSettings NOTIFY audioChanged)
     Q_PROPERTY(QVariantMap videoSettings READ videoSettings NOTIFY audioChanged)
+    Q_PROPERTY(bool uiSaving READ uiSaving NOTIFY configChanged)
+    Q_PROPERTY(QString uiSaveStatus READ uiSaveStatus NOTIFY configChanged)
+    Q_PROPERTY(bool uiSaveFailed READ uiSaveFailed NOTIFY configChanged)
     Q_PROPERTY(QVariantMap notificationSettings READ notificationSettings NOTIFY configChanged)
     Q_PROPERTY(QString version READ version CONSTANT)
 
@@ -307,6 +310,9 @@ public:
     QVariantList outputDevices() const { return m_outputDevices; }
     QVariantMap audioSettings() const { return m_audioSettings; }
     QVariantMap videoSettings() const { return m_videoSettings; }
+    bool uiSaving() const { return m_uiSaving; }
+    QString uiSaveStatus() const { return m_uiSaveStatus; }
+    bool uiSaveFailed() const { return m_uiSaveFailed; }
     QVariantMap notificationSettings() const;
     QString version() const;
 
@@ -418,6 +424,7 @@ public:
     Q_INVOKABLE void refreshAudio();
     Q_INVOKABLE void setAudio(const QString& key, const QVariant& value);
     Q_INVOKABLE void setVideo(const QString& key, const QVariant& value);
+    Q_INVOKABLE void setUi(double scale, bool reducedMotion);
     Q_INVOKABLE void setNotification(const QString& key, bool enabled);
     Q_INVOKABLE void setWindowFocused(bool focused);
     Q_INVOKABLE void markConversationRead(const QString& messageId);
@@ -533,6 +540,9 @@ private:
     void persistSelection();
 
     config::ClientConfig m_config;
+    bool m_uiSaving = false;
+    QString m_uiSaveStatus;
+    bool m_uiSaveFailed = false;
     bool m_discordImportBusy = false;
     QString m_discordImportStatus;
     DaemonLink m_link;

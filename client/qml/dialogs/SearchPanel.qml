@@ -14,10 +14,10 @@ Dialog {
     property bool wholeServer: false
     readonly property bool searchingServer: wholeServer && canSearchServer
     title: searchingServer ? qsTr("Search %1").arg(App.selectedServerName) : qsTr("Search #%1").arg(App.selectedChannelName)
-    width: Math.min(Theme.px(600), (parent ? parent.width : 800) - Theme.px(40))
+    width: Math.min(Metrics.px(600), (parent ? parent.width : 800) - Metrics.px(40))
     anchors.centerIn: undefined
     x: ((parent ? parent.width : 800) - width) / 2
-    y: Theme.px(70)
+    y: Metrics.px(70)
 
     onAboutToShow: {
         query.text = ""
@@ -40,20 +40,20 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(8)
+        spacing: Metrics.px(8)
         RowLayout {
             Layout.fillWidth: true
             Icon { name: "search" }
             TextField {
                 id: query
                 Layout.fillWidth: true
-                implicitHeight: Theme.px(36)
+                implicitHeight: Metrics.px(36)
                 placeholderText: dialog.title
                 placeholderTextColor: Theme.textFaint
                 color: Theme.text
-                font.pixelSize: Theme.px(14)
+                font.pixelSize: Metrics.px(14)
                 Accessible.name: dialog.title
-                background: Rectangle { radius: Theme.px(6); color: Theme.surfaceAlt; border.color: Theme.border }
+                background: Rectangle { radius: Metrics.px(6); color: Theme.surfaceAlt; border.color: Theme.border }
                 onTextChanged: {
                     dialog.hasSearched = false
                     App.clearSearch()
@@ -75,7 +75,7 @@ Dialog {
         }
         RowLayout {
             visible: dialog.canSearchServer
-            spacing: Theme.px(6)
+            spacing: Metrics.px(6)
             Repeater {
                 model: [{ label: qsTr("This channel"), server: false }, { label: qsTr("Whole server"), server: true }]
                 delegate: FlatButton {
@@ -98,7 +98,7 @@ Dialog {
                 : App.searchResults.count === 0 ? qsTr("No matching messages")
                 : qsTr("%n result(s). Choose one to view it with earlier messages.", "", App.searchResults.count)
             color: App.searchError.length > 0 ? Theme.danger : Theme.textMuted
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
             wrapMode: Text.Wrap
             Accessible.role: Accessible.StaticText
             Accessible.name: text
@@ -106,10 +106,10 @@ Dialog {
         ListView {
             id: results
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(Math.max(contentHeight, Theme.px(80)), Theme.px(420))
+            Layout.preferredHeight: Math.min(Math.max(contentHeight, Metrics.px(80)), Metrics.px(420))
             model: App.searchResults
             clip: true
-            spacing: Theme.px(2)
+            spacing: Metrics.px(2)
             activeFocusOnTab: count > 0
             keyNavigationEnabled: true
             Keys.onReturnPressed: dialog.activate(currentIndex)
@@ -127,8 +127,8 @@ Dialog {
                 required property string time
                 required property int index
                 width: ListView.view.width
-                implicitHeight: col.implicitHeight + Theme.px(12)
-                radius: Theme.px(4)
+                implicitHeight: col.implicitHeight + Metrics.px(12)
+                radius: Metrics.px(4)
                 color: result.ListView.isCurrentItem && results.activeFocus ? Theme.selection
                      : area.containsMouse ? Theme.raised : "transparent"
                 Accessible.role: Accessible.ListItem
@@ -138,24 +138,24 @@ Dialog {
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.margins: Theme.px(8)
+                    anchors.margins: Metrics.px(8)
                     Row {
-                        spacing: Theme.px(8)
-                        Text { text: result.author; color: Theme.text; font.bold: true; font.pixelSize: Theme.px(13) }
+                        spacing: Metrics.px(8)
+                        Text { text: result.author; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(13) }
                         Text {
                             visible: dialog.searchingServer && result.channel.length > 0
                             text: "#" + result.channel
                             color: Theme.accent
-                            font.pixelSize: Theme.px(12)
+                            font.pixelSize: Metrics.px(12)
                         }
-                        Text { text: result.time; color: Theme.textFaint; font.pixelSize: Theme.px(11) }
+                        Text { text: result.time; color: Theme.textFaint; font.pixelSize: Metrics.px(11) }
                     }
                     Text {
                         width: parent.width
                         text: result.preview
                         color: Theme.textMuted
                         wrapMode: Text.Wrap
-                        font.pixelSize: Theme.px(13)
+                        font.pixelSize: Metrics.px(13)
                     }
                 }
                 MouseArea {

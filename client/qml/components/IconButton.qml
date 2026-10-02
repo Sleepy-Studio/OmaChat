@@ -9,11 +9,11 @@ AbstractButton {
     property string iconName
     property string tip
     property color iconColor: checked ? Theme.danger : (hovered ? Theme.text : Theme.textMuted)
-    property real iconSize: Theme.px(18)
+    property real iconSize: Metrics.px(18)
     property bool danger: false
 
-    implicitWidth: Theme.px(32)
-    implicitHeight: Theme.px(32)
+    implicitWidth: Metrics.px(32)
+    implicitHeight: Metrics.px(32)
     focusPolicy: Qt.TabFocus
     hoverEnabled: true
 
@@ -27,7 +27,7 @@ AbstractButton {
     ToolTip.text: tip
 
     background: Rectangle {
-        radius: Theme.px(4)
+        radius: Metrics.px(4)
         color: control.down ? Theme.selection : (control.hovered ? Theme.raised : "transparent")
         border.width: control.visualFocus ? 2 : 0
         border.color: Theme.accent

@@ -47,18 +47,18 @@ Rectangle {
         // Header: server name + actions
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: Theme.px(46)
+            implicitHeight: Metrics.px(46)
             color: headerArea.containsMouse && !App.homeSelected ? Theme.raised : "transparent"
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(14)
-                anchors.rightMargin: Theme.px(6)
+                anchors.leftMargin: Metrics.px(14)
+                anchors.rightMargin: Metrics.px(6)
                 Text {
                     Layout.fillWidth: true
                     text: App.selectedServerName
                     color: Theme.text
-                    font.pixelSize: Theme.px(15)
+                    font.pixelSize: Metrics.px(15)
                     font.bold: true
                     elide: Text.ElideRight
                     Accessible.role: Accessible.Heading
@@ -101,7 +101,7 @@ Rectangle {
         Image {
             id: serverBanner
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.px(84)
+            Layout.preferredHeight: Metrics.px(84)
             visible: !App.homeSelected && status === Image.Ready
             source: App.selectedServerBannerId && App.selectedServerBannerId !== "0"
                     ? (App.previews[App.selectedServerBannerId] || "") : ""
@@ -113,7 +113,7 @@ Rectangle {
             id: list
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.topMargin: Theme.px(6)
+            Layout.topMargin: Metrics.px(6)
             clip: true
             model: App.channels
             boundsBehavior: Flickable.StopAtBounds
@@ -147,12 +147,12 @@ Rectangle {
             // Empty states
             Text {
                 anchors.centerIn: parent
-                width: parent.width - Theme.px(32)
+                width: parent.width - Metrics.px(32)
                 visible: list.count === 0
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 text: App.homeSelected ? qsTr("No conversations yet. Right-click a member to message them, or start a group with +.")
                                        : qsTr("No channels you can see.")
             }
@@ -163,25 +163,25 @@ Rectangle {
     Component {
         id: categoryRow
         Item {
-            implicitHeight: Theme.px(30)
+            implicitHeight: Metrics.px(30)
             readonly property var m: parent ? parent.model : null
             Component.onCompleted: if (m && m.iconAttachmentId && m.iconAttachmentId !== "0")
                                        App.requestPreview(m.iconAttachmentId, "category-icon.png", 0)
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(6)
-                anchors.rightMargin: Theme.px(8)
-                anchors.topMargin: Theme.px(8)
-                spacing: Theme.px(2)
+                anchors.leftMargin: Metrics.px(6)
+                anchors.rightMargin: Metrics.px(8)
+                anchors.topMargin: Metrics.px(8)
+                spacing: Metrics.px(2)
                 Icon {
                     name: m && m.collapsed ? "chevron-right" : "chevron-down"
-                    size: Theme.px(12)
+                    size: Metrics.px(12)
                 }
                 Image {
                     visible: !!(m && m.iconAttachmentId && m.iconAttachmentId !== "0") && status === Image.Ready
                     source: m ? (App.previews[m.iconAttachmentId] || "") : ""
-                    Layout.preferredWidth: Theme.px(16)
-                    Layout.preferredHeight: Theme.px(16)
+                    Layout.preferredWidth: Metrics.px(16)
+                    Layout.preferredHeight: Metrics.px(16)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                 }
@@ -192,9 +192,9 @@ Rectangle {
                 }
                 IconButton {
                     visible: App.canManageChannels
-                    implicitWidth: Theme.px(20)
-                    implicitHeight: Theme.px(20)
-                    iconSize: Theme.px(14)
+                    implicitWidth: Metrics.px(20)
+                    implicitHeight: Metrics.px(20)
+                    iconSize: Metrics.px(14)
                     iconName: "plus"
                     tip: qsTr("Create channel")
                     onClicked: sidebar.createChannel(m.itemId)
@@ -203,7 +203,7 @@ Rectangle {
             MouseArea {
                 id: catArea
                 anchors.fill: parent
-                anchors.rightMargin: Theme.px(30)
+                anchors.rightMargin: Metrics.px(30)
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
@@ -233,12 +233,12 @@ Rectangle {
             readonly property string iconId: m && m.iconAttachmentId ? m.iconAttachmentId : ""
             Component.onCompleted: if (iconId.length > 0 && iconId !== "0")
                                        App.requestPreview(iconId, "channel-icon.png", 0)
-            implicitHeight: isDm ? Theme.px(40) : Theme.px(30)
+            implicitHeight: isDm ? Metrics.px(40) : Metrics.px(30)
             anchors.left: parent ? parent.left : undefined
             anchors.right: parent ? parent.right : undefined
-            anchors.leftMargin: Theme.px(8) + (m ? m.depth : 0) * Theme.px(6)
-            anchors.rightMargin: Theme.px(8)
-            radius: Theme.px(4)
+            anchors.leftMargin: Metrics.px(8) + (m ? m.depth : 0) * Metrics.px(6)
+            anchors.rightMargin: Metrics.px(8)
+            radius: Metrics.px(4)
             color: m && m.selected ? Theme.selection : (area.containsMouse ? Theme.raised : "transparent")
             border.width: parent && parent.focused ? 2 : 0
             border.color: Theme.accent
@@ -254,39 +254,39 @@ Rectangle {
             Rectangle {
                 visible: m && m.unread && !m.selected
                 anchors.right: parent.left
-                anchors.rightMargin: Theme.px(2)
+                anchors.rightMargin: Metrics.px(2)
                 anchors.verticalCenter: parent.verticalCenter
-                width: Theme.px(4)
-                height: Theme.px(8)
-                radius: Theme.px(2)
+                width: Metrics.px(4)
+                height: Metrics.px(8)
+                radius: Metrics.px(2)
                 color: Theme.text
             }
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(8)
-                anchors.rightMargin: Theme.px(6)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(8)
+                anchors.rightMargin: Metrics.px(6)
+                spacing: Metrics.px(8)
 
                 Avatar {
                     visible: row.isDm
                     userId: m ? m.userId : ""
                     name: m ? m.name : ""
                     status: m ? m.presence : ""
-                    size: Theme.px(26)
+                    size: Metrics.px(26)
                 }
                 Icon {
                     visible: !row.isDm && !channelImage.visible
                     name: row.isGroup ? "users" : row.isVoice ? "speaker" : (m && m.locked ? "lock" : "hash")
-                    size: Theme.px(16)
+                    size: Metrics.px(16)
                     color: row.emphasized ? Theme.text : Theme.textFaint
                 }
                 Image {
                     id: channelImage
                     visible: !row.isDm && row.iconId.length > 0 && row.iconId !== "0" && status === Image.Ready
                     source: App.previews[row.iconId] || ""
-                    Layout.preferredWidth: Theme.px(16)
-                    Layout.preferredHeight: Theme.px(16)
+                    Layout.preferredWidth: Metrics.px(16)
+                    Layout.preferredHeight: Metrics.px(16)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                 }
@@ -295,13 +295,13 @@ Rectangle {
                     text: m ? m.name : ""
                     elide: Text.ElideRight
                     color: m && m.muted ? Theme.textFaint : (row.emphasized || area.containsMouse ? Theme.text : Theme.textMuted)
-                    font.pixelSize: Theme.px(14)
+                    font.pixelSize: Metrics.px(14)
                     font.bold: m ? m.unread && !m.muted : false
                 }
                 Icon {
                     visible: m ? m.muted : false
                     name: "bell-off"
-                    size: Theme.px(13)
+                    size: Metrics.px(13)
                     color: Theme.textFaint
                 }
                 Badge { count: m ? m.mentions : 0 }
@@ -309,7 +309,7 @@ Rectangle {
                     visible: row.isVoice && m && m.voiceCount > 0
                     text: m ? m.voiceCount : ""
                     color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    font.pixelSize: Metrics.px(11)
                 }
             }
 
@@ -342,42 +342,42 @@ Rectangle {
         id: participantRow
         Item {
             readonly property var m: parent ? parent.model : null
-            implicitHeight: Theme.px(28)
+            implicitHeight: Metrics.px(28)
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(36) + (m ? m.depth - 1 : 0) * Theme.px(6)
-                anchors.rightMargin: Theme.px(14)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(36) + (m ? m.depth - 1 : 0) * Metrics.px(6)
+                anchors.rightMargin: Metrics.px(14)
+                spacing: Metrics.px(8)
                 Avatar {
                     userId: m ? m.userId : ""
                     name: m ? m.name : ""
                     speaking: m ? m.speaking : false
-                    size: Theme.px(22)
+                    size: Metrics.px(22)
                 }
                 Text {
                     Layout.fillWidth: true
                     text: m ? m.name : ""
                     elide: Text.ElideRight
                     color: m && m.speaking ? Theme.text : Theme.textMuted
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                 }
                 Rectangle {
                     visible: m ? m.streaming : false
-                    implicitWidth: liveLabel.implicitWidth + Theme.px(8)
-                    implicitHeight: Theme.px(15)
-                    radius: Theme.px(3)
+                    implicitWidth: liveLabel.implicitWidth + Metrics.px(8)
+                    implicitHeight: Metrics.px(15)
+                    radius: Metrics.px(3)
                     color: Theme.danger
                     Text {
                         id: liveLabel
                         anchors.centerIn: parent
                         text: qsTr("LIVE")
                         color: Theme.accentText
-                        font.pixelSize: Theme.px(9)
+                        font.pixelSize: Metrics.px(9)
                         font.bold: true
                     }
                 }
-                Icon { visible: m ? m.userMuted && !m.userDeafened : false; name: "mic-off"; size: Theme.px(13); color: Theme.danger }
-                Icon { visible: m ? m.userDeafened : false; name: "headphones-off"; size: Theme.px(13); color: Theme.danger }
+                Icon { visible: m ? m.userMuted && !m.userDeafened : false; name: "mic-off"; size: Metrics.px(13); color: Theme.danger }
+                Icon { visible: m ? m.userDeafened : false; name: "headphones-off"; size: Metrics.px(13); color: Theme.danger }
             }
             MouseArea {
                 anchors.fill: parent
@@ -571,16 +571,16 @@ Rectangle {
             y = sidebar.height / 3
             open()
         }
-        width: Theme.px(220)
-        padding: Theme.px(12)
-        background: Rectangle { color: Theme.raised; radius: Theme.px(6); border.color: Theme.border }
+        width: Metrics.px(220)
+        padding: Metrics.px(12)
+        background: Rectangle { color: Theme.raised; radius: Metrics.px(6); border.color: Theme.border }
         ColumnLayout {
             anchors.fill: parent
-            spacing: Theme.px(6)
+            spacing: Metrics.px(6)
             Text {
                 text: qsTr("Volume for %1").arg(volumePopup.userName)
                 color: Theme.text
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 font.bold: true
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -598,8 +598,8 @@ Rectangle {
                 Text {
                     text: Math.round(slider.value) + "%"
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
-                    Layout.preferredWidth: Theme.px(38)
+                    font.pixelSize: Metrics.px(12)
+                    Layout.preferredWidth: Metrics.px(38)
                 }
             }
             FlatButton {

@@ -19,8 +19,8 @@ RowLayout {
             id: seg
             required property var modelData
             readonly property bool active: root.value === modelData.v
-            implicitWidth: Theme.px(28)
-            implicitHeight: Theme.px(22)
+            implicitWidth: Metrics.px(28)
+            implicitHeight: Metrics.px(22)
             color: !active ? Theme.surfaceAlt
                  : modelData.v < 0 ? Theme.danger
                  : modelData.v > 0 ? Theme.success : Theme.selection
@@ -30,7 +30,7 @@ RowLayout {
                 anchors.centerIn: parent
                 text: seg.modelData.label
                 color: seg.active && seg.modelData.v !== 0 ? Theme.accentText : Theme.textMuted
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 font.bold: seg.active
             }
             MouseArea {

@@ -2229,6 +2229,25 @@ void Daemon::registerMethods()
                     {"reduced_motion", m_config.ui.reducedMotion}, {"theme", m_config.ui.theme}}},
             {"shortcuts", shortcuts}});
     };
+    m[QStringLiteral("config.set_ui")] = [this](const QJsonObject& p, const Responder& r) {
+        const auto scale = p.value(QStringLiteral("scale"));
+        const auto motion = p.value(QStringLiteral("reduced_motion"));
+        if ((!scale.isUndefined() && (!scale.isDouble() || scale.toDouble() < 0.5 || scale.toDouble() > 3.0))
+            || (!motion.isUndefined() && !motion.isBool())) {
+            r.error(e::BadRequest, QStringLiteral("scale must be a number from 0.5 to 3; reduced_motion must be boolean"));
+            return;
+        }
+        const auto previous = m_config.ui;
+        m_config.ui.scale = scale.toDouble(previous.scale);
+        m_config.ui.reducedMotion = motion.toBool(previous.reducedMotion);
+        QString err;
+        if (!saveConfig(&err)) {
+            m_config.ui = previous;
+            r.error(e::StorageError, err);
+            return;
+        }
+        r.ok({{"scale", m_config.ui.scale}, {"reduced_motion", m_config.ui.reducedMotion}});
+    };
     m[QStringLiteral("config.set_notifications")] = [this](const QJsonObject& p, const Responder& r) {
         auto& n = m_config.notifications;
         n.messages = p.value(QStringLiteral("messages")).toBool(n.messages);

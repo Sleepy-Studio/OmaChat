@@ -52,7 +52,8 @@ assistants, bots or LLM features.
   `Ctrl+Shift+D` deafen, `Alt+↑/↓` channels, `Ctrl+L` channel list,
   `Ctrl+F` search, `Ctrl+/` help, `Up` edits your last message,
   `Tab` completes `@user`, `#channel` and `/commands` (all configurable)
-- Omarchy theme colors applied live; optional bar widget for Omarchy
+- Omarchy theme colors applied live; interface scale and reduced motion in Settings;
+  optional bar widget for Omarchy
 
 ## Install
 
