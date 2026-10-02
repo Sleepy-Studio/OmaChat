@@ -136,6 +136,7 @@ message VoiceState {
   bool server_deaf = 6;
   uint32 stream_id = 7;      // media stream id for speaking indicators
   bool streaming = 8;        // sharing their screen (1.2, "video.h264")
+  uint64 owner_session_id = 9; // voice.ownership.v1; 0 on legacy servers
 }
 
 message Invite {
@@ -221,6 +222,7 @@ message HelloReply {
   uint32 media_udp_port = 7;
   uint64 max_upload_bytes = 8;   // 0 = attachments unsupported
   repeated OAuthProviderConfig oauth_providers = 9;
+  string instance_id = 10; // instance.identity.v1: persistent server database UUID
 }
 
 // ---------------------------------------------------------- authentication
@@ -287,6 +289,23 @@ message OAuthIdentity {
 message OAuthIdentityList {
   repeated OAuthIdentity identities = 1;
 }
+
+// sessions.manage.v1; never exposes credentials, digests or peer addresses.
+message ListLoginSessionsRequest {
+  uint64 before_id = 1; // exclusive descending-ID cursor; 0 starts at newest
+}
+message LoginSession {
+  uint64 id = 1;
+  int64 created_at = 2; // unix ms
+  int64 expires_at = 3; // refresh expiry, unix ms
+  bool connected = 4;
+  bool current = 5;
+}
+message LoginSessionList {
+  repeated LoginSession sessions = 1; // at most 100
+  uint64 next_before_id = 2; // 0 when exhausted
+}
+message RevokeLoginSessionRequest { uint64 session_id = 1; }
 
 message LogoutRequest {}
 message DeleteAccountRequest {}
@@ -369,6 +388,7 @@ message SyncState {
   repeated uint64 server_permissions_server_ids = 9;
   repeated uint64 server_permissions = 10;  // parallel to the field above
   repeated CustomEmoji emoji = 11;
+  repeated ReadMarker read_markers = 12;
 }
 
 // --------------------------------------------------------- server/guilds
@@ -481,8 +501,12 @@ message SendMessageRequest {
   uint64 reply_to = 3;
   bool is_action = 4;
   repeated uint64 attachment_ids = 5;
+  bytes operation_id = 7;         // messages.idempotency.v1: stable 16-byte operation ID
   bytes encrypted = 6;            // 1.2 "e2e.v1": direct/group conversations only, content empty
 }
+message ReadMarker { uint64 channel_id = 1; uint64 message_id = 2; int64 timestamp = 3; }
+message SetReadMarkerRequest { uint64 channel_id = 1; uint64 message_id = 2; }
+
 message EditMessageRequest {
   uint64 message_id = 1;
   string content = 2;
@@ -494,7 +518,7 @@ message EditMessageRequest {
 // 1.2, capability "e2e.v1". Every device holds an X25519 key pair; only the
 // public half is published. A message body is sealed with a random content
 // key (XChaCha20-Poly1305, associated data = "omachat-e2e-v1" | channel id |
-// author id, both 8 bytes big-endian), and that key is boxed (crypto_box) from
+// author id (both 8 bytes big-endian) | 32-byte sender public key), and that key is boxed (crypto_box) from
 // the sender's device key to every participant device. The server stores and
 // relays the payload without being able to read it. See docs/security.md.
 
@@ -511,7 +535,7 @@ message DeviceKeyList { repeated DeviceKey keys = 1; }
 message E2EKeyWrap {
   bytes recipient_key = 1;        // device public key
   bytes nonce = 2;                // 24 bytes
-  bytes box = 3;                  // crypto_box_easy(content key)
+  bytes box = 3;                  // crypto_box_easy(content key | BLAKE2b-256(nonce | ciphertext))
 }
 message E2EFile {
   uint64 attachment_id = 1;
@@ -630,6 +654,7 @@ message JoinVoiceRequest {
   uint64 channel_id = 1;
   bool self_mute = 2;
   bool self_deaf = 3;
+  bool transfer = 4; // explicit user consent when another session owns voice
 }
 message LeaveVoiceRequest {}
 message SetVoiceStateRequest {
@@ -721,6 +746,7 @@ message Event {
     PermissionsChangedEvent permissions_changed = 29;
     DeviceKeysChangedEvent device_keys_changed = 30;
     EmojiEvent emoji_changed = 31;
+    ReadMarker read_marker = 32;
   }
 }
 
@@ -752,6 +778,9 @@ message Envelope {
     ListOAuthIdentitiesRequest list_oauth_identities = 133;
     OAuthIdentityList oauth_identity_list = 134;
     UpdateProfileRequest update_profile = 135;
+    ListLoginSessionsRequest list_login_sessions = 159;
+    LoginSessionList login_session_list = 160;
+    RevokeLoginSessionRequest revoke_login_session = 161;
 
     // sync
     SyncRequest sync = 20;
@@ -797,6 +826,8 @@ message Envelope {
     SetPresenceRequest set_presence = 57;
     SearchMessagesRequest search_messages = 58;
     ReactionRequest reaction = 59;
+    SetReadMarkerRequest set_read_marker = 157;
+    ReadMarker read_marker = 158;
 
     // attachments
     BeginUploadRequest begin_upload = 60;

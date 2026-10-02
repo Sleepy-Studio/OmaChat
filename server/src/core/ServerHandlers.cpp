@@ -73,6 +73,10 @@ void ChatServer::handleSync(Session& s, std::uint64_t rid)
         if (visibleVoiceChannels.contains(v.channelId))
             *st->add_voice_states() = toProto(uid, v);
     }
+    for (const auto& marker : m_store.readMarkers(s.userId)) {
+        if (m_state.can(marker.channel_id(), s.userId, ViewChannel | ReadHistory))
+            *st->add_read_markers() = marker;
+    }
     st->set_last_sequence(m_events.lastSequence());
     reply(s, rid, std::move(env));
 }

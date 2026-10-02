@@ -53,6 +53,7 @@ struct SessionRecord {
     Id userId = 0;
     QByteArray refreshDigest;
     std::int64_t expiresAt = 0;
+    std::int64_t createdAt = 0;
 };
 
 struct RoleRecord {

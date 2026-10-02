@@ -3,10 +3,11 @@
 #include "core/ChatServer.hpp"
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
-#include <QUrl>
 #include "omachat/core/Version.hpp"
+#include <QUrl>
 
 #include <QThreadPool>
+#include <limits>
 
 namespace omachat::server {
 
@@ -24,8 +25,8 @@ void ChatServer::handleUpdateProfile(Session& s, std::uint64_t rid, const proto:
     }
     const QUrl url(avatar);
     if (!name || !validBio || avatar.size() > 2048
-        || (!avatar.isEmpty() && (!url.isValid() || url.scheme() != u"https" || url.host().isEmpty()
-            || !url.userInfo().isEmpty()))) {
+        || (!avatar.isEmpty()
+            && (!url.isValid() || url.scheme() != u"https" || url.host().isEmpty() || !url.userInfo().isEmpty()))) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid profile fields"));
         return;
     }
@@ -81,6 +82,15 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("search.server");
     r->add_capabilities("dm.group");
     r->add_capabilities("resume");
+    r->add_capabilities("sessions.manage.v1");
+    r->add_capabilities("messages.idempotency.v1");
+    r->add_capabilities("read.markers.v1");
+    r->add_capabilities("voice.ownership.v1");
+    const QString instanceId = m_store.instanceId();
+    if (!instanceId.isEmpty()) {
+        r->add_capabilities("instance.identity.v1");
+        r->set_instance_id(instanceId.toStdString());
+    }
     r->add_capabilities("attachments");
     r->add_capabilities("attachments.resume");
     r->add_capabilities("video.h264");
@@ -252,7 +262,8 @@ void ChatServer::handleResume(Session& s, std::uint64_t rid, const proto::Resume
     const QString token = QString::fromStdString(m.access_token());
     auto it = m_accessTokens.find(token);
     if (it == m_accessTokens.end() || it->expiresAt < now() || it->sessionId != m.session_id()
-        || !m_state.user(it->userId) || m_store.isSuspended(it->userId)) {
+        || !m_state.user(it->userId) || m_store.isSuspended(it->userId)
+        || !m_store.sessionActive(it->sessionId, it->userId, now())) {
         replyError(s, rid, proto::ERROR_AUTHENTICATION, QStringLiteral("access token expired"));
         return;
     }
@@ -278,12 +289,87 @@ void ChatServer::handleResume(Session& s, std::uint64_t rid, const proto::Resume
     OMA_DEBUG("auth", "session resumed", {"user", grant.userId}, {"replayed", static_cast<qint64>(missed.size())});
 }
 
+void ChatServer::handleListLoginSessions(Session& s, std::uint64_t rid, Id beforeId)
+{
+    if (beforeId > std::uint64_t(std::numeric_limits<qint64>::max())) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid session cursor"));
+        return;
+    }
+    const auto rows = m_store.loginSessions(s.userId, beforeId, now());
+    if (!rows) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not list sessions"));
+        return;
+    }
+    proto::Envelope env;
+    auto* list = env.mutable_login_session_list();
+    for (std::size_t i = 0; i < std::min<std::size_t>(100, rows->size()); ++i) {
+        const auto& row = (*rows)[i];
+        auto* entry = list->add_sessions();
+        entry->set_id(row.id);
+        entry->set_created_at(row.createdAt);
+        entry->set_expires_at(row.expiresAt);
+        entry->set_current(row.id == s.sessionId);
+        entry->set_connected(std::ranges::any_of(m_sessions, [&](const auto& pair) {
+            return pair.second->phase == Session::Phase::Ready && pair.second->userId == s.userId
+                && pair.second->sessionId == row.id;
+        }));
+    }
+    if (rows->size() > 100)
+        list->set_next_before_id((*rows)[99].id);
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::invalidateLoginSession(Id userId, Id sessionId)
+{
+    for (auto it = m_accessTokens.begin(); it != m_accessTokens.end();)
+        it = it->userId == userId && it->sessionId == sessionId ? m_accessTokens.erase(it) : std::next(it);
+    const auto voice = m_voice.find(userId);
+    if (voice != m_voice.end() && voice->second.ownerSessionId == sessionId)
+        leaveVoice(userId);
+    // Closing can remove Session objects synchronously. Snapshot IDs first and
+    // prevent already-buffered requests from using a revoked authenticated phase.
+    std::vector<quint64> connections;
+    for (const auto& [id, peer] : m_sessions) {
+        if (peer->userId == userId && peer->sessionId == sessionId) {
+            peer->phase = Session::Phase::AwaitAuth;
+            connections.push_back(id);
+        }
+    }
+    for (quint64 id : connections)
+        if (Session* peer = sessionFor(id))
+            peer->conn->close();
+}
+
+void ChatServer::handleRevokeLoginSession(Session& s, std::uint64_t rid, Id sessionId)
+{
+    if (sessionId == 0 || sessionId > std::uint64_t(std::numeric_limits<qint64>::max())) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid session id"));
+        return;
+    }
+    const Id userId = s.userId;
+    const auto removed = m_store.revokeLoginSession(userId, sessionId);
+    if (!removed) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not revoke session"));
+        return;
+    }
+    if (!*removed) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("session not found"));
+        return;
+    }
+    replyOk(s, rid);
+    invalidateLoginSession(userId, sessionId);
+}
+
 void ChatServer::handleLogout(Session& s, std::uint64_t rid)
 {
-    m_store.deleteSession(s.sessionId);
-    m_accessTokens.remove(s.accessToken);
+    const Id userId = s.userId;
+    const Id sessionId = s.sessionId;
+    if (!m_store.deleteSession(sessionId)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not revoke session"));
+        return;
+    }
     replyOk(s, rid);
-    s.conn->close();
+    invalidateLoginSession(userId, sessionId);
 }
 
 void ChatServer::handleDeleteAccount(Session& s, std::uint64_t rid)
@@ -294,9 +380,18 @@ void ChatServer::handleDeleteAccount(Session& s, std::uint64_t rid)
         return;
     }
     const Id userId = s.userId;
-    struct RemovedServer { Id id; std::vector<Id> members; };
-    struct LeftServer { Id id; std::vector<Id> members; };
-    struct RemovedDm { Id id; std::vector<Id> recipients; };
+    struct RemovedServer {
+        Id id;
+        std::vector<Id> members;
+    };
+    struct LeftServer {
+        Id id;
+        std::vector<Id> members;
+    };
+    struct RemovedDm {
+        Id id;
+        std::vector<Id> recipients;
+    };
     std::vector<RemovedServer> owned;
     std::vector<LeftServer> joined;
     std::vector<RemovedDm> dms;
@@ -312,8 +407,7 @@ void ChatServer::handleDeleteAccount(Session& s, std::uint64_t rid)
             joined.push_back({id, std::move(members)});
     }
     for (const auto& [id, channel] : m_state.channels()) {
-        if (channel.serverId == 0
-            && std::ranges::find(channel.recipients, userId) != channel.recipients.end())
+        if (channel.serverId == 0 && std::ranges::find(channel.recipients, userId) != channel.recipients.end())
             dms.push_back({id, channel.recipients});
     }
     if (!m_store.deleteUser(userId)) {

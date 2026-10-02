@@ -15,14 +15,17 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 13);
+    EXPECT_EQ(store.schemaVersion(), 14);
+    const QString instance = store.instanceId();
+    EXPECT_FALSE(instance.isEmpty());
+    EXPECT_EQ(store.instanceId(), instance);
     server::UserRecord u{
         1, QStringLiteral("alice"), QStringLiteral("Alice"), QString(), QStringLiteral("$argon2id$x"), 5};
     EXPECT_TRUE(store.insertUser(u)) << "null avatar must be stored as empty string";
     EXPECT_FALSE(store.insertUser(u)) << "duplicate username rejected";
     EXPECT_EQ(store.userByName(QStringLiteral("alice"))->displayName, QStringLiteral("Alice"));
-    EXPECT_TRUE(store.updateUserProfile(1, QStringLiteral("Alice Two"), QStringLiteral("https://example.org/a.png"),
-        QStringLiteral("A short bio")));
+    EXPECT_TRUE(store.updateUserProfile(
+        1, QStringLiteral("Alice Two"), QStringLiteral("https://example.org/a.png"), QStringLiteral("A short bio")));
     const auto profile = store.userByName(QStringLiteral("alice"));
     ASSERT_TRUE(profile.has_value());
     EXPECT_EQ(profile->displayName, QStringLiteral("Alice Two"));
@@ -53,6 +56,9 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         db.setDatabaseName(path);
         ASSERT_TRUE(db.open());
         QSqlQuery q(db);
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TRIGGER message_operation_tombstone")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE message_operations")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE read_markers")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE emoji")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE attachments")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE device_keys")));
@@ -81,7 +87,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 13);
+    EXPECT_EQ(store.schemaVersion(), 14);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 
@@ -143,8 +149,8 @@ TEST(ServerStore, OAuthIdentitiesLinkToExactlyOneUser)
     ASSERT_TRUE(store.insertUser({2, QStringLiteral("bob"), QStringLiteral("Bob"), {}, {}, 0}));
 
     EXPECT_FALSE(store.oauthIdentity(QStringLiteral("discord"), QStringLiteral("999")).has_value());
-    ASSERT_TRUE(store.insertOAuthIdentity({1, 1, QStringLiteral("discord"), QStringLiteral("999"),
-        QStringLiteral("alice#0001"), 1000}));
+    ASSERT_TRUE(store.insertOAuthIdentity(
+        {1, 1, QStringLiteral("discord"), QStringLiteral("999"), QStringLiteral("alice#0001"), 1000}));
     const auto identity = store.oauthIdentity(QStringLiteral("discord"), QStringLiteral("999"));
     ASSERT_TRUE(identity.has_value());
     EXPECT_EQ(identity->userId, 1u);
@@ -163,8 +169,8 @@ TEST(ServerStore, OAuthIdentitiesForUserAndPasswordCheck)
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error));
     ASSERT_TRUE(store.insertUser({1, QStringLiteral("alice"), QStringLiteral("Alice"), {}, {}, 0}));
-    ASSERT_TRUE(store.insertUser(
-        {2, QStringLiteral("bob"), QStringLiteral("Bob"), {}, QStringLiteral("$argon2id$x"), 0}));
+    ASSERT_TRUE(
+        store.insertUser({2, QStringLiteral("bob"), QStringLiteral("Bob"), {}, QStringLiteral("$argon2id$x"), 0}));
 
     EXPECT_FALSE(store.hasPassword(1)) << "OAuth-created accounts start with no password";
     EXPECT_TRUE(store.hasPassword(2));
@@ -343,4 +349,48 @@ TEST(LocalStore, AccountsVolumesMutes)
     EXPECT_TRUE(store.mutedChannels(id).contains(7));
     EXPECT_TRUE(store.removeAccount(id));
     EXPECT_TRUE(store.userVolumes(id).empty()) << "cascade delete";
+}
+
+TEST(ServerStore, LoginSessionPagesAndScopedRevocationPersist)
+{
+    QTemporaryDir dir;
+    const auto path = dir.filePath(QStringLiteral("sessions.db"));
+    {
+        server::Store store;
+        QString error;
+        ASSERT_TRUE(store.open(path, &error));
+        ASSERT_TRUE(
+            store.insertUser({1, QStringLiteral("alice"), QStringLiteral("Alice"), {}, QStringLiteral("h"), 0}));
+        ASSERT_TRUE(store.insertUser({2, QStringLiteral("bob"), QStringLiteral("Bob"), {}, QStringLiteral("h"), 0}));
+        for (std::uint64_t id = 1; id <= 205; ++id)
+            ASSERT_TRUE(store.insertSession({id, 1, QByteArray::number(id), 5000}));
+        ASSERT_TRUE(store.insertSession({206, 1, QByteArray("expired"), 99}));
+        ASSERT_TRUE(store.insertSession({207, 2, QByteArray("foreign"), 5000}));
+        auto first = store.loginSessions(1, 0, 100);
+        ASSERT_TRUE(first);
+        ASSERT_EQ(first->size(), 101u); // 100 visible + a has-more sentinel
+        EXPECT_EQ(first->front().id, 205u);
+        EXPECT_EQ((*first)[99].id, 106u);
+        EXPECT_GT(first->front().createdAt, 0);
+        EXPECT_TRUE(first->front().refreshDigest.isEmpty());
+        auto second = store.loginSessions(1, 106, 100);
+        ASSERT_TRUE(second);
+        EXPECT_EQ(second->size(), 101u);
+        EXPECT_EQ(second->front().id, 105u);
+        auto last = store.loginSessions(1, 6, 100);
+        ASSERT_TRUE(last);
+        EXPECT_EQ(last->size(), 5u);
+        EXPECT_TRUE(store.sessionActive(205, 1, 100));
+        EXPECT_FALSE(store.sessionActive(205, 2, 100));
+        EXPECT_FALSE(store.sessionActive(206, 1, 100));
+        EXPECT_EQ(store.revokeLoginSession(1, 207), std::optional<bool>(false));
+        EXPECT_EQ(store.revokeLoginSession(1, 205), std::optional<bool>(true));
+        EXPECT_EQ(store.revokeLoginSession(1, 205), std::optional<bool>(false));
+    }
+    server::Store reopened;
+    QString error;
+    ASSERT_TRUE(reopened.open(path, &error));
+    EXPECT_FALSE(reopened.sessionActive(205, 1, 100));
+    EXPECT_FALSE(reopened.sessionByDigest(QByteArray("205")));
+    EXPECT_TRUE(reopened.sessionActive(207, 2, 100));
 }

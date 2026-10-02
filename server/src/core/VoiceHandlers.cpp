@@ -34,10 +34,22 @@ void ChatServer::handleJoinVoice(Session& s, std::uint64_t rid, const proto::Joi
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot join this voice channel"));
         return;
     }
-    if (m_voice.contains(s.userId))
-        leaveVoice(s.userId);
-
     VoiceRec v;
+    if (auto existing = m_voice.find(s.userId); existing != m_voice.end()) {
+        if (existing->second.ownerSessionId != s.sessionId && !m.transfer()) {
+            replyError(s, rid, proto::ERROR_CONFLICT,
+                QStringLiteral("You are connected on another device. Move voice to this phone?"));
+            return;
+        }
+        // Moderation belongs to the account, and survives ownership transfer.
+        v.serverMute = existing->second.serverMute;
+        v.serverDeaf = existing->second.serverDeaf;
+        // Replace the relay stream directly. A transient leave event would make
+        // the old client think it was evicted before learning who now owns it.
+        m_relay.removeStream(existing->second.streamId);
+    }
+    v.ownerSessionId = s.sessionId;
+    v.ownerConnId = s.connId;
     v.channelId = c->id;
     v.selfDeaf = m.self_deaf();
     v.selfMute = m.self_mute() || m.self_deaf();
@@ -50,7 +62,8 @@ void ChatServer::handleJoinVoice(Session& s, std::uint64_t rid, const proto::Joi
     info.key = media::randomKey();
     info.expiresAtMs = now() + kVoiceSessionMs;
     m_relay.addStream(info);
-    m_relay.setStreamFlags(v.streamId, m_state.can(c->id, s.userId, Speak) && !v.selfMute, v.selfDeaf);
+    m_relay.setStreamFlags(
+        v.streamId, m_state.can(c->id, s.userId, Speak) && !v.selfMute && !v.serverMute, v.selfDeaf || v.serverDeaf);
     m_relay.setVideoAllowed(v.streamId, false); // until SetStreaming
     m_voice[s.userId] = v;
 
@@ -71,6 +84,11 @@ void ChatServer::handleJoinVoice(Session& s, std::uint64_t rid, const proto::Joi
 
 void ChatServer::handleLeaveVoice(Session& s, std::uint64_t rid)
 {
+    const auto it = m_voice.find(s.userId);
+    if (it != m_voice.end() && it->second.ownerConnId != s.connId) {
+        replyError(s, rid, proto::ERROR_CONFLICT, QStringLiteral("voice belongs to another device"));
+        return;
+    }
     leaveVoice(s.userId);
     replyOk(s, rid);
 }
@@ -95,6 +113,10 @@ void ChatServer::handleSetVoiceState(Session& s, std::uint64_t rid, const proto:
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("not in a voice channel"));
         return;
     }
+    if (it->second.ownerConnId != s.connId) {
+        replyError(s, rid, proto::ERROR_CONFLICT, QStringLiteral("voice belongs to another device"));
+        return;
+    }
     VoiceRec& v = it->second;
     v.selfDeaf = m.self_deaf();
     v.selfMute = m.self_mute() || m.self_deaf(); // deafen also stops transmitting
@@ -109,6 +131,10 @@ void ChatServer::handleSetStreaming(Session& s, std::uint64_t rid, const proto::
     auto it = m_voice.find(s.userId);
     if (it == m_voice.end()) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("join a voice channel to share your screen"));
+        return;
+    }
+    if (it->second.ownerConnId != s.connId) {
+        replyError(s, rid, proto::ERROR_CONFLICT, QStringLiteral("voice belongs to another device"));
         return;
     }
     VoiceRec& v = it->second;
@@ -135,6 +161,10 @@ void ChatServer::handleWatchStream(Session& s, std::uint64_t rid, const proto::W
     if (viewer == m_voice.end() || source == m_voice.end() || source->first == s.userId
         || source->second.channelId != viewer->second.channelId || (m.watch() && !source->second.streaming)) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("that user is not sharing in your voice channel"));
+        return;
+    }
+    if (viewer->second.ownerConnId != s.connId) {
+        replyError(s, rid, proto::ERROR_CONFLICT, QStringLiteral("voice belongs to another device"));
         return;
     }
     m_relay.setSubscription(viewer->second.streamId, source->second.streamId, m.watch());

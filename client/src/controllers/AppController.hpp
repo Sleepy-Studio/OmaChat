@@ -420,6 +420,7 @@ public:
     Q_INVOKABLE void setVideo(const QString& key, const QVariant& value);
     Q_INVOKABLE void setNotification(const QString& key, bool enabled);
     Q_INVOKABLE void setWindowFocused(bool focused);
+    Q_INVOKABLE void markConversationRead(const QString& messageId);
     Q_INVOKABLE void dismissNotice();
 
     // ---- attachments (AttachmentActions.cpp)
@@ -555,6 +556,7 @@ private:
     QHash<QString, QHash<QString, QJsonObject>> m_membersByServer;
     QHash<QString, QJsonObject> m_voiceByUser;
     QSet<QString> m_speaking;
+    QHash<QString, QList<QJsonObject>> m_unreadMessages;
     QHash<QString, int> m_unread;
     QHash<QString, int> m_mentions;
     QSet<QString> m_mutedChannels;

@@ -21,3 +21,16 @@
 # Python bytecode (scripts/import-discord.py)
 __pycache__/
 *.pyc
+
+# Android local build state and signing material
+/android/.gradle/
+/android/.kotlin/
+/android/**/build/
+/android/**/.cxx/
+/android/**/.externalNativeBuild/
+/android/local.properties
+*.jks
+*.keystore
+
+# Local agent conversation exports
+/session-*.md

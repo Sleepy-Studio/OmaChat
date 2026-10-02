@@ -300,3 +300,19 @@ Not done yet — be aware:
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Android
+
+A native Kotlin/Compose Android client is being implemented in `android/`.
+The current vertical slice connects directly over TLS, supports community text,
+history, replies/edits/deletion/reactions, persisted drafts/outbox, and foreground
+recovery. Independent Android keys interoperate with desktop encrypted DMs,
+groups, edits and files, with safety numbers and key-change warnings. Native voice
+now has explicit ownership/transfer controls and a microphone foreground service;
+physical audio/routes/calls remain unverified. Persisted transfer resume, push, OAuth
+and screen-share viewing remain pending; this is not a completed mobile release.
+
+See [build/install and emulator tests](docs/android.md),
+[architecture](docs/android-architecture.md),
+[additive protocol changes](docs/mobile-protocol-changes.md), and
+[actual verification status](docs/android-implementation-status.md).

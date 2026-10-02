@@ -2,6 +2,8 @@ configure_file(src/omachat/core/Version.hpp.in
     ${CMAKE_CURRENT_BINARY_DIR}/generated/omachat/core/Version.hpp @ONLY)
 
 add_library(omachat_shared STATIC
+    src/omachat/crypto/MessageCrypto.cpp
+    src/omachat/crypto/FileCrypto.cpp
     src/omachat/core/Log.cpp
     src/omachat/core/Paths.cpp
     src/omachat/core/Snowflake.cpp

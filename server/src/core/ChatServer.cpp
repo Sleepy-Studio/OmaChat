@@ -184,6 +184,13 @@ void ChatServer::onClosed(quint64 connId)
         m_connectionsPerIp.remove(ip);
 
     if (s->userId) {
+        // Lease teardown is tied to the disconnected owner, even when another
+        // text-only device keeps the account online. A transfer invalidates it.
+        QTimer::singleShot(std::chrono::seconds(15), this, [this, userId = s->userId, connId] {
+            const auto voice = m_voice.find(userId);
+            if (voice != m_voice.end() && voice->second.ownerConnId == connId)
+                leaveVoice(userId);
+        });
         for (auto uit = m_userConns.lower_bound(s->userId); uit != m_userConns.upper_bound(s->userId);) {
             uit = uit->second == connId ? m_userConns.erase(uit) : std::next(uit);
         }
@@ -245,6 +252,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     }
 
     switch (env.payload_case()) {
+    case P::kSetReadMarker:
+        handleSetReadMarker(s, rid, env.set_read_marker());
+        break;
     case P::kSync:
         handleSync(s, rid);
         break;
@@ -266,6 +276,12 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
         break;
     case P::kInstanceModeration:
         handleInstanceModeration(s, rid, env.instance_moderation());
+        break;
+    case P::kListLoginSessions:
+        handleListLoginSessions(s, rid, env.list_login_sessions().before_id());
+        break;
+    case P::kRevokeLoginSession:
+        handleRevokeLoginSession(s, rid, env.revoke_login_session().session_id());
         break;
     case P::kLogout:
         handleLogout(s, rid);
@@ -659,6 +675,7 @@ proto::VoiceState ChatServer::toProto(Id userId, const VoiceRec& v) const
     p.set_server_deaf(v.serverDeaf);
     p.set_stream_id(v.streamId);
     p.set_streaming(v.streaming);
+    p.set_owner_session_id(v.ownerSessionId);
     return p;
 }
 

@@ -485,6 +485,13 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
         const Id channel = idFromJson(data.value(QStringLiteral("channel_id")));
         const Id self = m_conn->model().self().id();
         if (user == self) {
+            const Id owner = idFromJson(data.value(QStringLiteral("owner_session_id")));
+            if (owner && owner != m_conn->sessionId() && m_voiceChannel) {
+                m_voiceChannel = 0;
+                stopVoiceEngine();
+                m_video->stopSharing();
+                m_ipc.broadcast(QStringLiteral("voice.ownership_lost"), {});
+            }
             if (channel == 0 && m_voiceChannel && !m_voicePending) {
                 // The server removed us (kicked from channel, permission change).
                 OMA_INFO("voice", "removed from voice by server");
@@ -689,6 +696,13 @@ void Daemon::checkVoiceAfterSync()
         return;
     const ClientState& model = m_conn->model();
     const proto::VoiceState* mine = model.voiceState(model.self().id());
+    if (mine && mine->owner_session_id() && mine->owner_session_id() != m_conn->sessionId()) {
+        m_voiceChannel = 0;
+        stopVoiceEngine();
+        m_video->stopSharing();
+        m_ipc.broadcast(QStringLiteral("voice.ownership_lost"), {});
+        return;
+    }
     if (mine && mine->channel_id() == m_voiceChannel)
         return;
     // Full resync after an outage lost our voice session: rejoin transparently.

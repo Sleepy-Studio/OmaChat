@@ -52,6 +52,8 @@ public:
     bool connected() const;
     // Sends and waits for the reply with the same request id.
     std::optional<proto::Envelope> call(proto::Envelope env, int timeoutMs = 10000);
+    // Test-only fault: discard the next reply and abort before delivering it to call().
+    std::optional<proto::Envelope> callDroppingReply(proto::Envelope env);
     // Waits until an event matching `pred` arrives (consumed from the queue).
     std::optional<proto::Event> waitEvent(const std::function<bool(const proto::Event&)>& pred, int timeoutMs = 5000);
     void clearEvents() { m_events.clear(); }
@@ -69,6 +71,7 @@ private:
     std::deque<proto::Event> m_events;
     std::uint64_t m_nextId = 1;
     bool m_closed = false;
+    bool m_dropNextReply = false;
 };
 
 // A full omachatd in-process, with its own temp dir, memory credentials and

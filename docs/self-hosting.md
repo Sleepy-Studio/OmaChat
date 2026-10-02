@@ -252,3 +252,16 @@ is missing only makes that one attachment fail to download.
 The schema version is stored in the database (`PRAGMA user_version`) and
 migrated forward on start. A server refuses to open a database written by a
 newer version.
+
+## Mobile-compatible server changes
+
+The Android feature branch adds migration 14 and capability-negotiated durable
+message retries, per-account read state and explicit voice ownership. Back up the
+SQLite database before upgrade. Deduplication records persist until account deletion;
+deleted message tombstones prevent retry resurrection. A persistent public instance
+UUID helps phones detect a replaced database at the same address. Old clients remain
+compatible with additive wire fields. See [mobile protocol changes](mobile-protocol-changes.md).
+
+No push gateway, FCM registration, or OAuth mobile redirect support has been
+implemented yet. No Firebase project credentials are required for the current
+foreground-only text client. The hosted server has not been redeployed by this work.

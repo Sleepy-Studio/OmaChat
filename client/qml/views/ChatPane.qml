@@ -233,6 +233,26 @@ Rectangle {
                 Accessible.role: Accessible.List
                 Accessible.name: qsTr("Messages in %1").arg(App.selectedChannelName)
 
+                // Read receipts follow actual foreground visibility, never history fetch.
+                function scheduleRead() { visibleRead.restart() }
+                onContentYChanged: scheduleRead()
+                onVisibleChanged: scheduleRead()
+                Timer {
+                    id: visibleRead
+                    interval: 300
+                    onTriggered: {
+                        const newest = messages.itemAtIndex(0)
+                        if (!newest || !messages.visible) return
+                        const p = newest.mapToItem(messages, 0, 0)
+                        if (p.y < messages.height && p.y + newest.height > 0)
+                            App.markConversationRead(newest.messageId)
+                    }
+                }
+                Connections {
+                    target: App.messages
+                    function onCountChanged() { messages.scheduleRead() }
+                }
+
                 // One shared menu/dialog instead of one per delegate.
                 function openMenu(target, keyboard = false) {
                     messageMenu.target = target

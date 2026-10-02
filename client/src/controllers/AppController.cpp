@@ -344,11 +344,31 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         loadSnapshot();
         return;
     }
+    if (name == u"read.marker") {
+        const QString channelId = id("channel_id");
+        const qint64 at = static_cast<qint64>(data.value(QStringLiteral("timestamp")).toDouble());
+        const quint64 messageId = id("message_id").toULongLong();
+        auto& unread = m_unreadMessages[channelId];
+        unread.removeIf([&](const QJsonObject& msg) {
+            const qint64 timestamp = static_cast<qint64>(msg.value(QStringLiteral("timestamp")).toDouble());
+            return timestamp < at
+                || (timestamp == at && msg.value(QStringLiteral("id")).toString().toULongLong() <= messageId);
+        });
+        m_unread[channelId] = static_cast<int>(unread.size());
+        m_mentions[channelId] = static_cast<int>(std::ranges::count_if(unread, [&](const QJsonObject& msg) {
+            return msg.value(QStringLiteral("mentions_me")).toBool()
+                || channel(channelId).value(QStringLiteral("type")).toString() == u"dm";
+        }));
+        rebuildServers();
+        rebuildChannels();
+        return;
+    }
     if (name == u"message.created") {
         const QString channelId = id("channel_id");
         if (channelId == m_selectedChannel) {
             m_messages.addMessage(data);
         } else if (id("author_id") != selfId()) {
+            m_unreadMessages[channelId].append(data);
             m_unread[channelId] += 1;
             if (data.value(QStringLiteral("mentions_me")).toBool()
                 || channel(channelId).value(QStringLiteral("type")).toString() == u"dm")
@@ -819,8 +839,17 @@ void AppController::ensureSelection()
     markRead(m_selectedChannel);
 }
 
+void AppController::markConversationRead(const QString& messageId)
+{
+    if (!m_windowFocused || m_selectedChannel.isEmpty() || messageId.isEmpty())
+        return;
+    markRead(m_selectedChannel);
+    m_link.request(QStringLiteral("message.read"), {{"channel", m_selectedChannel}, {"message", messageId}});
+}
+
 void AppController::markRead(const QString& channelId)
 {
+    m_unreadMessages.remove(channelId);
     const bool had = m_unread.remove(channelId) + m_mentions.remove(channelId) > 0;
     if (had) {
         rebuildServers();

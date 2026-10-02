@@ -2,6 +2,7 @@
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
 
+#include <QCryptographicHash>
 #include <QRegularExpression>
 
 #include <set>
@@ -144,6 +145,35 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot send messages here"));
         return;
     }
+    const QByteArray operationId = QByteArray::fromStdString(m.operation_id());
+    if (!operationId.isEmpty() && operationId.size() != 16) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("operation IDs must be 16 bytes"));
+        return;
+    }
+    auto canonical = m;
+    canonical.clear_operation_id();
+    const QByteArray digest = QCryptographicHash::hash(
+        QByteArray::fromStdString(canonical.SerializeAsString()), QCryptographicHash::Sha256);
+    if (!operationId.isEmpty()) {
+        const auto previous = m_store.messageOperation(s.userId, operationId);
+        if (previous) {
+            if (previous->digest != digest) {
+                replyError(s, rid, proto::ERROR_CONFLICT, QStringLiteral("operation ID reused with different content"));
+                return;
+            }
+            if (!m_store.message(previous->messageId)) {
+                replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("accepted message has been deleted"));
+                return;
+            }
+            proto::Envelope env;
+            if (!env.mutable_chat_message()->ParseFromString(previous->result.toStdString())) {
+                replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("stored operation is invalid"));
+                return;
+            }
+            reply(s, rid, std::move(env));
+            return;
+        }
+    }
     std::vector<AttachmentRecord> attachments;
     if (m.attachment_ids_size() > kMaxAttachmentsPerMessage) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST,
@@ -189,7 +219,9 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
     msg.mentions = extractMentions(c->id, msg.content);
     msg.attachments = std::move(attachments);
     msg.encrypted = QByteArray::fromStdString(m.encrypted());
-    if (!m_store.insertMessage(msg)) {
+    const auto accepted = toProto(msg, 0);
+    if (!m_store.insertMessage(
+            msg, 0, {}, operationId, digest, QByteArray::fromStdString(accepted.SerializeAsString()))) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not store message"));
         return;
     }
@@ -409,6 +441,32 @@ void ChatServer::handleSetPresence(Session& s, std::uint64_t rid, const proto::S
     recipients.push_back(s.userId);
     publish(e, recipients);
     replyOk(s, rid);
+}
+
+void ChatServer::handleSetReadMarker(Session& s, std::uint64_t rid, const proto::SetReadMarkerRequest& m)
+{
+    if (!limit(s, rid, s.history))
+        return;
+    const auto msg = m_store.message(m.message_id());
+    if (!msg || msg->channelId != m.channel_id() || !m_state.can(m.channel_id(), s.userId, ViewChannel | ReadHistory)) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("message not found"));
+        return;
+    }
+    if (!m_store.setReadMarker(s.userId, *msg)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not persist read state"));
+        return;
+    }
+    for (const auto& marker : m_store.readMarkers(s.userId)) {
+        if (marker.channel_id() != m.channel_id())
+            continue;
+        proto::Event e;
+        *e.mutable_read_marker() = marker;
+        publish(std::move(e), {s.userId});
+        proto::Envelope env;
+        *env.mutable_read_marker() = marker;
+        reply(s, rid, std::move(env));
+        return;
+    }
 }
 
 } // namespace omachat::server

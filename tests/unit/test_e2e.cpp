@@ -136,7 +136,43 @@ TEST(E2E, SafetyNumbersMatchOnBothSidesAndFollowKeys)
     const QByteArray a1(32, 'a'), a2(32, 'b'), b1(32, 'c');
     const QString n = e2e::safetyNumber(1, {a1, a2}, 2, {b1});
     EXPECT_EQ(n, e2e::safetyNumber(2, {b1}, 1, {a2, a1})) << "same from both ends, key order irrelevant";
+    EXPECT_EQ(n, QStringLiteral("60386 21733 18440 13865 34198 52190 70934 68099 73903 08503 78776 68350")); // Independent BLAKE2b/BE64 vector.
     EXPECT_EQ(n.split(u' ').size(), 12);
     EXPECT_NE(n, e2e::safetyNumber(1, {a1}, 2, {b1})) << "a removed device changes it";
     EXPECT_NE(n, e2e::safetyNumber(1, {a1, a2}, 2, {QByteArray(32, 'd')}));
+}
+
+TEST(E2E, PortableFileBoundariesAndFailurePreserveExistingDestination)
+{
+    QTemporaryDir dir;
+    const auto source = dir.filePath("source"), cipher = dir.filePath("cipher"), output = dir.filePath("output");
+    for (const int size : {0, 1, 65535, 65536, 65537, 131072}) {
+        QByteArray data(size, 'x');
+        {
+            QFile f(source);
+            ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+            ASSERT_EQ(f.write(data), size);
+        }
+        QByteArray key;
+        QString error;
+        ASSERT_TRUE(e2e::encryptFile(source, cipher, &key, &error));
+        EXPECT_EQ(static_cast<std::uint64_t>(QFileInfo(cipher).size()), e2e::encryptedSize(size));
+        ASSERT_TRUE(e2e::decryptFile(cipher, output, key, &error));
+        {
+            QFile f(output);
+            ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+            EXPECT_EQ(f.readAll(), data);
+        }
+        {
+            QFile f(cipher);
+            ASSERT_TRUE(f.open(QIODevice::Append));
+            f.write("trailing");
+        }
+        EXPECT_FALSE(e2e::decryptFile(cipher, output, key, &error));
+        {
+            QFile f(output);
+            ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+            EXPECT_EQ(f.readAll(), data);
+        }
+    }
 }

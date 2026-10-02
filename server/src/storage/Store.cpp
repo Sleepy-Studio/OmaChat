@@ -11,7 +11,22 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 13;
+constexpr int kSchemaVersion = 14;
+
+const char* const kSchemaV14[] = {
+    R"(CREATE TABLE message_operations(
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        operation_id BLOB NOT NULL CHECK(length(operation_id) = 16),
+        digest BLOB NOT NULL, result BLOB NOT NULL, message_id INTEGER NOT NULL,
+        PRIMARY KEY(user_id, operation_id)))",
+    R"(CREATE TABLE read_markers(
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+        message_id INTEGER NOT NULL, timestamp INTEGER NOT NULL,
+        PRIMARY KEY(user_id, channel_id)))",
+    R"(CREATE TRIGGER message_operation_tombstone AFTER DELETE ON messages BEGIN
+        UPDATE message_operations SET result=X'' WHERE message_id=old.id;
+    END)"};
 
 const char* const kSchemaV1[] = {
     R"(CREATE TABLE users(
@@ -329,6 +344,19 @@ int Store::schemaVersion() const
     return 0;
 }
 
+QString Store::instanceId()
+{
+    QSqlQuery q(m_db);
+    if (!q.exec(QStringLiteral("SELECT value FROM instance_settings WHERE key='instance_id'")))
+        return {};
+    if (q.next())
+        return q.value(0).toString();
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (!exec(QStringLiteral("INSERT INTO instance_settings(key,value) VALUES('instance_id',?)"), {id}))
+        return {};
+    return id;
+}
+
 std::optional<bool> Store::registrationOverride()
 {
     QSqlQuery q(m_db);
@@ -441,6 +469,8 @@ bool Store::migrate(QString* error)
         return false;
     if (current < 13 && !apply(kSchemaV13))
         return false;
+    if (current < 14 && !apply(kSchemaV14))
+        return false;
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     if (!m_db.commit()) {
         if (error)
@@ -492,11 +522,15 @@ bool Store::deleteUser(Id userId)
 {
     if (!begin())
         return false;
-    const auto fail = [this] { rollback(); return false; };
+    const auto fail = [this] {
+        rollback();
+        return false;
+    };
     // An owner cannot be removed while their servers still reference them.
     if (!exec(QStringLiteral("DELETE FROM servers WHERE owner_id = ?"), {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM channels WHERE server_id IS NULL AND id IN "
-                                "(SELECT channel_id FROM dm_recipients WHERE user_id = ?)"), {sid(userId)})
+                                "(SELECT channel_id FROM dm_recipients WHERE user_id = ?)"),
+            {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM bans WHERE user_id = ?"), {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM overrides WHERE target_type = 1 AND target_id = ?"), {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM reactions WHERE user_id = ?"), {sid(userId)})
@@ -505,7 +539,8 @@ bool Store::deleteUser(Id userId)
                                 "AND id NOT IN (SELECT icon_attachment_id FROM channels) "
                                 "AND id NOT IN (SELECT banner_attachment_id FROM channels) "
                                 "AND id NOT IN (SELECT icon_attachment_id FROM servers) "
-                                "AND id NOT IN (SELECT banner_attachment_id FROM servers)"), {sid(userId)})
+                                "AND id NOT IN (SELECT banner_attachment_id FROM servers)"),
+            {sid(userId)})
         || !exec(QStringLiteral("DELETE FROM users WHERE id = ?"), {sid(userId)}))
         return fail();
     if (!commit())
@@ -554,8 +589,8 @@ bool Store::insertOAuthIdentity(const OAuthIdentityRecord& identity)
 {
     return exec(QStringLiteral("INSERT INTO oauth_identities(id, user_id, provider, provider_user_id, "
                                "provider_username, linked_at) VALUES(?,?,?,?,?,?)"),
-        {sid(identity.id), sid(identity.userId), identity.provider, identity.providerUserId,
-            identity.providerUsername, qint64(identity.linkedAt)});
+        {sid(identity.id), sid(identity.userId), identity.provider, identity.providerUserId, identity.providerUsername,
+            qint64(identity.linkedAt)});
 }
 
 std::optional<OAuthIdentityRecord> Store::oauthIdentity(const QString& provider, const QString& providerUserId)
@@ -595,8 +630,8 @@ std::vector<OAuthIdentityRecord> Store::oauthIdentitiesForUser(Id userId)
 
 bool Store::deleteOAuthIdentity(Id userId, const QString& provider)
 {
-    return exec(QStringLiteral("DELETE FROM oauth_identities WHERE user_id = ? AND provider = ?"),
-        {sid(userId), provider});
+    return exec(
+        QStringLiteral("DELETE FROM oauth_identities WHERE user_id = ? AND provider = ?"), {sid(userId), provider});
 }
 
 bool Store::hasPassword(Id userId)
@@ -636,6 +671,44 @@ bool Store::rotateSession(Id sessionId, const QByteArray& newDigest, std::int64_
 bool Store::deleteSession(Id sessionId)
 {
     return exec(QStringLiteral("DELETE FROM sessions WHERE id = ?"), {sid(sessionId)});
+}
+
+bool Store::sessionActive(Id sessionId, Id userId, std::int64_t nowMs)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT 1 FROM sessions WHERE id = ? AND user_id = ? AND expires_at >= ?"));
+    q.addBindValue(sid(sessionId));
+    q.addBindValue(sid(userId));
+    q.addBindValue(qint64(nowMs));
+    return q.exec() && q.next();
+}
+
+std::optional<std::vector<SessionRecord>> Store::loginSessions(Id userId, Id beforeId, std::int64_t nowMs)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id, created_at, expires_at FROM sessions WHERE user_id = ? "
+                             "AND expires_at >= ? AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT 101"));
+    q.addBindValue(sid(userId));
+    q.addBindValue(qint64(nowMs));
+    q.addBindValue(sid(beforeId));
+    q.addBindValue(sid(beforeId));
+    if (!q.exec())
+        return std::nullopt;
+    std::vector<SessionRecord> rows;
+    while (q.next())
+        rows.push_back({uid(q.value(0)), userId, {}, q.value(2).toLongLong(), q.value(1).toLongLong()});
+    return rows;
+}
+
+std::optional<bool> Store::revokeLoginSession(Id userId, Id sessionId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("DELETE FROM sessions WHERE user_id = ? AND id = ?"));
+    q.addBindValue(sid(userId));
+    q.addBindValue(sid(sessionId));
+    if (!q.exec())
+        return std::nullopt;
+    return q.numRowsAffected() == 1;
 }
 
 int Store::purgeExpiredSessions(std::int64_t nowMs)
@@ -718,9 +791,8 @@ Store::Snapshot Store::loadSnapshot()
     std::map<Id, ChannelRecord> channels;
     {
         QSqlQuery q(m_db);
-        q.exec(
-            QStringLiteral("SELECT id, COALESCE(server_id, 0), name, type, parent_id, position, topic, description, "
-                           "icon_attachment_id, banner_attachment_id FROM channels"));
+        q.exec(QStringLiteral("SELECT id, COALESCE(server_id, 0), name, type, parent_id, position, topic, description, "
+                              "icon_attachment_id, banner_attachment_id FROM channels"));
         while (q.next()) {
             ChannelRecord c;
             c.id = uid(q.value(0));
@@ -769,15 +841,15 @@ Store::Snapshot Store::loadSnapshot()
 bool Store::insertServer(const ServerRecord& s, std::int64_t createdAt)
 {
     return exec(QStringLiteral("INSERT INTO servers(id, name, icon_url, owner_id, created_at, description, "
-                                "icon_attachment_id, banner_attachment_id) VALUES(?,?,?,?,?,?,?,?)"),
-        {sid(s.id), s.name, s.iconUrl, sid(s.ownerId), qint64(createdAt), s.description,
-            sid(s.iconAttachmentId), sid(s.bannerAttachmentId)});
+                               "icon_attachment_id, banner_attachment_id) VALUES(?,?,?,?,?,?,?,?)"),
+        {sid(s.id), s.name, s.iconUrl, sid(s.ownerId), qint64(createdAt), s.description, sid(s.iconAttachmentId),
+            sid(s.bannerAttachmentId)});
 }
 
 bool Store::updateServer(const ServerRecord& s)
 {
     return exec(QStringLiteral("UPDATE servers SET name = ?, description = ?, icon_attachment_id = ?, "
-                                "banner_attachment_id = ? WHERE id = ?"),
+                               "banner_attachment_id = ? WHERE id = ?"),
         {s.name, s.description, sid(s.iconAttachmentId), sid(s.bannerAttachmentId), sid(s.id)});
 }
 
@@ -953,13 +1025,15 @@ std::optional<Id> Store::discordImportId(Id serverId, const QString& kind, const
 bool Store::rememberDiscordImport(Id serverId, const QString& kind, const QString& discordId, Id localId)
 {
     return exec(QStringLiteral("INSERT INTO discord_import_map(server_id,kind,discord_id,local_id) "
-                               "VALUES(?,?,?,?)"), {sid(serverId), kind, discordId, sid(localId)});
+                               "VALUES(?,?,?,?)"),
+        {sid(serverId), kind, discordId, sid(localId)});
 }
 
 bool Store::rememberDiscordReply(Id serverId, Id messageId, const QString& replyDiscordId)
 {
     return exec(QStringLiteral("INSERT OR REPLACE INTO discord_import_replies(server_id,message_id,discord_reply_id) "
-                               "VALUES(?,?,?)"), {sid(serverId), sid(messageId), replyDiscordId});
+                               "VALUES(?,?,?)"),
+        {sid(serverId), sid(messageId), replyDiscordId});
 }
 
 bool Store::resolveDiscordReplies(Id serverId)
@@ -971,10 +1045,12 @@ bool Store::resolveDiscordReplies(Id serverId)
                                "AND m.discord_id=r.discord_reply_id WHERE r.message_id=messages.id) "
                                "WHERE id IN (SELECT r.message_id FROM discord_import_replies r "
                                "JOIN discord_import_map m ON m.server_id=r.server_id AND m.kind='message' "
-                               "AND m.discord_id=r.discord_reply_id WHERE r.server_id=?)"), {sid(serverId)});
+                               "AND m.discord_id=r.discord_reply_id WHERE r.server_id=?)"),
+        {sid(serverId)});
 }
 
-bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QString& discordId)
+bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QString& discordId,
+    const QByteArray& operationId, const QByteArray& digest, const QByteArray& result)
 {
     if (!begin())
         return false;
@@ -997,6 +1073,10 @@ bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QStri
         q.addBindValue(sid(m.channelId));
         ok = q.exec() && q.numRowsAffected() == 1;
     }
+    if (ok && !operationId.isEmpty())
+        ok = exec(QStringLiteral("INSERT INTO message_operations(user_id, operation_id, digest, result, message_id) "
+                                 "VALUES(?,?,?,?,?)"),
+            {sid(m.authorId), operationId, digest, result, sid(m.id)});
     if (ok && importServerId)
         ok = rememberDiscordImport(importServerId, QStringLiteral("message"), discordId, m.id);
     if (!ok) {
@@ -1004,6 +1084,46 @@ bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QStri
         return false;
     }
     return commit();
+}
+
+std::optional<Store::MessageOperation> Store::messageOperation(Id userId, const QByteArray& operationId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(
+        QStringLiteral("SELECT digest, result, message_id FROM message_operations WHERE user_id=? AND operation_id=?"));
+    q.addBindValue(sid(userId));
+    q.addBindValue(operationId);
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return MessageOperation{q.value(0).toByteArray(), q.value(1).toByteArray(), uid(q.value(2))};
+}
+
+bool Store::setReadMarker(Id userId, const MessageRecord& message)
+{
+    const auto timestamp = message.createdAt ? message.createdAt : decodeSnowflake(message.id).unixMs;
+    return exec(QStringLiteral("INSERT INTO read_markers(user_id,channel_id,message_id,timestamp) VALUES(?,?,?,?) "
+                               "ON CONFLICT(user_id,channel_id) DO UPDATE SET message_id=excluded.message_id, "
+                               "timestamp=excluded.timestamp WHERE (excluded.timestamp,excluded.message_id) > "
+                               "(read_markers.timestamp,read_markers.message_id)"),
+        {sid(userId), sid(message.channelId), sid(message.id), qint64(timestamp)});
+}
+
+std::vector<proto::ReadMarker> Store::readMarkers(Id userId)
+{
+    std::vector<proto::ReadMarker> result;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT channel_id,message_id,timestamp FROM read_markers WHERE user_id=?"));
+    q.addBindValue(sid(userId));
+    if (!q.exec())
+        return result;
+    while (q.next()) {
+        proto::ReadMarker marker;
+        marker.set_channel_id(uid(q.value(0)));
+        marker.set_message_id(uid(q.value(1)));
+        marker.set_timestamp(q.value(2).toLongLong());
+        result.push_back(marker);
+    }
+    return result;
 }
 
 std::optional<MessageRecord> Store::message(Id id)
@@ -1073,7 +1193,8 @@ std::vector<MessageRecord> Store::messagePage(Id channelId, Id beforeId, int lim
         q.addBindValue(sid(beforeId));
     } else {
         q.prepare(QStringLiteral("SELECT %1 FROM messages WHERE channel_id = ? "
-                                 "ORDER BY created_at DESC, id DESC LIMIT ?").arg(cols));
+                                 "ORDER BY created_at DESC, id DESC LIMIT ?")
+                .arg(cols));
         q.addBindValue(sid(channelId));
     }
     q.addBindValue(limit + 1);
@@ -1105,11 +1226,10 @@ std::vector<MessageRecord> Store::searchMessages(const std::vector<Id>& channelI
     for (size_t i = 0; i < channelIds.size(); ++i)
         placeholders << QStringLiteral("?");
     QSqlQuery q(m_db);
-    q.prepare(
-        QStringLiteral("SELECT m.id, m.channel_id, m.author_id, m.content, m.reply_to, m.edited_at, "
-                       "m.is_action, m.mentions, m.encrypted, m.created_at FROM messages_fts f "
-                       "JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ? "
-                       "AND m.channel_id IN (%1) ORDER BY m.created_at DESC, m.id DESC LIMIT ?")
+    q.prepare(QStringLiteral("SELECT m.id, m.channel_id, m.author_id, m.content, m.reply_to, m.edited_at, "
+                             "m.is_action, m.mentions, m.encrypted, m.created_at FROM messages_fts f "
+                             "JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ? "
+                             "AND m.channel_id IN (%1) ORDER BY m.created_at DESC, m.id DESC LIMIT ?")
             .arg(placeholders.join(u',')));
     q.addBindValue(terms.join(u' '));
     for (Id id : channelIds)
@@ -1200,7 +1320,8 @@ bool Store::deleteAttachment(Id id)
 Id Store::artworkChannel(Id attachmentId)
 {
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT id FROM channels WHERE icon_attachment_id = ? OR banner_attachment_id = ? LIMIT 1"));
+    q.prepare(
+        QStringLiteral("SELECT id FROM channels WHERE icon_attachment_id = ? OR banner_attachment_id = ? LIMIT 1"));
     q.addBindValue(sid(attachmentId));
     q.addBindValue(sid(attachmentId));
     return q.exec() && q.next() ? uid(q.value(0)) : 0;
@@ -1209,7 +1330,8 @@ Id Store::artworkChannel(Id attachmentId)
 Id Store::artworkServer(Id attachmentId)
 {
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT id FROM servers WHERE icon_attachment_id = ? OR banner_attachment_id = ? LIMIT 1"));
+    q.prepare(
+        QStringLiteral("SELECT id FROM servers WHERE icon_attachment_id = ? OR banner_attachment_id = ? LIMIT 1"));
     q.addBindValue(sid(attachmentId));
     q.addBindValue(sid(attachmentId));
     return q.exec() && q.next() ? uid(q.value(0)) : 0;

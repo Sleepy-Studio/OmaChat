@@ -283,3 +283,7 @@ does not cancel them.
 `state` is one of `not_configured, connecting, authenticating,
 login_required, synchronizing, connected, reconnecting, offline,
 disconnected, error`. Keys are only ever added in minor releases.
+
+## Android additions
+
+See [mobile protocol changes](mobile-protocol-changes.md) for additive capability-negotiated durable message operations, read markers, voice ownership and server instance identity. Existing control framing remains unchanged.

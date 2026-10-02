@@ -78,7 +78,7 @@ Servers and channels
 
 Messages
   message send CHANNEL [TEXT...] [--attach FILE]...
-  message history CHANNEL [--limit N]
+  message history CHANNEL [--limit N] [--before MESSAGE_ID]
   message edit MESSAGE_ID TEXT... | delete MESSAGE_ID
   message search CHANNEL QUERY...
   message search --server SERVER QUERY... every channel of SERVER you can read
@@ -501,6 +501,8 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             const auto lim = optionValue(args, QStringLiteral("--limit"));
             inv.method = QStringLiteral("message.history");
             inv.params = {{"channel", args.at(2)}, {"limit", lim ? lim->toInt() : 20}};
+            if (const auto before = optionValue(args, QStringLiteral("--before")))
+                inv.params.insert(QStringLiteral("before"), *before);
             inv.print = printMessages;
         } else if (sub == u"edit" && need(4)) {
             inv.method = QStringLiteral("message.edit");

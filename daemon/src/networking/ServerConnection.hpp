@@ -89,6 +89,7 @@ public:
     // `has_error()`), or a synthetic NetworkError/timeout.
     void request(proto::Envelope env, ReplyCallback cb, int timeoutMs = 15000);
 
+    quint64 sessionId() const { return m_sessionId; }
     State state() const { return m_state; }
     static QString stateName(State s);
     QString errorCode() const { return m_errorCode; }

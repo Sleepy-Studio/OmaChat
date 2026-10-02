@@ -1119,23 +1119,28 @@ void Daemon::registerMethods()
                 *request = plan->batches[*index];
                 request->set_server_id(server.id());
                 auto continuation = weakNext.lock();
-                m_conn->request(std::move(batch), [this, r, index, imported, continuation, server, plan](const proto::Envelope& reply) {
-                    if (reply.has_error() || !reply.has_import_discord_result()) {
-                        m_conn->resync([](bool) {});
-                        const QString detail = reply.has_error() ? QString::fromStdString(reply.error().message())
-                                                               : QStringLiteral("invalid import reply");
-                        r.error(e::Internal, QStringLiteral("Server was created, but Discord import stopped: %1. "
-                            "You can retry the export into this server with the offline importer. (Server ID %2)")
-                            .arg(detail, QString::number(server.id())));
-                        return;
-                    }
-                    *imported += static_cast<int>(reply.import_discord_result().imported());
-                    ++*index;
-                    m_ipc.broadcast(QStringLiteral("discord.import_progress"),
-                        {{"completed", static_cast<int>(*index)}, {"total", static_cast<int>(plan->batches.size())},
-                         {"messages", *imported}});
-                    (*continuation)();
-                }, 60000);
+                m_conn->request(
+                    std::move(batch),
+                    [this, r, index, imported, continuation, server, plan](const proto::Envelope& reply) {
+                        if (reply.has_error() || !reply.has_import_discord_result()) {
+                            m_conn->resync([](bool) { });
+                            const QString detail = reply.has_error() ? QString::fromStdString(reply.error().message())
+                                                                     : QStringLiteral("invalid import reply");
+                            r.error(e::Internal,
+                                QStringLiteral("Server was created, but Discord import stopped: %1. "
+                                               "You can retry the export into this server with the offline importer. "
+                                               "(Server ID %2)")
+                                    .arg(detail, QString::number(server.id())));
+                            return;
+                        }
+                        *imported += static_cast<int>(reply.import_discord_result().imported());
+                        ++*index;
+                        m_ipc.broadcast(QStringLiteral("discord.import_progress"),
+                            {{"completed", static_cast<int>(*index)}, {"total", static_cast<int>(plan->batches.size())},
+                                {"messages", *imported}});
+                        (*continuation)();
+                    },
+                    60000);
             };
             (*next)();
         });
@@ -1489,6 +1494,20 @@ void Daemon::registerMethods()
     };
 
     // ----------------------------------------------------------- messages
+    m[QStringLiteral("message.read")] = [this](const QJsonObject& p, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("read.markers.v1"))) {
+            r.ok({{"supported", false}});
+            return;
+        }
+        proto::Envelope env;
+        auto* marker = env.mutable_set_read_marker();
+        marker->set_channel_id(idFromJson(p.value(QStringLiteral("channel"))));
+        marker->set_message_id(idFromJson(p.value(QStringLiteral("message"))));
+        forward(std::move(env), r, [](const proto::Envelope&) { return QJsonObject{{"supported", true}}; });
+    };
+
     m[QStringLiteral("message.history")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
         if (!cid)

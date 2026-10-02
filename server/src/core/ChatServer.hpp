@@ -26,7 +26,9 @@
 
 namespace omachat::server {
 
-namespace auth { struct OAuthProfile; }
+namespace auth {
+struct OAuthProfile;
+}
 
 class ChatServer : public QObject {
     Q_OBJECT
@@ -88,6 +90,8 @@ private:
     };
 
     struct VoiceRec {
+        Id ownerSessionId = 0;
+        quint64 ownerConnId = 0;
         Id channelId = 0;
         bool selfMute = false;
         bool selfDeaf = false;
@@ -128,12 +132,16 @@ private:
     proto::UserStatus statusOf(Id userId) const;
 
     // ---- handlers: auth (AuthHandlers.cpp)
+    void handleSetReadMarker(Session& s, std::uint64_t rid, const proto::SetReadMarkerRequest& m);
     void handleHello(Session& s, std::uint64_t rid, const proto::Hello& m);
     void handleRegister(Session& s, std::uint64_t rid, const proto::RegisterRequest& m);
     void handleLogin(Session& s, std::uint64_t rid, const proto::LoginRequest& m);
     void handleRefresh(Session& s, std::uint64_t rid, const proto::RefreshRequest& m);
     void handleResume(Session& s, std::uint64_t rid, const proto::ResumeRequest& m);
     void handleLogout(Session& s, std::uint64_t rid);
+    void handleListLoginSessions(Session& s, std::uint64_t rid, Id beforeId);
+    void handleRevokeLoginSession(Session& s, std::uint64_t rid, Id sessionId);
+    void invalidateLoginSession(Id userId, Id sessionId);
     void completeAuth(Session& s, std::uint64_t rid, Id userId, Id sessionId, const QString& refreshToken);
     void attachUser(Session& s, Id userId, Id sessionId, const QString& accessToken);
 

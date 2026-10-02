@@ -4,8 +4,8 @@
 #include "Harness.hpp"
 #include "omachat/core/Permissions.hpp"
 
-#include <QCryptographicHash>
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QImage>
 
 #include <limits>
@@ -458,9 +458,8 @@ TEST_F(Fixture, DeletingAccountRemovesServerIdentityAndOwnedServers)
     request.mutable_delete_account();
     auto deleted = alice->call(request);
     ASSERT_TRUE(deleted && deleted->has_ok());
-    EXPECT_TRUE(bob->waitEvent([sid](const proto::Event& e) {
-        return e.has_server_delete() && e.server_delete().server_id() == sid;
-    }));
+    EXPECT_TRUE(bob->waitEvent(
+        [sid](const proto::Event& e) { return e.has_server_delete() && e.server_delete().server_id() == sid; }));
 
     auto retry = std::make_unique<RawClient>(server);
     ASSERT_TRUE(retry->connect());
@@ -489,9 +488,8 @@ TEST_F(Fixture, DeletingMemberRemovesMembershipAndPrivateConversation)
     EXPECT_TRUE(alice->waitEvent([sid, bobId](const proto::Event& e) {
         return e.has_member_leave() && e.member_leave().server_id() == sid && e.member_leave().user_id() == bobId;
     }));
-    EXPECT_TRUE(alice->waitEvent([dmId](const proto::Event& e) {
-        return e.has_channel_delete() && e.channel_delete().channel_id() == dmId;
-    }));
+    EXPECT_TRUE(alice->waitEvent(
+        [dmId](const proto::Event& e) { return e.has_channel_delete() && e.channel_delete().channel_id() == dmId; }));
     const auto state = sync(*alice);
     ASSERT_EQ(state.servers_size(), 1);
     EXPECT_EQ(state.members_size(), 1);
@@ -521,9 +519,8 @@ TEST_F(Fixture, ProfileUpdatesAreValidatedAndVisibleToOtherMembers)
     profile->set_bio("Hello there");
     auto result = alice->call(update);
     ASSERT_TRUE(result && result->has_ok());
-    auto event = bob->waitEvent([](const proto::Event& e) {
-        return e.has_user_update() && e.user_update().username() == "alice";
-    });
+    auto event = bob->waitEvent(
+        [](const proto::Event& e) { return e.has_user_update() && e.user_update().username() == "alice"; });
     ASSERT_TRUE(event.has_value());
     EXPECT_EQ(event->user_update().display_name(), "Alice Cooper");
     EXPECT_EQ(event->user_update().bio(), "Hello there");
@@ -1301,4 +1298,297 @@ TEST_F(Fixture, GroupConversationsAddRenameAndLeave)
     for (auto* c : {bob.get(), carol.get(), dave.get()})
         ASSERT_TRUE(c->call(leave)->has_ok());
     EXPECT_EQ(send(*bob, group.id(), "anyone?").error().code(), proto::ERROR_NOT_FOUND) << "last one out deletes it";
+}
+
+TEST_F(Fixture, DurableMessageOperationsRejectConflictsAndDoNotResurrectDeletion)
+{
+    auto c = client("mobile");
+    createServer(*c, "Mobile");
+    const auto channel = channelNamed(sync(*c), "general", proto::CHANNEL_TYPE_TEXT);
+    ASSERT_NE(channel, 0u);
+    proto::Envelope env;
+    auto* send = env.mutable_send_message();
+    send->set_channel_id(channel);
+    send->set_content("accepted once");
+    send->set_operation_id(std::string(16, 'x'));
+    auto accepted = c->call(env);
+    ASSERT_TRUE(accepted && accepted->has_chat_message());
+    const auto id = accepted->chat_message().id();
+    c->abort();
+    server.stop();
+    ASSERT_TRUE(server.start());
+    c = client("mobile");
+    const auto retried = c->call(env);
+    ASSERT_TRUE(retried && retried->has_chat_message());
+    EXPECT_EQ(retried->chat_message().SerializeAsString(), accepted->chat_message().SerializeAsString());
+    env.mutable_send_message()->set_content("different");
+    const auto conflict = c->call(env);
+    ASSERT_TRUE(conflict && conflict->has_error());
+    EXPECT_EQ(conflict->error().code(), proto::ERROR_CONFLICT);
+    env.mutable_send_message()->set_content("accepted once");
+    proto::Envelope remove;
+    remove.mutable_delete_message()->set_message_id(id);
+    ASSERT_TRUE(c->call(remove)->has_ok());
+    const auto deletedRetry = c->call(env);
+    ASSERT_TRUE(deletedRetry && deletedRetry->has_error());
+    EXPECT_EQ(deletedRetry->error().code(), proto::ERROR_NOT_FOUND);
+    proto::Envelope history;
+    history.mutable_get_messages()->set_channel_id(channel);
+    EXPECT_EQ(c->call(history)->message_page().messages_size(), 0);
+}
+
+TEST_F(Fixture, ReadMarkersAreAccountScopedMonotonicAndDurable)
+{
+    auto c = client("reader");
+    createServer(*c, "Read state");
+    const auto channel = channelNamed(sync(*c), "general", proto::CHANNEL_TYPE_TEXT);
+    const auto first = send(*c, channel, "first").chat_message().id();
+    const auto second = send(*c, channel, "second").chat_message().id();
+    proto::Envelope env;
+    env.mutable_set_read_marker()->set_channel_id(channel);
+    env.mutable_set_read_marker()->set_message_id(second);
+    auto updated = c->call(env);
+    ASSERT_TRUE(updated && updated->has_read_marker());
+    EXPECT_EQ(updated->read_marker().message_id(), second);
+    auto otherDevice = client("reader");
+    env.mutable_set_read_marker()->set_message_id(first);
+    auto older = otherDevice->call(env);
+    ASSERT_TRUE(older && older->has_read_marker());
+    EXPECT_EQ(older->read_marker().message_id(), second);
+    auto unrelated = client("outsider");
+    EXPECT_TRUE(sync(*unrelated).read_markers().empty());
+    EXPECT_EQ(unrelated->call(env)->error().code(), proto::ERROR_NOT_FOUND);
+    c->abort();
+    otherDevice->abort();
+    unrelated->abort();
+    server.stop();
+    ASSERT_TRUE(server.start());
+    c = client("reader");
+    const auto snapshot = sync(*c);
+    ASSERT_EQ(snapshot.read_markers_size(), 1);
+    EXPECT_EQ(snapshot.read_markers(0).message_id(), second);
+}
+
+TEST_F(Fixture, VoiceOwnershipTransferRejectsFormerOwnerOperations)
+{
+    auto desktop = client("owner");
+    createServer(*desktop, "Devices");
+    const auto channel = channelNamed(sync(*desktop), "General", proto::CHANNEL_TYPE_VOICE);
+    proto::Envelope join;
+    join.mutable_join_voice()->set_channel_id(channel);
+    const auto original = desktop->call(join);
+    ASSERT_TRUE(original && original->has_voice_session());
+    auto phone = client("owner");
+    EXPECT_EQ(phone->call(join)->error().code(), proto::ERROR_CONFLICT);
+    join.mutable_join_voice()->set_transfer(true);
+    const auto moved = phone->call(join);
+    ASSERT_TRUE(moved && moved->has_voice_session());
+    EXPECT_NE(moved->voice_session().stream_id(), original->voice_session().stream_id());
+    const auto ownership = desktop->waitEvent([&](const proto::Event& e) {
+        return e.has_voice_state_update() && e.voice_state_update().stream_id() == moved->voice_session().stream_id();
+    });
+    ASSERT_TRUE(ownership);
+    EXPECT_NE(ownership->voice_state_update().owner_session_id(), 0u);
+    proto::Envelope stale;
+    stale.mutable_leave_voice();
+    EXPECT_EQ(desktop->call(stale)->error().code(), proto::ERROR_CONFLICT);
+    stale.clear_payload();
+    stale.mutable_set_voice_state()->set_self_mute(true);
+    EXPECT_EQ(desktop->call(stale)->error().code(), proto::ERROR_CONFLICT);
+    stale.clear_payload();
+    stale.mutable_set_streaming()->set_streaming(true);
+    EXPECT_EQ(desktop->call(stale)->error().code(), proto::ERROR_CONFLICT);
+    stale.clear_payload();
+    stale.mutable_watch_stream()->set_user_id(123);
+    EXPECT_TRUE(desktop->call(stale)->has_error());
+    join.mutable_join_voice()->set_transfer(false);
+    EXPECT_EQ(desktop->call(join)->error().code(), proto::ERROR_CONFLICT);
+    desktop->abort();
+    // Exercise the actual delayed disconnect callback, not just immediate state.
+    waitFor([] { return false; }, 16000);
+    ASSERT_EQ(sync(*phone).voice_states_size(), 1);
+    EXPECT_EQ(sync(*phone).voice_states(0).stream_id(), moved->voice_session().stream_id());
+}
+
+TEST_F(Fixture, DurableSendSurvivesLostAcknowledgementAndKeepsSingleAcceptedMessage)
+{
+    auto sender = client("lostack");
+    createServer(*sender, "Fault injection");
+    const auto channel = channelNamed(sync(*sender), "general", proto::CHANNEL_TYPE_TEXT);
+    auto observer = client("lostack");
+    proto::Envelope send;
+    send.mutable_send_message()->set_channel_id(channel);
+    send.mutable_send_message()->set_content("response lost after acceptance");
+    send.mutable_send_message()->set_operation_id(std::string(16, 'a'));
+    // A real accepted response reaches the transport but never reaches the caller;
+    // the TLS connection is aborted at that boundary. Another session proves commit.
+    EXPECT_FALSE(sender->callDroppingReply(send));
+    const auto accepted = observer->waitEvent([](const proto::Event& event) {
+        return event.has_message_create() && event.message_create().content() == "response lost after acceptance";
+    });
+    ASSERT_TRUE(accepted);
+    auto retrying = client("lostack");
+    const auto retried = retrying->call(send);
+    ASSERT_TRUE(retried && retried->has_chat_message());
+    EXPECT_EQ(retried->chat_message().id(), accepted->message_create().id());
+    proto::Envelope history;
+    history.mutable_get_messages()->set_channel_id(channel);
+    const auto page = retrying->call(history);
+    ASSERT_TRUE(page && page->has_message_page());
+    ASSERT_EQ(page->message_page().messages_size(), 1);
+    EXPECT_EQ(page->message_page().messages(0).id(), accepted->message_create().id());
+
+    // No connection means no acceptance. The same durable operation can be sent later.
+    send.mutable_send_message()->set_content("connection lost before transmission");
+    send.mutable_send_message()->set_operation_id(std::string(16, 'b'));
+    sender->abort();
+    EXPECT_FALSE(sender->call(send, 100));
+    ASSERT_TRUE(retrying->call(send)->has_chat_message());
+    EXPECT_EQ(retrying->call(history)->message_page().messages_size(), 2);
+}
+
+TEST_F(Fixture, RemoteSessionRevocationClosesAllGrantsAndPreservesOtherLoginsAndKeys)
+{
+    std::optional<proto::AuthResult> current;
+    auto alice = client("alice", "correct horse", &current);
+    RawClient remote(server);
+    ASSERT_TRUE(remote.connect() && remote.hello());
+    const auto old = remote.login("alice", "correct horse");
+    ASSERT_TRUE(old);
+    RawClient rotated(server);
+    ASSERT_TRUE(rotated.connect() && rotated.hello());
+    proto::Envelope env;
+    env.mutable_refresh()->set_refresh_token(old->refresh_token());
+    const auto result = rotated.call(env);
+    ASSERT_TRUE(result && result->has_auth_result());
+    const auto fresh = result->auth_result();
+    ASSERT_EQ(fresh.session_id(), old->session_id());
+    std::optional<proto::AuthResult> other;
+    auto bob = client("bob", "correct horse", &other);
+    proto::Envelope key;
+    key.mutable_publish_device_key()->set_public_key(std::string(32, 'k'));
+    ASSERT_TRUE(remote.call(key)->has_ok());
+    proto::Envelope list;
+    list.mutable_list_login_sessions();
+    auto page = alice->call(list);
+    ASSERT_TRUE(page && page->has_login_session_list());
+    ASSERT_EQ(page->login_session_list().sessions_size(), 2);
+    for (const auto& row : page->login_session_list().sessions()) {
+        EXPECT_NE(row.id(), other->session_id());
+        EXPECT_EQ(row.current(), row.id() == current->session_id());
+        EXPECT_TRUE(row.connected());
+        EXPECT_GT(row.created_at(), 0);
+        EXPECT_GT(row.expires_at(), row.created_at());
+    }
+    proto::Envelope revoke;
+    revoke.mutable_revoke_login_session()->set_session_id(old->session_id());
+    EXPECT_EQ(bob->call(revoke)->error().code(), proto::ERROR_NOT_FOUND);
+    ASSERT_TRUE(remote.connected() && rotated.connected());
+    ASSERT_TRUE(alice->call(revoke)->has_ok());
+    ASSERT_TRUE(waitFor([&] { return !remote.connected() && !rotated.connected(); }));
+    EXPECT_EQ(alice->call(revoke)->error().code(), proto::ERROR_NOT_FOUND);
+    EXPECT_TRUE(sync(*alice).has_self());
+    EXPECT_TRUE(sync(*bob).has_self());
+    proto::Envelope directory;
+    directory.mutable_get_device_keys()->add_user_ids(current->user().id());
+    EXPECT_EQ(alice->call(directory)->device_key_list().keys_size(), 1);
+    for (const auto& grant : {*old, fresh}) {
+        RawClient back(server);
+        ASSERT_TRUE(back.connect() && back.hello());
+        proto::Envelope resume;
+        resume.mutable_resume()->set_access_token(grant.access_token());
+        resume.mutable_resume()->set_session_id(grant.session_id());
+        EXPECT_EQ(back.call(resume)->error().code(), proto::ERROR_AUTHENTICATION);
+    }
+    RawClient refresh(server);
+    ASSERT_TRUE(refresh.connect() && refresh.hello());
+    env.mutable_refresh()->set_refresh_token(fresh.refresh_token());
+    EXPECT_EQ(refresh.call(env)->error().code(), proto::ERROR_AUTHENTICATION);
+    page = alice->call(list);
+    ASSERT_TRUE(page && page->has_login_session_list());
+    ASSERT_EQ(page->login_session_list().sessions_size(), 1);
+}
+
+TEST_F(Fixture, LoginSessionRevocationStopsOnlyItsOwnedVoiceAndSupportsSelf)
+{
+    std::optional<proto::AuthResult> current;
+    auto alice = client("alice", "correct horse", &current);
+    RawClient remote(server);
+    ASSERT_TRUE(remote.connect() && remote.hello());
+    const auto auth = remote.login("alice", "correct horse");
+    ASSERT_TRUE(auth);
+    createServer(*alice, "Session voice");
+    const auto voice = channelNamed(sync(*alice), "General", proto::CHANNEL_TYPE_VOICE);
+    ASSERT_NE(voice, 0u);
+    proto::Envelope join;
+    join.mutable_join_voice()->set_channel_id(voice);
+    ASSERT_TRUE(remote.call(join)->has_voice_session());
+    proto::Envelope revoke;
+    revoke.mutable_revoke_login_session()->set_session_id(auth->session_id());
+    ASSERT_TRUE(alice->call(revoke)->has_ok());
+    EXPECT_EQ(sync(*alice).voice_states_size(), 0);
+    ASSERT_TRUE(alice->call(join)->has_voice_session());
+    RawClient textOnly(server);
+    ASSERT_TRUE(textOnly.connect() && textOnly.hello());
+    const auto textAuth = textOnly.login("alice", "correct horse");
+    ASSERT_TRUE(textAuth);
+    revoke.mutable_revoke_login_session()->set_session_id(textAuth->session_id());
+    ASSERT_TRUE(alice->call(revoke)->has_ok());
+    EXPECT_EQ(sync(*alice).voice_states_size(), 1);
+    // Server supports self revocation; Android directs this through local sign-out.
+    revoke.mutable_revoke_login_session()->set_session_id(current->session_id());
+    ASSERT_TRUE(alice->call(revoke)->has_ok());
+    ASSERT_TRUE(waitFor([&] { return !alice->connected(); }));
+    RawClient back(server);
+    ASSERT_TRUE(back.connect() && back.hello());
+    proto::Envelope resume;
+    resume.mutable_resume()->set_session_id(current->session_id());
+    resume.mutable_resume()->set_access_token(current->access_token());
+    EXPECT_EQ(back.call(resume)->error().code(), proto::ERROR_AUTHENTICATION);
+}
+
+TEST_F(Fixture, LogoutInvalidatesEveryAccessGrantForItsLoginSession)
+{
+    std::optional<proto::AuthResult> auth;
+    auto alice = client("alice", "correct horse", &auth);
+    RawClient other(server);
+    ASSERT_TRUE(other.connect() && other.hello());
+    proto::Envelope refresh;
+    refresh.mutable_refresh()->set_refresh_token(auth->refresh_token());
+    const auto result = other.call(refresh);
+    ASSERT_TRUE(result && result->has_auth_result());
+    const auto fresh = result->auth_result();
+    proto::Envelope logout;
+    logout.mutable_logout();
+    ASSERT_TRUE(other.call(logout)->has_ok());
+    ASSERT_TRUE(waitFor([&] { return !alice->connected() && !other.connected(); }));
+    RawClient back(server);
+    ASSERT_TRUE(back.connect() && back.hello());
+    proto::Envelope resume;
+    resume.mutable_resume()->set_access_token(auth->access_token());
+    resume.mutable_resume()->set_session_id(auth->session_id());
+    EXPECT_EQ(back.call(resume)->error().code(), proto::ERROR_AUTHENTICATION);
+    refresh.mutable_refresh()->set_refresh_token(fresh.refresh_token());
+    EXPECT_EQ(back.call(refresh)->error().code(), proto::ERROR_AUTHENTICATION);
+}
+
+TEST_F(Fixture, LoginSessionRequestsRequireAuthenticationAndValidateIds)
+{
+    RawClient guest(server);
+    ASSERT_TRUE(guest.connect() && guest.hello());
+    proto::Envelope list;
+    list.mutable_list_login_sessions();
+    EXPECT_EQ(guest.call(list)->error().code(), proto::ERROR_NOT_AUTHENTICATED);
+    proto::Envelope revoke;
+    revoke.mutable_revoke_login_session()->set_session_id(1);
+    EXPECT_EQ(guest.call(revoke)->error().code(), proto::ERROR_NOT_AUTHENTICATED);
+    auto alice = client("alice");
+    list.mutable_list_login_sessions()->set_before_id(std::numeric_limits<std::uint64_t>::max());
+    EXPECT_EQ(alice->call(list)->error().code(), proto::ERROR_BAD_REQUEST);
+    revoke.mutable_revoke_login_session()->set_session_id(0);
+    EXPECT_EQ(alice->call(revoke)->error().code(), proto::ERROR_BAD_REQUEST);
+    revoke.mutable_revoke_login_session()->set_session_id(std::numeric_limits<std::uint64_t>::max());
+    EXPECT_EQ(alice->call(revoke)->error().code(), proto::ERROR_BAD_REQUEST);
+    revoke.mutable_revoke_login_session()->set_session_id(1);
+    EXPECT_EQ(alice->call(revoke)->error().code(), proto::ERROR_NOT_FOUND);
 }
