@@ -151,13 +151,21 @@ start_client() {
         "$CLIENT_BIN" "$@" >"$DEV_ROOT/client.log" 2>&1 &
     local cpid=$!
     sleep 1.5
-    if kill -0 "$cpid" 2>/dev/null; then
-        say "local client running (pid $cpid) -- log: $DEV_ROOT/client.log"
-        say "confirm in the window: same account, same server, same channels."
-    else
+    if ! kill -0 "$cpid" 2>/dev/null; then
         say "--- client log ---"; cat "$DEV_ROOT/client.log" >&2 || true
         die "local client exited immediately (is the packaged window still open?)"
     fi
+    # Survive a PipeWire that is still coming up: the client exits if it
+    # cannot reach the audio server at startup.
+    if ! wait_for_client "$cpid"; then
+        say "--- client log ---"; cat "$DEV_ROOT/client.log" >&2 || true
+        die "local client exited while the audio stack was settling -- restart pipewire and retry"
+    fi
+    if grep -q 'Failed to connect to pipewire' "$DEV_ROOT/client.log" 2>/dev/null; then
+        say "warning: PipeWire was not reachable at startup; text works, voice may not."
+    fi
+    say "local client running (pid $cpid) -- log: $DEV_ROOT/client.log"
+    say "confirm in the window: same account, same server, same channels."
 }
 
 # The client dies when PipeWire is unavailable or restarting, so a bare
