@@ -11,10 +11,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
       - name: Install pinned SDK
-        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
+        run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
       - name: Protocol tests, lint, debug and optimized unsigned release
         working-directory: android
         run: |
@@ -40,13 +41,31 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
-      - run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
-      - uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 36
-          arch: x86_64
-          profile: pixel_6
-          working-directory: android
-          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=org.omachat.android.RoomPersistenceTest
+      - run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
+      - name: Run persistence tests on API 36
+        working-directory: android
+        timeout-minutes: 20
+        run: |
+          sdkmanager 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+          sudo chmod a+rw /dev/kvm
+          echo no | avdmanager create avd --force --name omachat-ci --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" -avd omachat-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -accel on > /tmp/omachat-emulator.log 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true; cat /tmp/omachat-emulator.log' EXIT
+          adb="$ANDROID_HOME/platform-tools/adb"
+          timeout 180 "$adb" wait-for-device
+          booted=false
+          for attempt in {1..90}; do
+            if [[ $("$adb" shell getprop sys.boot_completed | tr -d '\r') == 1 ]]; then
+              booted=true
+              break
+            fi
+            kill -0 "$emulator_pid"
+            sleep 2
+          done
+          [[ "$booted" == true ]] || { echo 'Emulator boot timed out' >&2; exit 1; }
+          "$adb" shell input keyevent 82
+          ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=org.omachat.android.RoomPersistenceTest
