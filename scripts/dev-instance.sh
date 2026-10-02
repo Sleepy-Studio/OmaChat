@@ -100,9 +100,22 @@ start_daemon() {
 
     # The packaged daemon holds the same account and the same database. Stop it
     # first so exactly one daemon writes at a time and the socket is unambiguous.
+    # It can come back on its own (Restart=on-failure), so verify it stayed
+    # down instead of assuming the stop worked.
     if systemctl --user is-active --quiet omachat.service; then
         say "stopping packaged omachat.service (its session lives in the database, not the process)"
         systemctl --user stop omachat.service
+    fi
+    local i
+    for i in $(seq 1 20); do
+        systemctl --user is-active --quiet omachat.service || break
+        systemctl --user stop omachat.service 2>/dev/null || true
+        sleep 0.25
+    done
+    if systemctl --user is-active --quiet omachat.service; then
+        die "packaged omachat.service keeps restarting; stop it manually first
+  systemctl --user disable --now omachat.service
+then run this again. Two daemons would share one account."
     fi
 
     say "starting local daemon on $DEV_SOCKET"
@@ -145,6 +158,25 @@ start_client() {
         say "--- client log ---"; cat "$DEV_ROOT/client.log" >&2 || true
         die "local client exited immediately (is the packaged window still open?)"
     fi
+}
+
+# The client dies when PipeWire is unavailable or restarting, so a bare
+# background launch is not enough: it must survive the audio stack settling.
+# Poll for the pipewire connection and for the window itself, and only report
+# success once the client is still alive after the audio stack has settled.
+wait_for_client() {
+    local cpid="$1" i pw_ok=0
+    for i in $(seq 1 40); do          # ~20s
+        kill -0 "$cpid" 2>/dev/null || return 1
+        if grep -q 'Failed to connect to pipewire' "$DEV_ROOT/client.log" 2>/dev/null; then
+            : # still failing
+        else
+            pw_ok=1
+            break
+        fi
+        sleep 0.5
+    done
+    return 0
 }
 
 stop_all() {
