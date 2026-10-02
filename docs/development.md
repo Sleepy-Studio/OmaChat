@@ -143,3 +143,15 @@ and never touches your real config, keyring or package:
 scripts/dev-sandbox.sh start
 scripts/dev-sandbox.sh stop
 ```
+
+## Upstream status
+
+`run-local.sh` and `scripts/dev-instance.sh` are **not yet upstreamed** — they
+are committed locally only.
+
+They are a candidate for a pull request: self-contained, no dependencies beyond
+the tools already required to build, and the two environment overrides they
+rely on are documented stable behavior (`OMACHAT_SOCKET`, `XDG_RUNTIME_DIR`).
+Before proposing them, review whether the hardcoded `OMACHAT_DEV_ROOT` default
+of `/tmp/omachat-dev`, and the local-machine assumptions in `check`, belong in
+an upstream patch or should be parameterized.
