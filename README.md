@@ -137,6 +137,34 @@ The package installs the binaries, desktop entry
 the `omachat.service` user unit, and the server's system unit and sysusers
 entry. Uninstalling never deletes your data.
 
+### The `omachat://` link scheme
+
+OmaChat registers `omachat://`, so any script, keybind, browser or other
+application can focus or join something. It is a small, declarative
+integration surface — useful precisely because OmaChat has no plugin
+system (see [docs/addons.md](docs/addons.md)).
+
+| URL | Effect | Asks first? |
+|---|---|---|
+| `omachat://invite/TOKEN` | Join a server by invite | **Yes** |
+| `omachat://join/<channelId>` | Focus a text channel | No |
+| `omachat://server/<serverId>` | Focus a server | No |
+
+```bash
+omachat "omachat://join/230912986460459015"   # from a script or keybind
+omachatctl channel list                         # where the IDs come from
+```
+
+> **Known gap:** there is no GUI affordance for discovering an ID yet — no
+> "Copy ID" on a channel, and `channel list` is the only place they appear.
+> Anyone wiring up a keybind has to look them up by hand. A "Copy link"
+> action in the channel menu is the obvious fix and is not implemented.
+
+The second invocation never opens a second window: it hands the URL to the
+running one over a local socket. Anything that mutates state, captures a
+device, or sends a message asks for confirmation first; navigation does
+not. A link can only reach channels and servers you can already read.
+
 ## Run
 
 ```bash
