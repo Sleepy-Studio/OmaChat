@@ -524,11 +524,42 @@ void AppController::openLink(const QString& url)
     const QUrl u(url);
     const QString scheme = u.scheme().toLower();
     if (scheme == u"omachat") {
-        if (u.host() == u"invite") {
+        const QString verb = u.host().toLower();
+        // Every verb is gated on this: a link is untrusted input, so anything
+        // beyond pure navigation must be confirmed by the user first. The
+        // invite verb established the precedent (Main.qml always asks).
+        if (verb == u"invite") {
             emit requestInviteJoin(url);
             return;
         }
-        showNotice(tr("Unsupported OmaChat link"), true);
+        // Read-only navigation: no state change, so no confirmation needed.
+        if (verb == u"join") {
+            const QString channelId = u.path().mid(1);
+            if (channelId.isEmpty()) {
+                showNotice(tr("This link is missing a channel"), true);
+                return;
+            }
+            if (!m_channelsById.contains(channelId)) {
+                showNotice(tr("That channel is not on any server you can read"), true);
+                return;
+            }
+            selectChannel(channelId);
+            return;
+        }
+        if (verb == u"server") {
+            const QString serverId = u.path().mid(1);
+            if (serverId.isEmpty()) {
+                showNotice(tr("This link is missing a server"), true);
+                return;
+            }
+            if (!m_serversById.contains(serverId)) {
+                showNotice(tr("You are not a member of that server"), true);
+                return;
+            }
+            selectServer(serverId);
+            return;
+        }
+        showNotice(tr("Unsupported OmaChat link (%1)").arg(verb), true);
         return;
     }
     if (scheme == u"http" || scheme == u"https") {
