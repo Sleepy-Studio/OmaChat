@@ -291,12 +291,59 @@ phishing primitive — `<a href>` on any web page could trigger it.
 
 ### 6.5 Notifications and alerting
 
+**Shipped: clickable notifications.** `Notifier::notify` used to pass an empty
+action list and never subscribed to `ActionInvoked`, so a notification had no
+click behaviour at all. Now:
+
+- a message notification carries a `"default"` action, which is what makes the
+  notification **body** clickable, not just a button
+- the daemon subscribes to `ActionInvoked` in its constructor (subscribing late
+  would silently drop clicks whenever the notification server started after it)
+- the action key is `channel:<id>`; on click the daemon re-checks the channel is
+  still readable and broadcasts the existing `ui.navigate` event, so the GUI
+  needs no notification-specific code
+- **with no client connected** there is nobody to receive that broadcast, so the
+  daemon starts one with `omachat://join/<id>`. The client's single-instance
+  handoff makes this harmless if a window appears in between. Launching does not
+  make the daemon GUI-capable: it stays headless (`Qt6::Core/Network/Sql/DBus`)
+  and only calls `QProcess::startDetached`, the same pattern `xdg-open` already
+  uses in `OAuthLoginFlow.cpp`.
+
+The flow, and the answer to "how does a notification arrive if the app is
+closed": the **daemon** is what receives messages, not the GUI. `omachatd` runs
+headless from `omachat.service` on login, holds the session, and speaks D-Bus to
+the notification server. The window is the heavy part and is optional.
+
 | Verb | Direction | Notes |
 |---|---|---|
-| `message/<channelId>/<messageId>` | **inbound** | Click-to-jump from a desktop notification. The highest-value integration: point the notification server's default action here |
+| `message/<channelId>/<messageId>` | **inbound** | Click-to-jump to a specific message. **Blocked** — see below |
 | `mention/me` | inbound | Click on a mention notification |
 | `mark-read/<serverId>`, `snooze/<channelId>?minutes=` | inbound | Notification action buttons |
 | `alert/<channelId>?title=&body=` | **outbound** | A monitoring script raises an in-app notification attributed to a channel. Needs its own rate limit and a visible source label, or it becomes "any process can pop arbitrary text in the user's face" |
+
+**Why `message/` is blocked.** Jump-to-message needs the message body, and the
+client only has the id. The obvious approach — page backwards using the id as a
+`before` bound — **does not work**, measured against a live server. `messagePage`
+pages by `(created_at, id)` compared against the *anchor message's own
+timestamp* (`Store.cpp:1067-1070`), not a raw id bound. `before = target`,
+`target±1` all returned pages entirely older than the target, while `before = 0`
+contained it, because snowflake ids are timestamp-derived and sparse. A correct
+implementation needs a **server-side get-message-by-id that checks channel
+access** — protocol work, not a client patch.
+
+**Pager ping (not implemented).** A member can send a "pager" that raises a
+notification offering to join a voice channel — not a call that connects
+automatically. This is a legitimate, common pattern and it does *not* hit the
+`message/` blocker, because joining needs only a channel id:
+
+- `omachat://voice/<voiceChannelId>` focuses the voice channel **without**
+  connecting (tier N), so a ping can surface the channel with no device capture
+- the actual connect is a separate tier-D action, so the user still decides
+- the pager action needs its own rate limit, a per-user opt-in, and a server-side
+  permission check — any member must not be able to make every client capture its
+  microphone on demand
+- consider a global "quiet hours" or per-channel opt-out, since a ping that
+  interrupts is a paging primitive by design
 
 ### 6.6 Automation, webhooks and orchestration
 
