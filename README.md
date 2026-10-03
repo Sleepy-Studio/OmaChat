@@ -261,6 +261,11 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
   [docs/development.md](docs/development.md) and `./run-local.sh` — same
   account and hosted server as the installed package, without replacing
   `/usr/bin`.
+- **Add-ons and extension points** (local IPC, the `omachat://` scheme, a
+  per-application theme file, and what a plugin system would actually cost):
+  [docs/addons.md](docs/addons.md).
+- **Per-application theme:** drop a `theme.toml` in `~/.config/omachat/` to
+  recolour OmaChat alone, leaving the Omarchy desktop theme untouched.
 - Tests: `ctest --test-dir build -L unit|integration|fuzz`. Integration
   tests run a real TLS server and real daemons in-process (null audio
   device) and push a synthetic tone through the full voice path.

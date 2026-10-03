@@ -79,52 +79,85 @@ requiring new daemon behaviour needs a daemon code change.
 
 ## Phase 2 — extend `omachat://` (small, upstreamable)
 
-The client already registers `omachat://` as a desktop handler
-(`packaging/desktop/org.omarchy.OmaChat.desktop`) and dispatches it in
-`AppController::openLink` (`client/src/controllers/AppActions.cpp:522`). Only
-`omachat://invite/` exists today; anything else is refused with
-"Unsupported OmaChat link".
+**Partly implemented.** The client already registers `omachat://` as a desktop
+handler (`packaging/desktop/org.omarchy.OmaChat.desktop`) and dispatches it in
+`AppController::openLink` (`client/src/controllers/AppActions.cpp:522`).
 
-This is a real third-party entry point with a confirmation gate already built
-(`client/qml/Main.qml:99` — invite links always ask first). Adding verbs is
-additive and low-risk.
-
-Candidate verbs, in rough priority order:
+Shipped so far:
 
 | Verb | Effect | Confirmation |
 |---|---|---|
-| `omachat://join/CHANNEL` | Focus a channel in the current server | No — read-only navigation |
-| `omachat://account/N` | Switch to the Nth connected account | Yes |
-| `omachat://settings/SECTION` | Open Settings at a section | No |
-| `omachat://voice/join` | Join the active voice channel | Yes — it captures the mic |
+| `omachat://invite/TOKEN` | Join a server by invite | Yes — existing |
+| `omachat://join/<channelId>` | Focus a channel | No — navigation only |
+| `omachat://server/<serverId>` | Focus a server | No — navigation only |
+
+Both new verbs validate against the models the client already holds
+(`m_channelsById` / `m_serversById`), so a link cannot reach a channel the user
+cannot read, and an unknown verb or empty id names the problem instead of
+reporting a generic "unsupported link".
+
+Not implemented, and deliberately still gated — anything that mutates state,
+captures a device, or sends a message:
+
+| Verb | Confirmation |
+|---|---|
+| `omachat://account/N` | Yes — switches identity |
+| `omachat://voice/join` | Yes — captures the mic |
+| `omachat://settings/SECTION` | No, once added |
 
 Rules for any new verb:
 
-- **Never** execute a verb from a link without confirmation if it mutates
-  state, captures a device, or sends a message. The invite precedent is the
-  model: parse, describe in plain language, ask.
-- Reject unknown verbs with the existing notice rather than silently ignoring
-  them, so a typo is visible instead of a dead click.
-- Keep the scheme free of credentials and tokens beyond the existing invite
-  token, which is already single-use and server-validated.
+- **Never** execute a mutating verb from a link without confirmation. Parse,
+  describe in plain language, ask. The invite path (`client/qml/Main.qml:99`)
+  is the model.
+- Reject unknown verbs visibly rather than silently ignoring them, so a typo is
+  not a dead click.
+- Keep credentials out of the scheme beyond the existing single-use,
+  server-validated invite token.
 - A verb must never widen what a link can do on the server: everything still
   goes through the daemon and its permission checks.
 
+`tests/manual/url-verbs-check.sh` renders offscreen with each URL and asserts
+startup and render. It does **not** claim a verb navigated — without a live
+daemon there are no channels, so a correct "no such channel" path and a silent
+no-op look identical. The check's header says so.
+
 ## Phase 3 — a real local theme override (small, upstreamable)
 
-`ThemeProvider` reads `$XDG_STATE_HOME/omarchy/current/theme/*.toml`
+**Implemented.** `ThemeProvider` reads `$XDG_STATE_HOME/omarchy/current/theme/colors.toml`
 (`client/src/platform/ThemeProvider.cpp:90`) and accepts `background`,
 `foreground`, `accent`, `selection`, `red`, `green`, `yellow` (`loadFile`,
 `ThemeProvider.cpp:153`). It file-watches and live-reloads.
 
-The gap: that is the **Omarchy** theme file, so editing it recolors the whole
-desktop, not just OmaChat. There is no OmaChat-local theme path.
+The gap it had: that is the **Omarchy** theme file, so editing it recolors the
+whole desktop, not just OmaChat. `reload()` now resolves an OmaChat-local file
+first (`ThemeProvider::localThemeFile`) and falls back to Omarchy:
 
-A minimal change — read an OmaChat-local file first, fall back to Omarchy —
-gives per-application theming with no rebuild and no server involvement. This
-is the cheapest route to "perks only I see" and is worth proposing upstream.
+| Priority | Source |
+|---|---|
+| 1 | `$OMACHAT_THEME_FILE` (explicit, and what the test uses) |
+| 2 | `~/.config/omachat/theme.toml` |
+| 3 | `$XDG_STATE_HOME/omarchy/current/theme/colors.toml` |
+| 4 | built-in dark palette |
 
-Also available locally today, no code needed:
+The local file uses the **same schema**, so a partial file only overrides the
+keys it names and inherits the rest from Omarchy. It is watched too, so edits
+apply live. Per-user and per-application: no rebuild, no server, no
+desktop-wide side effects.
+
+```toml
+# ~/.config/omachat/theme.toml — OmaChat only
+background = "#12141a"
+foreground = "#e6e8ec"
+accent     = "#7aa2f7"
+```
+
+Verified by `tests/manual/theme-override-check.sh`, which renders offscreen and
+reads the background pixel back out of the PNG: Omarchy-only, local-wins,
+partial-falls-back, and no-theme-at-all. The `local-wins` case fails against the
+previous code, so the check discriminates rather than merely passing.
+
+Other local settings, no code needed:
 `~/.config/omachat/config.toml` carries all nine shortcut bindings
 (`shared/src/omachat/config/ClientConfig.cpp:38`), `[ui] compact_mode`,
 `scale`, `reduced_motion`, `[audio]` and `[video]` preferences, and per-user
