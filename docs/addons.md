@@ -217,6 +217,178 @@ Until Phases 1-3 are exhausted, this is not worth doing: the existing IPC
 surface already covers the add-on use cases that are actually being asked for,
 and it is safe by construction because it holds no code-loading path.
 
+## Phase 6 — candidate verbs, surveyed
+
+A survey of what the `omachat://` scheme could carry, and what each would
+require. None of these are implemented; the shipped verbs remain `invite`,
+`join` and `server`. Tier is the safety class a verb would need:
+
+| Tier | Meaning |
+|---|---|
+| **N** | Navigation / read-only. No confirmation. |
+| **C** | Mutates state or sends. Confirmation required. |
+| **D** | Captures a device (mic, camera, screen). Confirmation **plus** a persistent indicator. Never auto-join. |
+| **A** | "Armed": safe unconfirmed **only** if the caller can prove a local trusted origin (see the origin rule below). |
+
+### 6.1 Navigation (tier N)
+
+| Verb | Effect | Notes |
+|---|---|---|
+| `join/<channelId>` | Focus a text channel | **Shipped** |
+| `server/<serverId>` | Focus a server | **Shipped** |
+| `channel/<id>?server=<id>` | Server-qualified channel | IDs are globally unique today, but qualifying them is cheap insurance |
+| `dm/<userId>` | Open a DM or group thread | Needs a DM index in the client model |
+| `message/<channelId>/<messageId>` | **Scroll to and highlight a message** | The highest-value verb: unlocks notifications and cross-app links at once |
+| `mention/me` | Next unread mention | The most-used navigation target in any chat app |
+| `unread`, `next-unread?server=` | Next unread, cycling servers | |
+| `home` | DM / inbox home view | |
+| `search?q=…&scope=server` | Search pre-loaded with a query | **Query from a link must land in a search box, never a composer** |
+| `settings/<section>` | Focus a settings section | Trivial and safe; powers help docs |
+| `profile/me`, `profile/<userId>` | Own profile, or another user's card | |
+| `members/<channelId>`, `pins/<channelId>`, `files/<channelId>` | Side panels | |
+| `compose/<channelId>` | Focus an empty composer without scrolling the message list | Speed-of-use and an accessibility win |
+| `voice/<voiceChannelId>` | Focus a voice channel **without** connecting | Connecting is a separate, tier-D verb |
+
+### 6.2 Lifecycle and moderation (tier C)
+
+| Verb | Effect | Notes |
+|---|---|---|
+| `invite/<token>` | Join a server | **Shipped**, confirmation is the precedent |
+| `create-channel/<serverId>?name=&topic=` | Create a channel | Confirm must show the resolved name **and** topic |
+| `add-friend/<userId>` | Send a friend request | This sends a real message to a human; treat exactly like a DM |
+| `leave/<serverId>` | Leave a server | Destructive, and links arrive from anywhere |
+| `delete-message/<channelId>/<messageId>` | Delete by permalink | Irreversible |
+| `pin/…`, `mute/<channelId>`, `read/<channelId>` | Small persistent state changes | `read` scoped to the focused channel could be tier A |
+
+### 6.3 Composition — prefill, never send (tier C)
+
+The category where a URL scheme most easily becomes a remote-input channel.
+
+| Verb | Effect | Notes |
+|---|---|---|
+| `send/<channelId>?prefill=…` | Open the composer with text **loaded but not sent** | **This is the right shape for every automation link** |
+| `reply/<channelId>/<messageId>?prefill=…` | Prefill a reply | |
+| `react/<channelId>/<messageId>?emoji=` | Add a reaction | Visible but cheap; the first send-like verb that could reasonably be tier A |
+| `attach?path=&to=&prefill=` | Stage a local file without uploading | **Needs a path allowlist** — a link must never be able to name `~/.ssh/id_ed25519` |
+| `forward/<channelId>/<messageId>?to=` | Forward a message | |
+
+**The rule: make `?text=` (auto-send) a rejected or confirm-gated verb, and
+prefer `?prefill=`.** Every automation use case below wants prefill; none
+needs auto-send. Refusing `?text=` outright removes an entire class of
+remote-input attack at zero cost, because a URL that can post as you is a
+phishing primitive — `<a href>` on any web page could trigger it.
+
+### 6.4 Voice, video and screen capture (tier D)
+
+| Verb | Effect | Notes |
+|---|---|---|
+| `voice/join/<id>` | Connect to a voice channel | Confirm naming the channel; the mic indicator must persist |
+| `voice/join/<id>?deafen` | Join deafened | A common "join quietly" keybind |
+| `voice/join/<id>?ring=false` | Join without a ring notification | For scheduled standups |
+| `voice/mute`, `voice/deafen` | Toggle local audio | Device state, so a confirm would be noise; scope to the active session |
+| `voice/leave` | Leave the current voice channel | **Tier N** — a disconnect is the safe direction |
+| `screen-share/start/<id>` | Begin a screen share | **Consider refusing from links entirely.** Expose it as a keybind → `omachatctl`, which is local, deliberate and auditable |
+
+### 6.5 Notifications and alerting
+
+| Verb | Direction | Notes |
+|---|---|---|
+| `message/<channelId>/<messageId>` | **inbound** | Click-to-jump from a desktop notification. The highest-value integration: point the notification server's default action here |
+| `mention/me` | inbound | Click on a mention notification |
+| `mark-read/<serverId>`, `snooze/<channelId>?minutes=` | inbound | Notification action buttons |
+| `alert/<channelId>?title=&body=` | **outbound** | A monitoring script raises an in-app notification attributed to a channel. Needs its own rate limit and a visible source label, or it becomes "any process can pop arbitrary text in the user's face" |
+
+### 6.6 Automation, webhooks and orchestration
+
+These are not user-clicked. They arrive from `cron`, systemd timers, CI and
+webhooks. The right primitive is a **local IPC call with a scoped token**
+(what `omachatctl` already is), not a URL any process can fire.
+
+| Use | Example | Tier |
+|---|---|---|
+| Deploy finished | `send/<id>?prefill=…` from a cron script | C, or A with origin |
+| CI failure | `alert/…` from a webhook | A with a per-channel token |
+| Green-check on a commit | `react/…/…?emoji=✅` | A with a token — lowest-friction legitimate automation |
+| Nightly noise suppression | `read/<id>` | A |
+| Standup timer | `voice/join/<id>?ring=false` | D, and it needs a real user opt-in setting, not just a confirm |
+| Focus mode | `mute/<id>` from a deep-work script | A (local, reversible) |
+| Pomodoro end | `unread` | N |
+
+### 6.7 Cross-application deep links
+
+| Source | Verb | Tier |
+|---|---|---|
+| Browser extension (GitHub, GitLab, Jira) | `message/…` | N |
+| Wiki or docs page | `join/<id>` | N |
+| **Email body** | `invite/<token>` | C — the existing flow, and the shape where the confirm earns its keep |
+| CRM or contact record | `dm/<userId>` | N |
+| Calendar event description | `join/<id>` | N |
+| Project template repo | `create-channel/<id>?name=&topic=` | C |
+
+### 6.8 Sharing (outbound link generation)
+
+Generating links is the other direction, and it has a constraint the
+navigation verbs do not.
+
+| Link | Notes |
+|---|---|
+| Copy link on a message | **Needs a signed permalink token, not a raw ID** — see the snowflake note below |
+| Copy link on a thread | Same |
+| `invite/<token>?max_uses=1&expires=` | Matches what self-hosting already supports |
+
+**Snowflake IDs are sequential and timestamp-decodable.** `Snowflake.hpp:11-15`
+packs a 41-bit millisecond timestamp, a 10-bit node id and a 12-bit sequence,
+so an id reveals when it was created and roughly how many objects exist since.
+
+- **Navigation is safe** — `join` and `server` re-validate against
+  `m_channelsById` / `m_serversById`, so a guessed id you cannot read simply
+  fails.
+- **Sharing is not** — a raw-id permalink leaks channel existence, message
+  count and creation time to anyone holding the link. Share links need a
+  signed, scoped token.
+
+### 6.9 App lifecycle (tier C, and mostly refusable)
+
+`quit`, `relaunch`, `window/close`, `clear-cache`, `new-window` (needs
+multi-window support; `SingleInstance` currently collapses it),
+`export/<serverId>` (writes a file — always a save dialog, never a
+link-supplied path).
+
+**Consider refusing `quit` outright.** It is trivial to trigger from a web
+page once the scheme is registered, and there is a keybind for it.
+
+### 6.10 What any implementation must satisfy
+
+These fall out of the survey, and they apply to every verb above:
+
+1. **Prefill, never auto-send.** Covered in 6.3.
+2. **A bare `omachat://` URL has no caller identity.** The desktop entry
+   declares `MimeType=x-scheme-handler/omachat`, so *any web page* can trigger
+   *any verb*. Any verb that skips confirmation therefore needs an origin
+   check, not merely a judgement that it is "low risk".
+3. **Render the resolved identity, never the link's spelling.** Every
+   confirmation dialog must show resolved server/user/channel names and the
+   decoded, length-capped, escaped payload — not the raw query string. This
+   closes `create-dm?name=Ada`-style impersonation and `%0A` injection.
+4. **No credentials in the scheme beyond the invite token.** URLs end up in
+   shell history, `ps` and logs. Automation uses scoped per-channel tokens
+   over IPC, never a bearer secret in a URL.
+5. **Rate-limit inbound links.** A loop firing `omachat://` URLs must not be
+   able to queue 500 confirmation dialogs. Cap the pending queue and collapse
+   duplicates.
+6. **Screen capture from a link is the one verb to consider refusing.**
+
+### 6.11 Ranked next steps
+
+| Rank | Verb | Why |
+|---|---|---|
+| 1 | `message/<channelId>/<messageId>` | Unlocks notifications and cross-app links simultaneously |
+| 2 | `mention/me` | Most-used navigation target in any chat app |
+| 3 | `send/<id>?prefill=` | Every automation integration, with no auto-send risk |
+| 4 | Notification default action → `message/…` | Biggest UX win; depends on #1 |
+| 5 | `settings/<section>` | Trivial and safe |
+| 6 | Copy ID / Copy link in menus | Makes the whole scheme self-service; today there is no GUI way to discover an id |
+
 ## Recommendation
 
 Ship Phase 1 knowledge (document the IPC surface), then do Phase 2 and Phase 3
