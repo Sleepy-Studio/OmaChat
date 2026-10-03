@@ -1506,6 +1506,19 @@ void Daemon::registerMethods()
                 {"has_more", reply.message_page().has_more()}};
         });
     };
+    // Reserved slot for omachat://message/<channelId>/<messageId>.
+//
+// NOT IMPLEMENTABLE as a paging trick. messagePage() pages by
+// (created_at, id) compared against the ANCHOR MESSAGE'S OWN timestamp
+// (Store.cpp:1067-1070), not by a raw id bound, so there is no before value
+// that isolates a single message. Asking for before = target returned a page
+// entirely older than the target: snowflake ids are timestamp-derived and
+// sparse, so target+1 sits far below the next real id and the strict tuple
+// comparison skips the target.
+//
+// A correct implementation needs a server-side "get message by id" that checks
+// channel access, then the client anchors on it. Do not re-add this as a
+// client-side page request.
     m[QStringLiteral("message.send")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r, "channel", ClientState::ChannelKind::Messages);
         if (!cid)
