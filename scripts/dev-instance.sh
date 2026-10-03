@@ -56,6 +56,27 @@ PACKAGED_CTL="${OMACHAT_PACKAGED_CTL:-/usr/bin/omachatctl}"
 say()  { printf '%s\n' "$*"; }
 die()  { printf 'dev-instance: %s\n' "$*" >&2; exit 1; }
 
+# systemctl --user needs a real XDG_RUNTIME_DIR with a systemd private socket.
+# If the caller's environment has been redirected (a scratch runtime dir, a
+# test harness, a nested shell), every --user call fails with
+# "Failed to connect to user scope bus". Point systemd back at the real one
+# while leaving everything else untouched.
+systemd_user() {
+    local real="${XDG_RUNTIME_DIR_REAL:-/run/user/$(id -u)}"
+    if [ -S "$real/systemd/private" ]; then
+        XDG_RUNTIME_DIR="$real" systemctl --user "$@"
+    else
+        systemctl --user "$@"
+    fi
+}
+
+# PIDs of any INSTALLED (/usr/bin) omachatd, one per line. The dev daemon lives
+# in the build tree and must never match. Returns non-zero when there are none,
+# so it can be used directly as a condition.
+packaged_daemons() {
+    pgrep -f '^/usr/bin/omachatd' 2>/dev/null
+}
+
 require_build() {
     [ -x "$CLIENT_BIN" ] || die "no client build at $CLIENT_BIN -- run: cmake --build $BUILD"
     [ -x "$DAEMON_BIN" ] || die "no daemon build at $DAEMON_BIN -- run: cmake --build $BUILD"
@@ -100,22 +121,31 @@ start_daemon() {
 
     # The packaged daemon holds the same account and the same database. Stop it
     # first so exactly one daemon writes at a time and the socket is unambiguous.
-    # It can come back on its own (Restart=on-failure), so verify it stayed
-    # down instead of assuming the stop worked.
-    if systemctl --user is-active --quiet omachat.service; then
-        say "stopping packaged omachat.service (its session lives in the database, not the process)"
-        systemctl --user stop omachat.service
-    fi
+    # Three separate ways it can survive a naive `stop`, so check the PROCESS,
+    # not just the unit -- systemd_user is-active said "inactive" while a
+    # packaged omachatd was still running and holding the account:
+    #   1. Restart=on-failure restarts it after a stop.
+    #   2. It may have been started directly, not by systemd, so the unit reads
+    #      inactive while the process lives.
+    #   3. A stray daemon from an earlier run with no unit at all.
     local i
     for i in $(seq 1 20); do
-        systemctl --user is-active --quiet omachat.service || break
-        systemctl --user stop omachat.service 2>/dev/null || true
+        packaged_daemons >/dev/null || break
+        if systemd_user is-active --quiet omachat.service; then
+            systemd_user stop omachat.service 2>/dev/null || true
+        fi
+        # Whatever the unit says, the process must actually go.
+        pkill -f '^/usr/bin/omachatd' 2>/dev/null || true
         sleep 0.25
     done
-    if systemctl --user is-active --quiet omachat.service; then
-        die "packaged omachat.service keeps restarting; stop it manually first
-  systemctl --user disable --now omachat.service
-then run this again. Two daemons would share one account."
+    if packaged_daemons; then
+        die "a packaged omachatd is still running (pids: $(packaged_daemons | tr '\n' ' ')).
+Two daemons on one account fight over the server connection. Stop it:
+  pkill -f '^/usr/bin/omachatd'
+then run this again."
+    fi
+    if systemd_user is-active --quiet omachat.service; then
+        say "note: omachat.service is still active; stop it with 'systemctl --user stop omachat.service'"
     fi
 
     say "starting local daemon on $DEV_SOCKET"
@@ -200,13 +230,13 @@ stop_all() {
     pkill -f "^$CLIENT_BIN" 2>/dev/null && say "stopped local client" || true
 
     say "restoring packaged omachat.service"
-    systemctl --user start omachat.service 2>/dev/null || say "could not start omachat.service (start it yourself)"
+    systemd_user start omachat.service 2>/dev/null || say "could not start omachat.service (start it yourself)"
 }
 
 show_status() {
     say "=== packaged install (untouched) ==="
     pacman -Qo /usr/bin/omachat 2>/dev/null || say "(not owned by a package)"
-    printf 'service: '; systemctl --user is-active omachat.service 2>/dev/null || true
+    printf 'service: '; systemd_user is-active omachat.service 2>/dev/null || true
 
     say ""
     say "=== local build ==="
