@@ -122,6 +122,27 @@ startup and render. It does **not** claim a verb navigated — without a live
 daemon there are no channels, so a correct "no such channel" path and a silent
 no-op look identical. The check's header says so.
 
+`tests/manual/url-verbs-live-check.sh` closes that gap. It drives the real
+forwarding path (a second `omachat` invocation hands the URL to the running
+instance over the single-instance socket) and reads the compositor's window
+title to see which channel is actually displayed:
+
+```
+join/<real>          shows that channel
+join/<other real>    moves to a visibly different one
+join/<nonexistent>   leaves the window where it was
+```
+
+It only reads `hyprctl clients`; it never focuses, moves or raises a window.
+Verified against a live account: `#general` → `@Howie Duhzit`, with a
+nonexistent id refused without moving.
+
+**A caveat on `server/`:** it navigates, but the window title often does not
+change, because `selectServer` ends in `ensureSelection()` which immediately
+auto-selects a channel. Two different servers can both show `#general`. The
+observable effect is the server rail and member list, not the title — so
+assert on `status`, not the title, when testing that verb.
+
 ## Phase 3 — a real local theme override (small, upstreamable)
 
 **Implemented.** `ThemeProvider` reads `$XDG_STATE_HOME/omarchy/current/theme/colors.toml`
