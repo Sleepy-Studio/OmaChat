@@ -9,6 +9,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QProcess>
+#include <QStandardPaths>
 
 namespace omachat::daemon {
 
@@ -129,6 +131,8 @@ bool Daemon::start(QString* error)
         }
     });
     registerMethods();
+
+    connect(&m_notifier, &Notifier::actionActivated, this, &Daemon::onActionActivated);
 
     if (!m_ipc.listen(m_options.socketPath, error))
         return false;
@@ -575,10 +579,53 @@ void Daemon::maybeNotify(const ServerConnection& conn, const std::set<std::uint6
     }
     if (!active) // say which account it came to
         summary += QStringLiteral(" · %1@%2").arg(conn.account().username, conn.account().host);
-    m_notifier.notify(summary, msg.value(QStringLiteral("content")).toString(), QStringLiteral("im.received"), mention);
+    // The action key carries the jump target so a click can act on it without
+    // the Notifier knowing anything about channels. The GUI turn is handled in
+    // onActionActivated: the daemon does not launch anything itself.
+    const QString actionKey = QStringLiteral("channel:%1").arg(idString(channelId));
+    m_notifier.notify(summary, msg.value(QStringLiteral("content")).toString(), QStringLiteral("im.received"), mention,
+        actionKey);
 }
 
 // ------------------------------------------------------------------- voice
+
+void Daemon::onActionActivated(const QString& actionKey)
+{
+    // "channel:<id>" -- focus that channel. Same path as the CLI's
+    // `channel join`, so the GUI needs no notification-specific handling.
+    if (!actionKey.startsWith(QStringLiteral("channel:")))
+        return;
+    const Id cid = idFromJson(actionKey.mid(8));
+    if (!cid)
+        return;
+    const auto* c = m_conn->model().channel(cid);
+    if (!c) {
+        OMA_INFO("notify", "action target no longer readable", {"channel", idString(cid)});
+        return;
+    }
+    const QJsonObject nav{
+        {"channel_id", idString(cid)}, {"server_id", idString(c->server_id())}};
+    m_ipc.broadcast(QStringLiteral("ui.navigate"), nav);
+    // A connected GUI already has the broadcast. With no client there is
+    // nobody to receive it, so start one with the same URL the desktop entry
+    // would: the client's single-instance handoff means this is harmless even
+    // if a window appeared between the check and the spawn.
+    if (m_ipc.clientCount() == 0) {
+        const QString client = QStandardPaths::findExecutable(QStringLiteral("omachat"));
+        if (client.isEmpty()) {
+            OMA_WARN("notify", "no client binary to launch", {"channel", idString(cid)});
+            return;
+        }
+        const QString url = QStringLiteral("omachat://join/%1").arg(idString(cid));
+        if (QProcess::startDetached(client, {url}))
+            OMA_INFO("notify", "launched client for notification", {"channel", idString(cid)}, {"url", url});
+        else
+            OMA_WARN("notify", "could not launch client", {"channel", idString(cid)});
+        return;
+    }
+    OMA_INFO("notify", "navigated from notification", {"channel", idString(cid)},
+        {"clients", m_ipc.clientCount()});
+}
 
 void Daemon::joinVoice(Id channelId, const Responder* r)
 {

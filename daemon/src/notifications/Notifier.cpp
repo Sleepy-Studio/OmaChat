@@ -6,6 +6,7 @@
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
+#include <QDBusMetaType>
 #include <QVariantMap>
 
 namespace omachat::daemon {
@@ -13,11 +14,22 @@ namespace omachat::daemon {
 namespace {
 const QString kService = QStringLiteral("org.freedesktop.Notifications");
 const QString kPath = QStringLiteral("/org/freedesktop/Notifications");
+
+// freedesktop says a caller that passes replace_id != 0 has its previous
+// notification closed and replaced. 0 always means "new notification".
+constexpr quint32 kNoReplace = 0;
 } // namespace
 
 Notifier::Notifier(QObject* parent)
     : QObject(parent)
 {
+    // ActionInvoked(id, action_key) is how a click comes back. Subscribed in
+    // the constructor: the notification server may not be running yet, but a
+    // missed subscription would silently drop every click forever.
+    if (!QDBusConnection::sessionBus().isConnected())
+        return;
+    QDBusConnection::sessionBus().connect(kService, kPath, kService,
+        SIGNAL(ActionInvoked(quint32, QString)), this, SLOT(onActionInvoked(quint32, QString)));
 }
 
 bool Notifier::available() const
@@ -26,11 +38,31 @@ bool Notifier::available() const
     return bus.isConnected() && bus.interface() && bus.interface()->isServiceRegistered(kService);
 }
 
-void Notifier::notify(const QString& summary, const QString& body, const QString& category, bool urgent)
+void Notifier::notify(const QString& summary, const QString& body, const QString& category, bool urgent,
+    const QString& actionKey)
 {
-    auto bus = QDBusConnection::sessionBus();
-    if (!bus.isConnected())
+    send(summary, body, category, urgent, actionKey, kNoReplace);
+}
+
+void Notifier::notifyReplacing(const QString& summary, const QString& body, const QString& category, bool urgent,
+    const QString& actionKey, quint32 replaceId)
+{
+    send(summary, body, category, urgent, actionKey, replaceId);
+}
+
+void Notifier::send(const QString& summary, const QString& body, const QString& category, bool urgent,
+    const QString& actionKey, quint32 replaceId)
+{
+    if (!QDBusConnection::sessionBus().isConnected())
         return;
+    // Built by the same helper the tests assert against, so the wire shape has
+    // one definition.
+    QDBusConnection::sessionBus().asyncCall(buildNotifyMessage(summary, body, category, urgent, actionKey, replaceId));
+}
+
+QDBusMessage Notifier::buildNotifyMessage(const QString& summary, const QString& body, const QString& category,
+    bool urgent, const QString& actionKey, quint32 replaceId)
+{
     QDBusMessage msg = QDBusMessage::createMethodCall(kService, kPath, kService, QStringLiteral("Notify"));
     QVariantMap hints;
     hints.insert(QStringLiteral("desktop-entry"), QString::fromLatin1(kAppId));
@@ -40,9 +72,24 @@ void Notifier::notify(const QString& summary, const QString& body, const QString
     QString plain = body;
     if (plain.size() > 240)
         plain = plain.left(239) + QChar(0x2026);
-    msg << QStringLiteral("OmaChat") << quint32(0) << QString::fromLatin1(kAppId) << summary << plain << QStringList()
+
+    // An action with an empty key is what makes the notification body
+    // clickable: the server shows a "default" entry and invokes it when the
+    // user clicks the body rather than a button.
+    QStringList actions;
+    if (!actionKey.isEmpty())
+        actions << QStringLiteral("default");
+
+    // Notify's signature ends with expire_timeout; -1 = server default.
+    msg << QStringLiteral("OmaChat") << replaceId << QString::fromLatin1(kAppId) << summary << plain << actions
         << hints << qint32(-1);
-    bus.asyncCall(msg);
+    return msg;
+}
+
+void Notifier::onActionInvoked(quint32 id, const QString& actionKey)
+{
+    OMA_INFO("notify", "notification action invoked", {"id", id}, {"action", actionKey});
+    emit actionActivated(actionKey);
 }
 
 } // namespace omachat::daemon

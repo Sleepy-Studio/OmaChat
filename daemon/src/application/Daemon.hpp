@@ -57,6 +57,11 @@ public:
     video::VideoManager& videoManager() { return *m_video; }
     QJsonObject statusJson() const;
 
+private slots:
+    // A desktop notification was clicked. Turns the action key into a jump and
+    // makes sure a window exists to receive it.
+    void onActionActivated(const QString& actionKey);
+
 private:
     using Method = std::function<void(const QJsonObject& params, const Responder& r)>;
 
