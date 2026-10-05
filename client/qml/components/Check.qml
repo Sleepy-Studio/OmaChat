@@ -19,8 +19,17 @@ CheckBox {
         implicitHeight: Metrics.px(16)
         radius: Metrics.px(3)
         color: control.checked ? Theme.accent : Theme.surfaceAlt
-        border.color: control.visualFocus ? Theme.text : (control.checked ? Theme.accent : Theme.border)
-        border.width: control.visualFocus ? 2 : 1
+        border.color: control.checked ? Theme.accent : Theme.controlBorder
+        border.width: 1
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -Metrics.px(3)
+            color: "transparent"
+            radius: Metrics.px(5)
+            border.width: Metrics.px(2)
+            border.color: Theme.focus
+            visible: control.visualFocus && control.enabled
+        }
         opacity: control.enabled ? 1 : 0.5
         Text {
             anchors.centerIn: parent

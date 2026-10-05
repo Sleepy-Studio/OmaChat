@@ -30,11 +30,17 @@ class ThemeProvider : public QObject {
     Q_PROPERTY(QColor raised READ raised NOTIFY changed) // popups, hover
     Q_PROPERTY(QColor selection READ selection NOTIFY changed)
     Q_PROPERTY(QColor border READ border NOTIFY changed)
+    Q_PROPERTY(QColor controlBorder READ controlBorder NOTIFY changed)
+    Q_PROPERTY(QColor focus READ focus NOTIFY changed)
     Q_PROPERTY(QColor text READ text NOTIFY changed)
     Q_PROPERTY(QColor textMuted READ textMuted NOTIFY changed)
     Q_PROPERTY(QColor textFaint READ textFaint NOTIFY changed)
     Q_PROPERTY(QColor accent READ accent NOTIFY changed)
     Q_PROPERTY(QColor accentText READ accentText NOTIFY changed)
+    Q_PROPERTY(QColor accentHover READ accentHover NOTIFY changed)
+    Q_PROPERTY(QColor accentPressed READ accentPressed NOTIFY changed)
+    Q_PROPERTY(QColor dangerText READ dangerText NOTIFY changed)
+    Q_PROPERTY(QColor successText READ successText NOTIFY changed)
     Q_PROPERTY(QColor danger READ danger NOTIFY changed)
     Q_PROPERTY(QColor success READ success NOTIFY changed)
     Q_PROPERTY(QColor warning READ warning NOTIFY changed)
@@ -63,11 +69,18 @@ public:
     QColor raised() const { return m_raised; }
     QColor selection() const { return m_selection; }
     QColor border() const { return m_border; }
+    QColor controlBorder() const { return m_controlBorder; }
+    QColor focus() const { return m_focus; }
     QColor text() const { return m_text; }
     QColor textMuted() const { return m_textMuted; }
     QColor textFaint() const { return m_textFaint; }
     QColor accent() const { return m_accent; }
     QColor accentText() const { return m_accentText; }
+    QColor accentHover() const { return m_accentHover; }
+    QColor accentPressed() const { return m_accentPressed; }
+    QColor dangerText() const { return contrastingText(m_danger); }
+    QColor successText() const { return contrastingText(m_success); }
+    Q_INVOKABLE QColor contrastingText(const QColor& background) const;
     QColor danger() const { return m_danger; }
     QColor success() const { return m_success; }
     QColor warning() const { return m_warning; }
@@ -104,6 +117,7 @@ private:
     bool m_dark = true;
     QColor m_background, m_surface, m_surfaceAlt, m_raised, m_selection, m_border;
     QColor m_text, m_textMuted, m_textFaint, m_accent, m_accentText;
+    QColor m_controlBorder, m_focus, m_accentHover, m_accentPressed;
     QColor m_danger, m_success, m_warning, m_idle, m_mention, m_codeBackground;
     QString m_fontFamily;
     QString m_monoFamily;

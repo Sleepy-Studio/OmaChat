@@ -178,40 +178,104 @@ Item {
             }
         }
 
-        // Uploads in flight (they continue even if this window closes)
-        Repeater {
-            model: App.uploads
-            delegate: RowLayout {
-                required property var modelData
-                Layout.fillWidth: true
-                Layout.bottomMargin: Metrics.px(4)
-                spacing: Metrics.px(8)
-                Text {
-                    Layout.preferredWidth: Metrics.px(180)
-                    elide: Text.ElideMiddle
-                    color: Theme.textMuted
-                    font.pixelSize: Metrics.px(12)
-                    text: modelData.waiting ? qsTr("%1 continues when reconnected").arg(modelData.name)
-                                            : qsTr("Uploading %1").arg(modelData.name)
+        ScrollView {
+            Layout.fillWidth: true
+            visible: App.uploads.length > 0 || App.sendOperations.length > 0
+            implicitHeight: visible ? Math.min(outcomes.implicitHeight, Metrics.px(140)) : 0
+            contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ColumnLayout {
+                id: outcomes
+                width: parent.width
+                // Daemon-owned transfers and retained outcomes for this conversation.
+                Repeater {
+                    model: App.uploads
+                    delegate: ColumnLayout {
+                        id: uploadRow
+                        required property var modelData
+                        readonly property bool ended: uploadRow.modelData.complete === true || uploadRow.modelData.error !== undefined
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: Metrics.px(6)
+                        spacing: Metrics.px(2)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                color: Theme.textMuted
+                                font.pixelSize: Metrics.px(12)
+                                text: uploadRow.modelData.error !== undefined ? qsTr("%1: %2").arg(uploadRow.modelData.name).arg(uploadRow.modelData.error.message)
+                                    : uploadRow.modelData.complete === true ? qsTr("%1 uploaded; message delivery is separate.").arg(uploadRow.modelData.name)
+                                    : uploadRow.modelData.waiting ? qsTr("%1 continues when reconnected").arg(uploadRow.modelData.name)
+                                    : qsTr("Uploading %1 · %2 / %3").arg(uploadRow.modelData.name)
+                                        .arg(App.formatSize(uploadRow.modelData.transferred)).arg(App.formatSize(uploadRow.modelData.total))
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: text
+                            }
+                            IconButton {
+                                iconName: "x"
+                                tip: uploadRow.ended ? qsTr("Dismiss upload outcome") : qsTr("Cancel upload")
+                                onClicked: uploadRow.ended ? App.dismissTransfer(uploadRow.modelData.key) : App.cancelTransfer(uploadRow.modelData.id)
+                            }
+                        }
+                        ProgressBar {
+                            visible: !uploadRow.ended
+                            Layout.fillWidth: true
+                            from: 0
+                            to: Math.max(1, uploadRow.modelData.total)
+                            value: uploadRow.modelData.transferred
+                        }
+                    }
                 }
-                ProgressBar {
-                    Layout.fillWidth: true
-                    from: 0
-                    to: Math.max(1, modelData.total)
-                    value: modelData.transferred
-                }
-                Text {
-                    color: Theme.textMuted
-                    font.pixelSize: Metrics.px(11)
-                    text: App.formatSize(modelData.transferred) + " / " + App.formatSize(modelData.total)
-                }
-                IconButton {
-                    implicitWidth: Metrics.px(22)
-                    implicitHeight: Metrics.px(22)
-                    iconSize: Metrics.px(12)
-                    iconName: "x"
-                    tip: qsTr("Cancel upload")
-                    onClicked: App.cancelTransfer(modelData.id)
+
+                Repeater {
+                    model: App.sendOperations
+                    delegate: ColumnLayout {
+                        id: sendRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: Metrics.px(6)
+                        spacing: Metrics.px(2)
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: Theme.textMuted
+                            font.pixelSize: Metrics.px(12)
+                            text: sendRow.modelData.pending ? qsTr("Sending message…")
+                                : sendRow.modelData.retryable ? qsTr("Message not sent: %1").arg(sendRow.modelData.error)
+                                : qsTr("Delivery unconfirmed: %1. Check this conversation before sending again.").arg(sendRow.modelData.error)
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: text
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            visible: !sendRow.modelData.pending && sendRow.modelData.text.length > 0
+                            text: sendRow.modelData.text
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            wrapMode: Text.Wrap
+                            color: Theme.text
+                            font.pixelSize: Metrics.px(12)
+                        }
+                        RowLayout {
+                            visible: !sendRow.modelData.pending
+                            FlatButton {
+                                visible: sendRow.modelData.retryable
+                                text: qsTr("Retry")
+                                enabled: App.canSend && App.state === "connected" && App.daemonState === "connected"
+                                onClicked: App.retrySend(sendRow.modelData.id)
+                            }
+                            FlatButton {
+                                visible: sendRow.modelData.text.length > 0
+                                text: qsTr("Copy text")
+                                onClicked: App.copyText(sendRow.modelData.text)
+                            }
+                            FlatButton {
+                                text: qsTr("Dismiss")
+                                onClicked: App.dismissSend(sendRow.modelData.id)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -221,8 +285,8 @@ Item {
             implicitHeight: Math.min(input.implicitHeight, Metrics.px(220)) + Metrics.px(4)
             radius: Metrics.px(8)
             color: Theme.surfaceAlt
-            border.width: input.activeFocus ? 1 : 0
-            border.color: Theme.border
+            border.width: input.activeFocus ? Metrics.px(2) : 0
+            border.color: Theme.focus
 
             ScrollView {
                 id: scroll
@@ -232,6 +296,7 @@ Item {
 
                 TextArea {
                     id: input
+                    objectName: "composerInput"
                     enabled: App.canSend || composer.editingId.length > 0
                     wrapMode: TextArea.Wrap
                     color: Theme.text
@@ -294,8 +359,7 @@ Item {
 
                 EmojiPicker {
                     id: composerEmojiPicker
-                    x: parent.width - width
-                    y: -height - Metrics.px(4)
+                    onClosed: input.forceActiveFocus()
                     onEmojiSelected: glyph => {
                         input.insert(input.cursorPosition, glyph)
                         input.forceActiveFocus()

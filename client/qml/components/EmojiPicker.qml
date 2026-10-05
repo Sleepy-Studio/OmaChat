@@ -11,8 +11,12 @@ Popup {
 
     signal emojiSelected(string glyph)
 
-    width: Metrics.px(320)
-    height: Metrics.px(360)
+    objectName: "emojiPicker"
+    parent: Overlay.overlay
+    width: Math.min(Metrics.px(320), parent ? parent.width - Metrics.px(24) : Metrics.px(320))
+    height: Math.min(Metrics.px(360), parent ? parent.height - Metrics.px(24) : Metrics.px(360))
+    x: parent ? Math.max(Metrics.px(12), (parent.width - width) / 2) : 0
+    y: parent ? Math.max(Metrics.px(12), (parent.height - height) / 2) : 0
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -66,26 +70,23 @@ Popup {
             id: search
             Layout.fillWidth: true
             placeholder: qsTr("Search emoji")
+            input.objectName: "emojiSearch"
+            input.Keys.onDownPressed: {
+                const target = root._showCustom ? customGrid : grid
+                target.currentIndex = 0
+                target.forceActiveFocus()
+            }
+            input.Keys.onReturnPressed: {
+                if (root._showCustom && root._filteredCustom.length > 0) root.pickCustom(root._filteredCustom[0].name)
+                else if (!root._showCustom && root._filtered.length > 0) root.pick(root._filtered[0].glyph)
+            }
         }
 
-        Row {
+        RowLayout {
             visible: App.serverEmoji.length > 0
             Layout.fillWidth: true
-            spacing: Metrics.px(10)
-            Text {
-                text: qsTr("Unicode")
-                color: root._showCustom ? Theme.textFaint : Theme.accent
-                font.pixelSize: Metrics.px(12)
-                font.bold: !root._showCustom
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root._showCustom = false }
-            }
-            Text {
-                text: qsTr("Server")
-                color: root._showCustom ? Theme.accent : Theme.textFaint
-                font.pixelSize: Metrics.px(12)
-                font.bold: root._showCustom
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root._showCustom = true }
-            }
+            FlatButton { text: qsTr("Unicode"); primary: !root._showCustom; onClicked: root._showCustom = false }
+            FlatButton { text: qsTr("Server"); primary: root._showCustom; onClicked: root._showCustom = true }
         }
 
         Row {
@@ -107,6 +108,11 @@ Popup {
 
         GridView {
             id: grid
+            objectName: "unicodeEmojiGrid"
+            activeFocusOnTab: true
+            keyNavigationEnabled: true
+            Keys.onReturnPressed: if (currentItem) root.pick(currentItem.glyph)
+            Keys.onSpacePressed: if (currentItem) root.pick(currentItem.glyph)
             visible: !root._showCustom
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -119,6 +125,10 @@ Popup {
 
         GridView {
             id: customGrid
+            activeFocusOnTab: true
+            keyNavigationEnabled: true
+            Keys.onReturnPressed: if (currentItem) root.pickCustom(currentItem.modelData.name)
+            Keys.onSpacePressed: if (currentItem) root.pickCustom(currentItem.modelData.name)
             visible: root._showCustom
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -136,6 +146,8 @@ Popup {
             width: Metrics.px(34)
             height: Metrics.px(34)
             radius: Metrics.px(4)
+            border.width: GridView.isCurrentItem && grid.activeFocus ? 2 : 0
+            border.color: Theme.focus
             color: hover.hovered ? Theme.selection : "transparent"
             readonly property string glyph: typeof modelData === "string" ? modelData : modelData.glyph
             readonly property string tip: typeof modelData === "string" ? "" : modelData.shortcode
@@ -166,6 +178,8 @@ Popup {
             width: Metrics.px(34)
             height: Metrics.px(34)
             radius: Metrics.px(4)
+            border.width: GridView.isCurrentItem && customGrid.activeFocus ? 2 : 0
+            border.color: Theme.focus
             color: chover.hovered ? Theme.selection : "transparent"
 
             Component.onCompleted: App.requestMedia(modelData.attachment_id, modelData.name)

@@ -18,7 +18,7 @@ Rectangle {
         id: label
         anchors.centerIn: parent
         text: parent.count > 99 ? "99+" : parent.count
-        color: "#ffffff"
+        color: Theme.dangerText
         font.pixelSize: Metrics.px(10)
         font.bold: true
     }

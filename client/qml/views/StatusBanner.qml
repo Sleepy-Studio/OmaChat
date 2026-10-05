@@ -8,11 +8,12 @@ Rectangle {
 
     readonly property bool active: App.state === "reconnecting" || App.state === "offline"
                                    || App.state === "disconnected" || App.state === "synchronizing"
-                                   || App.audioError.length > 0
+                                   || App.audioError.length > 0 || App.failedSendCount > 0
 
     visible: active
     implicitHeight: active ? Metrics.px(30) : 0
-    color: App.state === "synchronizing" ? Theme.raised : Qt.darker(Theme.warning, 2.6)
+    color: Theme.raised
+    border.color: App.state === "synchronizing" ? Theme.border : Theme.warning
 
     Accessible.role: Accessible.AlertMessage
     Accessible.name: label.text
@@ -34,7 +35,14 @@ Rectangle {
                 : App.state === "offline" ? qsTr("You are offline. OmaChat will reconnect when the network returns.")
                 : App.state === "disconnected" ? qsTr("Disconnected from %1").arg(App.accountHost)
                 : App.state === "synchronizing" ? qsTr("Synchronizing…")
-                : qsTr("Audio: %1").arg(App.audioError)
+                : App.audioError.length > 0 ? qsTr("Audio: %1").arg(App.audioError)
+                : qsTr("%1 message(s) need attention").arg(App.failedSendCount)
+        }
+        FlatButton {
+            visible: App.failedSendCount > 0
+            implicitHeight: Metrics.px(22)
+            text: qsTr("Review send")
+            onClicked: App.reviewFailedSend()
         }
         FlatButton {
             visible: App.state === "reconnecting" || App.state === "disconnected" || App.state === "offline"

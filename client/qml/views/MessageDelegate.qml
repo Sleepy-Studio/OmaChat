@@ -77,7 +77,7 @@ Item {
                  : root.mentionsMe ? Qt.rgba(Theme.mention.r, Theme.mention.g, Theme.mention.b, 0.10)
                  : (root.hovered ? Theme.surface : "transparent")
             border.width: root.keyboardCurrent ? Metrics.px(2) : 0
-            border.color: Theme.accent
+            border.color: Theme.focus
 
             Rectangle {
                 visible: root.searchMatch
@@ -331,8 +331,7 @@ Item {
 
             EmojiPicker {
                 id: reactionPicker
-                x: parent.width - width
-                y: -height - Metrics.px(4)
+                objectName: "reactionEmojiPicker"
                 onEmojiSelected: glyph => App.toggleReaction(root.messageId, glyph)
             }
         }

@@ -12,6 +12,7 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 
@@ -169,6 +170,8 @@ void AppController::logout()
         rebuildChannels();
         rebuildMembers();
         emit selectionChanged();
+        emit attachmentsChanged();
+        emit sendOperationsChanged();
     });
 }
 
@@ -197,6 +200,8 @@ void AppController::selectHome()
     updateTyping();
     persistSelection();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
 }
 
 void AppController::selectServer(const QString& id)
@@ -217,6 +222,8 @@ void AppController::selectServer(const QString& id)
     updateTyping();
     persistSelection();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
 }
 
 void AppController::selectChannel(const QString& id)
@@ -254,6 +261,8 @@ void AppController::selectChannel(const QString& id)
     updateTyping();
     persistSelection();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
 }
 
 void AppController::selectRelativeChannel(int delta)
@@ -283,31 +292,100 @@ void AppController::toggleCategory(const QString& id)
 void AppController::sendMessage(const QString& channelId, const QString& content, const QString& replyTo, bool action,
     const QString& original, const QVariantList& files)
 {
-    QJsonObject params{{"channel", channelId}, {"content", content}, {"action", action}};
-    if (!replyTo.isEmpty())
-        params.insert(QStringLiteral("reply_to"), replyTo);
+    if (m_sendOperations.size() >= 20) {
+        showNotice(tr("Resolve or dismiss earlier sends before sending more."), true);
+        emit composerRestore(original);
+        return;
+    }
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_sendOperations.insert(id, {accountId(), channelId, content, replyTo, original, {}, files, action});
+    dispatchSend(id);
+}
+
+QVariantList AppController::sendOperations() const
+{
+    QVariantList out;
+    for (auto it = m_sendOperations.cbegin(); it != m_sendOperations.cend(); ++it) {
+        const auto& op = it.value();
+        if (op.account == accountId() && op.channel == m_selectedChannel)
+            out.append(QVariantMap{{"id", it.key()}, {"text", op.original}, {"error", op.error},
+                {"pending", op.pending}, {"retryable", op.retryable}});
+    }
+    return out;
+}
+
+int AppController::failedSendCount() const
+{
+    return static_cast<int>(std::ranges::count_if(m_sendOperations, [this](const auto& op) {
+        return op.account == accountId() && !op.pending;
+    }));
+}
+
+void AppController::reviewFailedSend()
+{
+    for (const auto& op : m_sendOperations) {
+        if (op.account == accountId() && !op.pending) {
+            selectChannel(op.channel);
+            return;
+        }
+    }
+}
+
+void AppController::dispatchSend(const QString& id)
+{
+    auto& op = m_sendOperations[id];
+    op.pending = true;
+    op.error.clear();
+    emit sendOperationsChanged();
+    QJsonObject params{{"channel", op.channel}, {"content", op.content}, {"action", op.action}};
+    if (!op.replyTo.isEmpty())
+        params.insert(QStringLiteral("reply_to"), op.replyTo);
     QJsonArray paths;
-    for (const auto& f : files)
+    for (const auto& f : op.files)
         paths.append(f.toMap().value(QStringLiteral("path")).toString());
     if (!paths.isEmpty())
         params.insert(QStringLiteral("files"), paths);
-    m_link.request(
-        QStringLiteral("message.send"), params,
-        [this, original, files](const ipc::Reply& r) {
-            if (!r.ok) {
-                showNotice(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage, true);
-                emit composerRestore(original); // never lose what the user typed
-                if (!files.isEmpty() && m_pendingFiles.isEmpty()) {
-                    m_pendingFiles = files; // nor what they attached
-                    emit attachmentsChanged();
-                }
-            }
-        },
-        files.isEmpty() ? 20000 : 0); // uploads report progress through events
+    m_link.request(QStringLiteral("message.send"), params, [this, id](const ipc::Reply& r) {
+        if (r.ok) {
+            m_sendOperations.remove(id);
+        } else {
+            auto& failed = m_sendOperations[id];
+            failed.pending = false;
+            failed.error = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
+            // Only explicit rejection is safe to repeat. A transport failure or
+            // timeout may have lost the acknowledgement after the server saved it.
+            failed.retryable = QStringList{"BadRequest", "PermissionDenied", "NotFound", "RateLimited",
+                "TooLarge", "StorageError", "AuthenticationError", "Conflict"}.contains(r.errorCode);
+        }
+        emit sendOperationsChanged();
+    }, op.files.isEmpty() ? 20000 : 0);
+}
+
+void AppController::retrySend(const QString& id)
+{
+    const auto it = m_sendOperations.constFind(id);
+    if (it == m_sendOperations.cend() || it->pending || !it->retryable
+        || it->account != accountId() || it->channel != m_selectedChannel || !canSend()
+        || state() != u"connected" || daemonState() != u"connected")
+        return;
+    dispatchSend(id);
+}
+
+void AppController::dismissSend(const QString& id)
+{
+    const auto it = m_sendOperations.constFind(id);
+    if (it == m_sendOperations.cend() || it->pending || it->account != accountId())
+        return;
+    m_sendOperations.remove(id);
+    emit sendOperationsChanged();
 }
 
 bool AppController::sendComposer(const QString& text)
 {
+    if (m_sendOperations.size() >= 20) {
+        showNotice(tr("Resolve or dismiss earlier sends before sending more."), true);
+        return false;
+    }
     if (text.trimmed().isEmpty() && m_pendingFiles.isEmpty())
         return false;
     if (auto cmd = !text.trimmed().isEmpty() ? CommandParser::parse(text) : std::nullopt) {
@@ -818,7 +896,12 @@ void AppController::deleteServer(const QString& id)
 void AppController::updateServerDetails(const QString& id, const QString& name, const QString& description)
 {
     call(QStringLiteral("server.update"), {{"server", id}, {"name", name.trimmed()}, {"description", description}},
-        [this, id](const QJsonObject&) { emit serverDetailsSaved(id); }, tr("Cannot update server"));
+        [this, id](const QJsonObject& saved) {
+            emit serverDetailsSaved(id);
+            emit administrationFinished(QStringLiteral("server.update"), id, {}, saved.toVariantMap());
+        }, tr("Cannot update server"), [this, id](const QString& error) {
+            emit administrationFinished(QStringLiteral("server.update"), id, error);
+        });
 }
 
 void AppController::setServerArtwork(const QString& id, const QString& kind, const QUrl& fileUrl)
@@ -851,8 +934,11 @@ void AppController::createChannel(const QString& name, const QString& type, cons
                 setChannelArtwork(id, QStringLiteral("icon"), iconFile);
             if (!bannerFile.isEmpty())
                 setChannelArtwork(id, QStringLiteral("banner"), bannerFile);
+            emit administrationFinished(QStringLiteral("channel.create"), id, {});
         },
-        tr("Cannot create channel"));
+        tr("Cannot create channel"), [this](const QString& error) {
+            emit administrationFinished(QStringLiteral("channel.create"), {}, error);
+        });
 }
 
 void AppController::deleteChannel(const QString& id)
@@ -871,8 +957,13 @@ void AppController::updateChannelDetails(const QString& id, const QString& name,
 {
     call(QStringLiteral("channel.update"),
         {{"channel", id}, {"name", name.trimmed()}, {"topic", topic}, {"description", description}},
-        [this, id](const QJsonObject&) { emit channelDetailsSaved(id); },
-        tr("Cannot update channel"));
+        [this, id](const QJsonObject& saved) {
+            emit channelDetailsSaved(id);
+            emit administrationFinished(QStringLiteral("channel.update"), id, {}, saved.toVariantMap());
+        },
+        tr("Cannot update channel"), [this, id](const QString& error) {
+            emit administrationFinished(QStringLiteral("channel.update"), id, error);
+        });
 }
 
 void AppController::setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl)

@@ -9,6 +9,7 @@ import OmaChat
 // supports it, every channel of the current server you can read.
 Dialog {
     id: dialog
+    objectName: "searchPanel"
     property bool hasSearched: false
     readonly property bool canSearchServer: !App.homeSelected && App.capabilities.indexOf("search.server") >= 0
     property bool wholeServer: false
@@ -18,6 +19,7 @@ Dialog {
     anchors.centerIn: undefined
     x: ((parent ? parent.width : 800) - width) / 2
     y: Metrics.px(70)
+    height: Math.min(implicitHeight, Math.max(0, (parent ? parent.height : 600) - y - Metrics.px(20)))
 
     onAboutToShow: {
         query.text = ""
@@ -34,6 +36,8 @@ Dialog {
     }
 
     function activate(index) {
+        if (index < 0 || index >= App.searchResults.count)
+            return
         const row = App.searchResults.get(index)
         if (row.itemId && App.openSearchResult(row.itemId))
             dialog.close()
@@ -46,6 +50,7 @@ Dialog {
             Icon { name: "search" }
             TextField {
                 id: query
+                objectName: "searchQuery"
                 Layout.fillWidth: true
                 implicitHeight: Metrics.px(36)
                 placeholderText: dialog.title
@@ -53,7 +58,12 @@ Dialog {
                 color: Theme.text
                 font.pixelSize: Metrics.px(14)
                 Accessible.name: dialog.title
-                background: Rectangle { radius: Metrics.px(6); color: Theme.surfaceAlt; border.color: Theme.border }
+                background: Rectangle {
+                    radius: Metrics.px(6)
+                    color: Theme.surfaceAlt
+                    border.color: query.activeFocus ? Theme.focus : Theme.controlBorder
+                    border.width: query.activeFocus ? Metrics.px(2) : 1
+                }
                 onTextChanged: {
                     dialog.hasSearched = false
                     App.clearSearch()
@@ -105,6 +115,9 @@ Dialog {
         }
         ListView {
             id: results
+            objectName: "searchResultsList"
+            Layout.fillHeight: true
+            Layout.minimumHeight: 0
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(Math.max(contentHeight, Metrics.px(80)), Metrics.px(420))
             model: App.searchResults
@@ -139,20 +152,38 @@ Dialog {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.margins: Metrics.px(8)
-                    Row {
+                    RowLayout {
+                        objectName: "searchMetadata"
+                        width: parent.width
                         spacing: Metrics.px(8)
-                        Text { text: result.author; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(13) }
                         Text {
+                            objectName: "searchAuthor"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            text: result.author
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            color: Theme.text
+                            font.bold: true
+                            font.pixelSize: Metrics.px(13)
+                        }
+                        Text {
+                            objectName: "searchChannel"
+                            Layout.maximumWidth: parent.width * 0.35
+                            Layout.minimumWidth: 0
                             visible: dialog.searchingServer && result.channel.length > 0
                             text: "#" + result.channel
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
                             color: Theme.accent
                             font.pixelSize: Metrics.px(12)
                         }
-                        Text { text: result.time; color: Theme.textFaint; font.pixelSize: Metrics.px(11) }
+                        Text { objectName: "searchTime"; text: result.time; color: Theme.textMuted; font.pixelSize: Metrics.px(11) }
                     }
                     Text {
                         width: parent.width
                         text: result.preview
+                        textFormat: Text.PlainText
                         color: Theme.textMuted
                         wrapMode: Text.Wrap
                         font.pixelSize: Metrics.px(13)

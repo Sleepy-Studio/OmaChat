@@ -216,6 +216,8 @@ Item {
     // --------------------------------------------------------------- dialogs
     Popup {
         id: channelsDrawer
+        objectName: "channelsDrawer"
+        onClosed: chat.focusComposer()
         parent: Overlay.overlay
         x: Metrics.px(62)
         y: statusBanner.height
@@ -239,6 +241,9 @@ Item {
     }
     Popup {
         id: membersDrawer
+        objectName: "membersDrawer"
+        onOpened: Qt.callLater(() => { if (membersDrawer.opened) memberDrawerContent.focusList() })
+        onClosed: chat.focusComposer()
         parent: Overlay.overlay
         x: root.width - width
         y: statusBanner.height
@@ -248,7 +253,7 @@ Item {
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle { color: Theme.surface; border.color: Theme.border }
-        contentItem: MemberList {}
+        contentItem: MemberList { id: memberDrawerContent }
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animationMs } }
         exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationMs } }
     }
@@ -256,7 +261,7 @@ Item {
     SettingsDialog { id: settingsDialog; objectName: "settingsDialog" }
     CommandHelp { id: commandHelp }
     SearchPanel { id: searchPanel }
-    ServerSettingsDialog { id: serverSettings }
+    ServerSettingsDialog { id: serverSettings; objectName: "serverSettings" }
     InstanceConsoleDialog { id: instanceConsole }
     Connections {
         target: rail

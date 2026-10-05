@@ -63,7 +63,12 @@ Rectangle {
                     color: Theme.textFaint
                 }
                 Text {
+                    objectName: "conversationChannelName"
+                    Layout.maximumWidth: parent.width * 0.35
+                    Layout.minimumWidth: 0
                     text: App.selectedChannelName
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
                     color: Theme.text
                     font.pixelSize: Metrics.px(15)
                     font.bold: true
@@ -86,8 +91,11 @@ Rectangle {
                 }
                 Text {
                     id: topic
+                    objectName: "channelTopic"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: App.selectedChannelTopic
+                    textFormat: Text.PlainText
                     color: Theme.textMuted
                     font.pixelSize: Metrics.px(13)
                     elide: Text.ElideRight
@@ -100,9 +108,10 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: topic.text.length === 0 }
                 IconButton {
-                    visible: App.canManageChannels && topic.text.length === 0
+                    objectName: "editChannelTopic"
+                    visible: App.canManageChannels
                     iconName: "edit"
-                    tip: qsTr("Set topic")
+                    tip: topic.text.length === 0 ? qsTr("Set topic") : qsTr("Edit topic")
                     onClicked: topicDialog.open()
                 }
                 IconButton {
@@ -133,13 +142,15 @@ Rectangle {
             }
         }
 
-        Image {
+        ArtworkBanner {
+            objectName: "channelBanner"
             Layout.fillWidth: true
             Layout.preferredHeight: Metrics.px(88)
-            visible: App.selectedChannelBannerId.length > 0 && App.selectedChannelBannerId !== "0" && status === Image.Ready
+            visible: App.selectedChannelBannerId.length > 0 && App.selectedChannelBannerId !== "0"
             source: App.previews[App.selectedChannelBannerId] || ""
+            failed: !!App.previewErrors[App.selectedChannelBannerId]
+            onRetry: pane.loadBanner()
             fillMode: Image.PreserveAspectCrop
-            asynchronous: true
         }
 
         // A persistent reminder that outlives navigating away from the

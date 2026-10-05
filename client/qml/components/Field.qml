@@ -39,7 +39,7 @@ Column {
             radius: Metrics.px(4)
             color: Theme.surfaceAlt
             border.width: input.activeFocus ? 2 : 1
-            border.color: input.activeFocus ? Theme.accent : Theme.border
+            border.color: input.activeFocus ? Theme.focus : Theme.controlBorder
         }
     }
 

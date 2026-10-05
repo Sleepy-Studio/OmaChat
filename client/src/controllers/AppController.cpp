@@ -120,12 +120,14 @@ QString AppController::version() const
 // --------------------------------------------------------------- plumbing
 
 void AppController::call(const QString& method, const QJsonObject& params, std::function<void(const QJsonObject&)> onOk,
-    const QString& failurePrefix)
+    const QString& failurePrefix, std::function<void(const QString&)> onError)
 {
-    m_link.request(method, params, [this, onOk = std::move(onOk), failurePrefix](const ipc::Reply& r) {
+    m_link.request(method, params, [this, onOk = std::move(onOk), failurePrefix, onError = std::move(onError)](const ipc::Reply& r) {
         if (!r.ok) {
             const QString msg = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
             showNotice(failurePrefix.isEmpty() ? msg : failurePrefix + QStringLiteral(": ") + msg, true);
+            if (onError)
+                onError(msg);
             return;
         }
         if (onOk)
@@ -174,6 +176,7 @@ void AppController::onDaemonConnected()
     });
     loadSnapshot();
     refreshAudio();
+    refreshTransfers();
 }
 
 void AppController::loadSnapshot()
@@ -199,10 +202,15 @@ void AppController::applyStatus(const QJsonObject& status)
     const QJsonObject user = status.value(QStringLiteral("user")).toObject();
     if (!user.isEmpty())
         m_self = user;
+    refreshArtworkCache();
     emit statusChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
     emit voiceChanged();
     if (voiceBefore != voiceJoined() || voiceChannelBefore != voiceChannelId())
         rebuildServers();
+    if (previousAccount != accountId())
+        refreshTransfers();
     if (previousState != state() && state() == u"connected")
         loadSnapshot();
 }
@@ -268,11 +276,14 @@ void AppController::applySnapshot(const QJsonObject& snap)
             m_selectedServer.clear();
     }
     ensureSelection();
+    refreshArtworkCache(true);
     rebuildServers();
     rebuildChannels();
     rebuildMembers();
     m_messages.refreshRendering();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
     refreshInstanceStatus();
 }
 
@@ -864,6 +875,7 @@ void AppController::markRead(const QString& channelId)
 
 void AppController::rebuildServers()
 {
+    refreshArtworkCache();
     QList<QVariantMap> rows;
     int homeUnread = 0, homeMentions = 0;
     QHash<QString, int> unreadByServer, mentionsByServer;
@@ -905,6 +917,7 @@ void AppController::rebuildServers()
 
 void AppController::rebuildChannels()
 {
+    refreshArtworkCache();
     QList<QVariantMap> rows;
     auto channelRow = [&](const QJsonObject& c, int depth) {
         const QString id = c.value(QStringLiteral("id")).toString();

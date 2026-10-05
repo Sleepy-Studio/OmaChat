@@ -32,6 +32,7 @@ qt_add_qml_module(omachat
         src/models/RowListModel.hpp src/models/RowListModel.cpp
         src/models/MessageListModel.hpp src/models/MessageListModel.cpp
         src/platform/ThemeProvider.hpp src/platform/ThemeProvider.cpp
+        src/platform/ArtworkCache.hpp src/platform/ArtworkCache.cpp
         src/platform/SingleInstance.hpp src/platform/SingleInstance.cpp
         src/views/VideoFrameItem.hpp src/views/VideoFrameItem.cpp
         src/views/AudioLevels.hpp src/views/AudioLevels.cpp
@@ -41,6 +42,7 @@ qt_add_qml_module(omachat
         qml/components/Icon.qml
         qml/components/IconButton.qml
         qml/components/Avatar.qml
+        qml/components/ArtworkBanner.qml
         qml/components/PresenceDot.qml
         qml/components/Badge.qml
         qml/components/FlatButton.qml

@@ -409,7 +409,8 @@ QJsonObject Daemon::statusJson() const
     if (m_conn && m_conn->hasAccount()) {
         const auto& a = m_conn->account();
         status.insert(QStringLiteral("account"),
-            QJsonObject{{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port}, {"username", a.username}});
+            QJsonObject{{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port}, {"username", a.username},
+                {"trusted_fingerprint", a.trustedFingerprint}});
         status.insert(QStringLiteral("instance"), m_conn->instanceName());
         status.insert(QStringLiteral("max_upload_bytes"), static_cast<double>(m_conn->maxUploadBytes()));
         status.insert(QStringLiteral("capabilities"), QJsonArray::fromStringList(m_conn->capabilities()));

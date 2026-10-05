@@ -24,6 +24,27 @@ Rectangle {
         list.currentIndex = i >= 0 ? i : 0
     }
 
+    function openContextMenu(index, item) {
+        if (index < 0 || index >= list.count) return
+        const row = list.model.get(index)
+        if (row.rowType === "participant") return
+        list.currentIndex = index
+        const menu = row.rowType === "category" ? categoryMenu : channelMenu
+        menu.channelId = row.itemId
+        menu.channelName = row.name
+        if (menu === channelMenu) {
+            menu.isVoice = row.rowType === "voice"
+            menu.isGroup = row.rowType === "group_dm"
+            menu.userId = row.userId || ""
+        }
+        if (item) {
+            const point = item.mapToItem(sidebar, 0, item.height)
+            menu.popup(sidebar, point.x, point.y)
+        } else {
+            menu.popup()
+        }
+    }
+
     function loadServerBanner() {
         const id = App.selectedServerBannerId
         if (!App.homeSelected && id && id !== "0")
@@ -98,19 +119,22 @@ Rectangle {
             }
         }
 
-        Image {
+        ArtworkBanner {
             id: serverBanner
+            objectName: "serverBanner"
             Layout.fillWidth: true
             Layout.preferredHeight: Metrics.px(84)
-            visible: !App.homeSelected && status === Image.Ready
+            visible: !App.homeSelected && App.selectedServerBannerId.length > 0 && App.selectedServerBannerId !== "0"
             source: App.selectedServerBannerId && App.selectedServerBannerId !== "0"
                     ? (App.previews[App.selectedServerBannerId] || "") : ""
+            failed: !!App.previewErrors[App.selectedServerBannerId]
+            onRetry: App.requestPreview(App.selectedServerBannerId, "server-banner.png", 0)
             fillMode: Image.PreserveAspectFit
-            asynchronous: true
         }
 
         ListView {
             id: list
+            objectName: "channelList"
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.topMargin: Metrics.px(6)
@@ -125,12 +149,21 @@ Rectangle {
             Accessible.name: App.homeSelected ? qsTr("Direct messages") : qsTr("Channels")
 
             Keys.onReturnPressed: activate(currentIndex)
+            Keys.onEnterPressed: activate(currentIndex)
             Keys.onSpacePressed: activate(currentIndex)
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                    sidebar.openContextMenu(currentIndex, currentItem)
+                    event.accepted = true
+                }
+            }
             function activate(i) {
+                if (i < 0 || i >= count) return
                 const row = model.get(i)
                 if (row.rowType === "participant")
                     return
-                App.selectChannel(row.itemId)
+                if (row.rowType === "category") App.toggleCategory(row.itemId)
+                else App.selectChannel(row.itemId)
             }
 
             delegate: Loader {
@@ -162,8 +195,13 @@ Rectangle {
     // ------------------------------------------------------------ row kinds
     Component {
         id: categoryRow
-        Item {
+        Rectangle {
+            objectName: "categoryRow"
             implicitHeight: Metrics.px(30)
+            color: "transparent"
+            border.width: parent && parent.focused ? 2 : 0
+            border.color: Theme.focus
+            radius: Metrics.px(4)
             readonly property var m: parent ? parent.model : null
             Component.onCompleted: if (m && m.iconAttachmentId && m.iconAttachmentId !== "0")
                                        App.requestPreview(m.iconAttachmentId, "category-icon.png", 0)
@@ -177,17 +215,30 @@ Rectangle {
                     name: m && m.collapsed ? "chevron-right" : "chevron-down"
                     size: Metrics.px(12)
                 }
-                Image {
-                    visible: !!(m && m.iconAttachmentId && m.iconAttachmentId !== "0") && status === Image.Ready
-                    source: m ? (App.previews[m.iconAttachmentId] || "") : ""
+                Item {
+                    visible: !!(m && m.iconAttachmentId && m.iconAttachmentId !== "0")
                     Layout.preferredWidth: Metrics.px(16)
                     Layout.preferredHeight: Metrics.px(16)
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
+                    Icon {
+                        anchors.centerIn: parent
+                        name: "hash"
+                        size: Metrics.px(16)
+                        visible: categoryImage.status !== Image.Ready
+                    }
+                    Image {
+                        id: categoryImage
+                        anchors.fill: parent
+                        source: m ? (App.previews[m.iconAttachmentId] || "") : ""
+                        visible: status === Image.Ready
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                    }
                 }
                 SectionLabel {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: m ? m.name.toUpperCase() : ""
+                    textFormat: Text.PlainText
                     color: catArea.containsMouse ? Theme.text : Theme.textMuted
                 }
                 IconButton {
@@ -208,9 +259,7 @@ Rectangle {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
                     if (mouse.button === Qt.RightButton) {
-                        categoryMenu.channelId = m.itemId
-                        categoryMenu.channelName = m.name
-                        categoryMenu.popup()
+                        sidebar.openContextMenu(parent.parent.index, parent)
                     } else {
                         App.toggleCategory(m.itemId)
                     }
@@ -241,7 +290,7 @@ Rectangle {
             radius: Metrics.px(4)
             color: m && m.selected ? Theme.selection : (area.containsMouse ? Theme.raised : "transparent")
             border.width: parent && parent.focused ? 2 : 0
-            border.color: Theme.accent
+            border.color: Theme.focus
 
             Accessible.role: isVoice ? Accessible.Button : Accessible.ListItem
             Accessible.name: (isVoice ? qsTr("Voice channel %1, %n connected", "", m ? m.voiceCount : 0).arg(m ? m.name : "")
@@ -320,12 +369,7 @@ Rectangle {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
                     if (mouse.button === Qt.RightButton) {
-                        channelMenu.channelId = m.itemId
-                        channelMenu.channelName = m.name
-                        channelMenu.isVoice = row.isVoice
-                        channelMenu.isGroup = row.isGroup
-                        channelMenu.userId = m.userId
-                        channelMenu.popup()
+                        sidebar.openContextMenu(row.parent.index, row)
                     } else {
                         App.selectChannel(m.itemId)
                     }
@@ -371,7 +415,7 @@ Rectangle {
                         id: liveLabel
                         anchors.centerIn: parent
                         text: qsTr("LIVE")
-                        color: Theme.accentText
+                        color: Theme.dangerText
                         font.pixelSize: Metrics.px(9)
                         font.bold: true
                     }
@@ -434,16 +478,19 @@ Rectangle {
 
     MenuPopup {
         id: categoryMenu
+        objectName: "categoryContextMenu"
+        // Restore the list before deferred menu actions open their next popup.
+        onClosed: list.forceActiveFocus()
         property string channelId
         property string channelName
         MenuAction {
             text: qsTr("Category settings")
             enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
-            onTriggered: sidebar.openChannelSettings(categoryMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelSettings(categoryMenu.channelId))
         }
         MenuAction {
             text: qsTr("View details")
-            onTriggered: sidebar.openChannelDetails(categoryMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelDetails(categoryMenu.channelId))
         }
         MenuAction {
             text: qsTr("Move up")
@@ -458,18 +505,21 @@ Rectangle {
         MenuAction {
             text: qsTr("Permissions")
             enabled: App.canManageRoles
-            onTriggered: sidebar.openChannelPermissions(categoryMenu.channelId, categoryMenu.channelName)
+            onTriggered: Qt.callLater(() => sidebar.openChannelPermissions(categoryMenu.channelId, categoryMenu.channelName))
         }
         MenuAction {
             text: qsTr("Delete category")
             danger: true
             enabled: App.canManageChannels
-            onTriggered: { channelConfirm.channelId = categoryMenu.channelId; channelConfirm.open() }
+            onTriggered: { categoryConfirm.channelId = categoryMenu.channelId; Qt.callLater(() => categoryConfirm.open()) }
         }
     }
 
     MenuPopup {
         id: channelMenu
+        objectName: "channelContextMenu"
+        // Restore the list before deferred menu actions open their next popup.
+        onClosed: list.forceActiveFocus()
         property string channelId
         property string channelName
         property bool isVoice
@@ -482,7 +532,7 @@ Rectangle {
         MenuAction {
             text: qsTr("View details")
             enabled: channelMenu.userId.length === 0 && !channelMenu.isGroup
-            onTriggered: sidebar.openChannelDetails(channelMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelDetails(channelMenu.channelId))
         }
         MenuAction {
             text: App.channelMuted(channelMenu.channelId) ? qsTr("Unmute notifications") : qsTr("Mute notifications")
@@ -492,24 +542,24 @@ Rectangle {
         MenuAction {
             text: qsTr("Add people")
             enabled: channelMenu.isGroup
-            onTriggered: sidebar.addToGroup(channelMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.addToGroup(channelMenu.channelId))
         }
         MenuAction {
             text: qsTr("Rename conversation")
             enabled: channelMenu.isGroup
-            onTriggered: sidebar.renameGroup(channelMenu.channelId, channelMenu.channelName)
+            onTriggered: Qt.callLater(() => sidebar.renameGroup(channelMenu.channelId, channelMenu.channelName))
         }
         MenuAction {
             text: qsTr("Leave conversation")
             danger: true
             enabled: channelMenu.isGroup
-            onTriggered: { leaveGroupConfirm.channelId = channelMenu.channelId; leaveGroupConfirm.open() }
+            onTriggered: { leaveGroupConfirm.channelId = channelMenu.channelId; Qt.callLater(() => leaveGroupConfirm.open()) }
         }
         MenuAction {
             text: qsTr("Channel settings")
             enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
                      && channelMenu.userId.length === 0 && !channelMenu.isGroup
-            onTriggered: sidebar.openChannelSettings(channelMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelSettings(channelMenu.channelId))
         }
         MenuAction {
             text: qsTr("Move up")
@@ -526,7 +576,7 @@ Rectangle {
         MenuAction {
             text: qsTr("Permissions")
             enabled: App.canManageRoles && channelMenu.userId.length === 0
-            onTriggered: sidebar.openChannelPermissions(channelMenu.channelId, channelMenu.channelName)
+            onTriggered: Qt.callLater(() => sidebar.openChannelPermissions(channelMenu.channelId, channelMenu.channelName))
         }
         MenuAction {
             text: qsTr("Copy channel ID")
@@ -536,7 +586,7 @@ Rectangle {
             text: qsTr("Delete channel")
             danger: true
             enabled: App.canManageChannels && channelMenu.userId.length === 0
-            onTriggered: { channelConfirm.channelId = channelMenu.channelId; channelConfirm.open() }
+            onTriggered: { channelConfirm.channelId = channelMenu.channelId; Qt.callLater(() => channelConfirm.open()) }
         }
     }
 
@@ -548,6 +598,17 @@ Rectangle {
         confirmText: qsTr("Leave")
         destructive: true
         onConfirmed: App.leaveGroup(channelId)
+    }
+
+    ConfirmDialog {
+        id: categoryConfirm
+        objectName: "categoryDeleteConfirmation"
+        property string channelId
+        title: qsTr("Delete category?")
+        message: qsTr("Its channels move to the end of the top-level list. Channels, messages and their own permission overrides are kept. If this category has inherited permission overrides, review and move its channels before deleting it.")
+        confirmText: qsTr("Delete category")
+        destructive: true
+        onConfirmed: App.deleteChannel(channelId)
     }
 
     ConfirmDialog {

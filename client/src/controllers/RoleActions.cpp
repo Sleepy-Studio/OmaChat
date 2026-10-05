@@ -159,13 +159,19 @@ void AppController::updateRole(
     const QString& roleId, const QString& name, const QString& color, const QStringList& permissions)
 {
     const QJsonObject role = m_rolesById.value(roleId);
-    if (role.isEmpty())
+    if (role.isEmpty()) {
+        emit administrationFinished(QStringLiteral("role.update"), roleId, tr("This role is no longer available."));
         return;
+    }
     call(QStringLiteral("role.update"),
         {{"role", roleId}, {"name", name.trimmed()}, {"color", color.isEmpty() ? QStringLiteral("000000") : color},
             {"permissions", toJsonArray(permissions)},
             {"position", std::max(1, role.value(QStringLiteral("position")).toInt())}},
-        {}, tr("Cannot update role"));
+        [this, roleId](const QJsonObject&) {
+            emit administrationFinished(QStringLiteral("role.update"), roleId, {});
+        }, tr("Cannot update role"), [this, roleId](const QString& error) {
+            emit administrationFinished(QStringLiteral("role.update"), roleId, error);
+        });
 }
 
 void AppController::moveRole(const QString& roleId, int delta)

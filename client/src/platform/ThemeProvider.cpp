@@ -8,6 +8,8 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <initializer_list>
 
 namespace omachat::client {
 
@@ -16,7 +18,7 @@ ThemeProvider* g_instance = nullptr;
 
 double luminance(const QColor& c)
 {
-    auto ch = [](double v) { return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+    auto ch = [](double v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
     return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF());
 }
 
@@ -33,14 +35,27 @@ QColor mix(const QColor& a, const QColor& b, double t)
         static_cast<float>(a.blueF() * (1 - t) + b.blueF() * t));
 }
 
-// Ensures readable text: nudges `fg` toward white/black until it reaches the
-// WCAG AA ratio against `bg`.
+// Keep the original hue where possible, choosing the endpoint that can meet
+// the target on every surface. Small steps avoid unnecessary palette shifts.
+QColor readableOn(QColor fg, std::initializer_list<QColor> backgrounds, double ratio = 4.5)
+{
+    auto minimumContrast = [&](const QColor& color) {
+        double result = 21.0;
+        for (const auto& bg : backgrounds)
+            result = std::min(result, contrast(color, bg));
+        return result;
+    };
+    const QColor black(Qt::black), white(Qt::white);
+    const QColor target = minimumContrast(white) > minimumContrast(black) ? white : black;
+    const QColor original = fg;
+    for (int i = 1; i <= 100 && minimumContrast(fg) < ratio; ++i)
+        fg = mix(original, target, i / 100.0);
+    return fg;
+}
+
 QColor readable(QColor fg, const QColor& bg, double ratio = 4.5)
 {
-    const QColor target = luminance(bg) < 0.5 ? QColor(Qt::white) : QColor(Qt::black);
-    for (int i = 0; i < 20 && contrast(fg, bg) < ratio; ++i)
-        fg = mix(fg, target, 0.15);
-    return fg;
+    return readableOn(fg, {bg}, ratio);
 }
 
 QString pickFont(const QStringList& candidates, QFontDatabase::SystemFont fallback)
@@ -116,7 +131,13 @@ QColor ThemeProvider::userColor(const QString& id) const
 {
     const auto h = static_cast<int>(qHash(id) % 360);
     QColor c = QColor::fromHsl(h, m_dark ? 140 : 170, m_dark ? 165 : 90);
-    return readable(c, m_background, 3.0);
+    return readableOn(c, {m_background, m_surface, m_surfaceAlt, m_raised, m_selection});
+}
+
+QColor ThemeProvider::contrastingText(const QColor& background) const
+{
+    const QColor black(0x10, 0x10, 0x10), white(Qt::white);
+    return contrast(black, background) > contrast(white, background) ? black : white;
 }
 
 void ThemeProvider::applyFallback()
@@ -137,14 +158,27 @@ void ThemeProvider::derive(const QColor& bg, const QColor& fg, const QColor& acc
     m_raised = mix(bg, toward, m_dark ? 0.08 : 0.06);
     m_selection = selection.isValid() ? selection : mix(bg, accent, 0.25);
     m_border = mix(bg, toward, m_dark ? 0.12 : 0.15);
-    m_text = readable(fg, m_surface);
-    m_textMuted = readable(mix(fg, bg, 0.35), m_raised, 4.5);
-    m_textFaint = readable(mix(fg, bg, 0.55), m_surface, 3.0);
-    m_accent = readable(accent, m_surface, 3.0);
-    m_accentText = luminance(m_accent) > 0.4 ? QColor(0x10, 0x10, 0x10) : QColor(Qt::white);
-    m_danger = readable(red, m_surface, 3.0);
-    m_success = readable(green, m_surface, 3.0);
-    m_warning = readable(yellow, m_surface, 3.0);
+    // A selection must stay on the same luminance side as the surrounding UI:
+    // one shared text token then remains readable during hover and selection.
+    // Preserve the supplied color unless its luminance makes that impossible.
+    const QColor selectionTarget = m_dark ? QColor(Qt::white) : QColor(Qt::black);
+    const QColor originalSelection = m_selection;
+    for (int i = 1; i <= 100 && contrast(selectionTarget, m_selection) < 7.0; ++i)
+        m_selection = mix(originalSelection, bg, i / 100.0);
+    const auto surfaces = {m_background, m_surface, m_surfaceAlt, m_raised, m_selection};
+    m_text = readableOn(fg, surfaces);
+    m_textMuted = readableOn(mix(fg, bg, 0.35), surfaces);
+    // This token labels placeholders and small descriptions, not decoration.
+    m_textFaint = readableOn(mix(fg, bg, 0.55), surfaces);
+    m_accent = readableOn(accent, surfaces);
+    m_accentText = contrastingText(m_accent);
+    m_accentHover = readable(mix(m_accent, toward, 0.10), m_accentText);
+    m_accentPressed = readable(mix(m_accent, bg, 0.12), m_accentText);
+    m_danger = readableOn(red, surfaces);
+    m_success = readableOn(green, surfaces);
+    m_warning = readableOn(yellow, surfaces);
+    m_controlBorder = readableOn(m_border, surfaces, 3.0);
+    m_focus = readableOn(accent, surfaces, 3.0);
     m_idle = m_warning;
     m_mention = m_accent;
     m_codeBackground = mix(bg, m_dark ? QColor(Qt::black) : QColor(Qt::white), 0.35);
@@ -176,9 +210,11 @@ bool ThemeProvider::loadFile(const QString& path)
     // Omarchy's green/yellow slots are not always green/yellow; keep presence
     // semantics recognizable when a theme repurposes them.
     if (std::abs(m_success.hueF() - 0.33) > 0.12)
-        m_success = readable(QColor(0x5f, 0xc2, 0x7a), m_surface, 3.0);
+        m_success
+            = readableOn(QColor(0x5f, 0xc2, 0x7a), {m_background, m_surface, m_surfaceAlt, m_raised, m_selection});
     if (std::abs(m_warning.hueF() - 0.12) > 0.1)
-        m_warning = m_idle = readable(QColor(0xe5, 0xb5, 0x4a), m_surface, 3.0);
+        m_warning = m_idle
+            = readableOn(QColor(0xe5, 0xb5, 0x4a), {m_background, m_surface, m_surfaceAlt, m_raised, m_selection});
     m_source = path;
     return true;
 }

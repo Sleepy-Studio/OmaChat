@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import OmaChat
@@ -7,13 +8,25 @@ import OmaChat
 Popup {
     id: dialog
 
+    property bool protectClose: false
+    signal closeRequested()
+    function requestClose() {
+        if (protectClose) closeRequested()
+        else close()
+    }
+    Shortcut {
+        sequence: "Escape"
+        enabled: dialog.visible && dialog.protectClose && dialog.activeFocus
+        onActivated: dialog.requestClose()
+    }
+
     property string title
 
     parent: Overlay.overlay
     anchors.centerIn: parent
     modal: true
     focus: true
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    closePolicy: protectClose ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
     padding: Metrics.px(20)
     width: Math.min(Metrics.px(460), (parent ? parent.width : 800) - Metrics.px(40))
 

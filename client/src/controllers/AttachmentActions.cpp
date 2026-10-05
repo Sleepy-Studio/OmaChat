@@ -15,6 +15,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QMimeData>
 #include <QMimeDatabase>
 #include <QProcess>
@@ -79,8 +80,11 @@ QString AppController::formatDuration(qint64 ms) const
 QVariantList AppController::uploads() const
 {
     QVariantList out;
-    for (const auto& t : m_uploads)
-        out.append(t.toVariantMap());
+    for (const auto& t : m_uploads) {
+        if (t.value(QStringLiteral("account")).toString() == accountId()
+            && t.value(QStringLiteral("channel_id")).toString() == m_selectedChannel)
+            out.append(t.toVariantMap());
+    }
     return out;
 }
 
@@ -171,15 +175,74 @@ void AppController::removePendingFile(int index)
     emit attachmentsChanged();
 }
 
+void AppController::refreshTransfers()
+{
+    const QString account = accountId();
+    if (account.isEmpty())
+        return;
+    // Only reconcile rows known before this request; newer progress events win.
+    QHash<QString, QJsonObject> before;
+    for (auto it = m_uploads.cbegin(); it != m_uploads.cend(); ++it)
+        if (it->value(QStringLiteral("account")).toString() == account)
+            before.insert(it.key(), it.value());
+    m_link.request(QStringLiteral("transfer.list"), {}, [this, account, before](const ipc::Reply& r) {
+        if (!r.ok || account != accountId())
+            return;
+        QSet<QString> active;
+        for (const auto& value : r.result.value(QStringLiteral("transfers")).toArray()) {
+            auto data = value.toObject();
+            const QString key = account + u':' + data.value(QStringLiteral("id")).toString();
+            active.insert(key);
+            if (!m_uploads.contains(key) || m_uploads.value(key) == before.value(key)) {
+                data.insert(QStringLiteral("account"), account);
+                onTransferProgress(data);
+            }
+        }
+        for (auto it = before.cbegin(); it != before.cend(); ++it) {
+            if (!active.contains(it.key()) && m_uploads.value(it.key()) == it.value()
+                && !it->contains(QStringLiteral("error")) && !it->value(QStringLiteral("complete")).toBool()) {
+                auto row = it.value();
+                row.insert(QStringLiteral("error"),
+                    QJsonObject{
+                        {"message", tr("Transfer is no longer active. Check message delivery before sending again.")}});
+                m_uploads.insert(it.key(), row);
+            }
+        }
+        emit attachmentsChanged();
+    });
+}
+
 void AppController::onTransferProgress(const QJsonObject& data)
 {
     if (data.value(QStringLiteral("direction")).toString() != u"upload")
         return;
     const QString id = data.value(QStringLiteral("id")).toString();
-    if (data.value(QStringLiteral("complete")).toBool() || data.contains(QStringLiteral("error")))
-        m_uploads.remove(id);
-    else
-        m_uploads.insert(id, data);
+    const QString account = data.value(QStringLiteral("account")).toString(accountId());
+    const QString key = account + u':' + id;
+    QJsonObject row = data;
+    row.insert(QStringLiteral("account"), account);
+    row.insert(QStringLiteral("key"), key);
+    m_uploads.insert(key, row);
+    // Keep outcomes until dismissed, bounded independently of active transfers.
+    if (m_uploads.size() > 100) {
+        for (auto it = m_uploads.begin(); it != m_uploads.end(); ++it) {
+            if (it.key() != key
+                && (it->contains(QStringLiteral("error")) || it->value(QStringLiteral("complete")).toBool())) {
+                m_uploads.erase(it);
+                break;
+            }
+        }
+    }
+    emit attachmentsChanged();
+}
+
+void AppController::dismissTransfer(const QString& key)
+{
+    const auto it = m_uploads.constFind(key);
+    if (it == m_uploads.cend() || it->value(QStringLiteral("account")).toString() != accountId()
+        || (!it->contains(QStringLiteral("error")) && !it->value(QStringLiteral("complete")).toBool()))
+        return;
+    m_uploads.remove(key);
     emit attachmentsChanged();
 }
 
@@ -188,20 +251,158 @@ void AppController::cancelTransfer(const QString& transferId)
     call(QStringLiteral("transfer.cancel"), {{"id", transferId}});
 }
 
+void AppController::refreshArtworkCache(bool modelReady)
+{
+    const QJsonObject currentAccount = account();
+    const QString identity = accountId().isEmpty() || selfId().isEmpty()
+        ? QString()
+        : QString::fromUtf8(QJsonDocument(
+              QJsonArray{accountId(), currentAccount.value(QStringLiteral("host")),
+                  currentAccount.value(QStringLiteral("port")), currentAccount.value(QStringLiteral("username")),
+                  currentAccount.value(QStringLiteral("trusted_fingerprint")), selfId()})
+                  .toJson(QJsonDocument::Compact));
+    if (modelReady)
+        m_artworkModelIdentity = identity;
+    const bool accessLost = state() == u"login_required" || state() == u"not_configured"
+        || m_status.value(QStringLiteral("error")).toObject().value(QStringLiteral("code")).toString()
+            == ipc::errors::AuthenticationError;
+    if (accessLost)
+        m_artworkModelIdentity.clear();
+    QSet<QString> authorizedIds;
+    QSet<QString> active;
+    auto collect = [](const QJsonObject& object, QSet<QString>& into) {
+        for (const auto* key : {"icon_attachment_id", "banner_attachment_id"}) {
+            const QString id = object.value(QLatin1StringView(key)).toString();
+            if (!id.isEmpty() && id != u"0")
+                into.insert(id);
+        }
+    };
+    if (!identity.isEmpty() && identity == m_artworkModelIdentity) {
+        for (const auto& server : m_serversById)
+            collect(server, authorizedIds);
+        for (const auto& ch : m_channelsById)
+            collect(ch, authorizedIds);
+        // The rail and channel list show icons as well as selected banners.
+        for (const auto& server : m_serversById) {
+            const QString icon = server.value(QStringLiteral("icon_attachment_id")).toString();
+            if (!icon.isEmpty())
+                active.insert(icon);
+        }
+        collect(m_serversById.value(m_selectedServer), active);
+        for (const auto& ch : m_channelsById)
+            if (ch.value(QStringLiteral("server_id")).toString() == m_selectedServer) {
+                const QString icon = ch.value(QStringLiteral("icon_attachment_id")).toString();
+                if (!icon.isEmpty())
+                    active.insert(icon);
+            }
+        collect(m_channelsById.value(m_selectedChannel), active);
+    }
+    const quint64 before = m_artworkCache.generation();
+    const QSet<QString> removed
+        = m_artworkCache.reconcile(identity, authorizedIds, active, accessLost || identity == m_artworkModelIdentity);
+    bool changed = false;
+    for (const auto& id : removed) {
+        changed |= m_previews.remove(id) > 0;
+        changed |= m_previewErrors.remove(id) > 0;
+        m_previewRequests.remove(id);
+    }
+    if (before != m_artworkCache.generation()) {
+        // Attachment IDs have meaning only within an authenticated endpoint.
+        changed |= !m_previews.isEmpty() || !m_previewErrors.isEmpty();
+        m_previews.clear();
+        m_previewErrors.clear();
+        m_previewRequests.clear();
+        m_videoThumbnails.clear();
+        m_videoThumbnailRequests.clear();
+        m_pendingMediaRequests.clear();
+        m_pendingAudioOpens.clear();
+        m_pendingVideoOpens.clear();
+        emit videoThumbnailsChanged();
+    }
+    if (changed)
+        emit previewsChanged();
+}
+
 void AppController::requestPreview(const QString& attachmentId, const QString& filename, double size)
 {
+    refreshArtworkCache();
+    bool artwork = m_artworkCache.authorized(attachmentId);
+    const auto identifiesArtwork = [&](const QJsonObject& object) {
+        return object.value(QStringLiteral("icon_attachment_id")).toString() == attachmentId
+            || object.value(QStringLiteral("banner_attachment_id")).toString() == attachmentId;
+    };
+    for (const auto& object : m_serversById)
+        artwork |= identifiesArtwork(object);
+    for (const auto& object : m_channelsById)
+        artwork |= identifiesArtwork(object);
+    if (artwork && !m_artworkCache.authorized(attachmentId))
+        return;
+    const QString cachedArtwork = artwork ? m_artworkCache.lookup(attachmentId) : QString();
+    if (artwork && m_previews.contains(attachmentId)) {
+        // Detect deleted/corrupt disk entries before considering a URL reusable.
+        if (cachedArtwork.isEmpty()) {
+            m_previews.remove(attachmentId);
+            emit previewsChanged();
+        }
+    }
     if (size > kMaxPreviewBytes || m_previews.contains(attachmentId) || m_previewRequests.contains(attachmentId))
         return;
+    if (artwork) {
+        if (!cachedArtwork.isEmpty()) {
+            m_previewErrors.remove(attachmentId);
+            m_previews.insert(attachmentId, QUrl::fromLocalFile(cachedArtwork));
+            emit previewsChanged();
+            return;
+        }
+    }
+    if (artwork && m_artworkCache.stagingFull()) {
+        // Keep one pending timer per authorized ID while transfer slots are full.
+        // Capacity pressure is loading, not a download failure.
+        m_previewRequests.insert(attachmentId);
+        if (m_previewErrors.remove(attachmentId))
+            emit previewsChanged();
+        const quint64 waitingGeneration = m_artworkCache.generation();
+        QTimer::singleShot(250, this, [this, attachmentId, filename, size, waitingGeneration] {
+            if (waitingGeneration != m_artworkCache.generation())
+                return;
+            m_previewRequests.remove(attachmentId);
+            if (m_artworkCache.authorized(attachmentId))
+                requestPreview(attachmentId, filename, size);
+        });
+        return;
+    }
+    const QString staging = artwork ? m_artworkCache.stagingPath(attachmentId) : QString();
+    if (artwork && staging.isEmpty()) {
+        m_previewErrors.insert(attachmentId, true);
+        emit previewsChanged();
+        return;
+    }
     m_previewRequests.insert(attachmentId);
+    if (m_previewErrors.remove(attachmentId))
+        emit previewsChanged();
+    const quint64 generation = m_artworkCache.generation();
     m_link.request(
         QStringLiteral("attachment.download"),
-        {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}, {"size", size}},
-        [this, attachmentId](const ipc::Reply& r) {
-            if (!r.ok) {
-                m_previewRequests.remove(attachmentId);
+        {{"attachment", attachmentId}, {"filename", filename}, {"to", artwork ? staging : QStringLiteral("cache")},
+            {"size", size}},
+        [this, attachmentId, artwork, staging, generation](const ipc::Reply& r) {
+            if (generation != m_artworkCache.generation() || (artwork && !m_artworkCache.authorized(attachmentId))) {
+                m_artworkCache.discard(staging);
                 return;
             }
-            m_previews.insert(attachmentId, QUrl::fromLocalFile(r.result.value(QStringLiteral("path")).toString()));
+            m_previewRequests.remove(attachmentId);
+            QString path;
+            if (r.ok)
+                path = artwork ? m_artworkCache.store(attachmentId, staging, generation)
+                               : r.result.value(QStringLiteral("path")).toString();
+            else
+                m_artworkCache.discard(staging);
+            if (path.isEmpty()) {
+                m_previewErrors.insert(attachmentId, true);
+                emit previewsChanged();
+                return;
+            }
+            m_previews.insert(attachmentId, QUrl::fromLocalFile(path));
             emit previewsChanged();
         },
         0);
@@ -218,9 +419,12 @@ void AppController::requestMedia(const QString& attachmentId, const QString& fil
         return;
     }
     m_previewRequests.insert(attachmentId);
+    const quint64 generation = m_artworkCache.generation();
     m_link.request(
         QStringLiteral("attachment.download"), {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}},
-        [this, attachmentId, filename](const ipc::Reply& r) {
+        [this, attachmentId, filename, generation](const ipc::Reply& r) {
+            if (generation != m_artworkCache.generation())
+                return;
             m_previewRequests.remove(attachmentId);
             if (!r.ok) {
                 if (m_pendingAudioOpens.remove(attachmentId))
@@ -251,8 +455,9 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
         return;
     }
 
-    const QString key
-        = QString::fromLatin1(QCryptographicHash::hash(attachmentId.toUtf8(), QCryptographicHash::Sha256).toHex());
+    const QString key = QString::fromLatin1(
+        QCryptographicHash::hash((m_artworkModelIdentity + u':' + attachmentId).toUtf8(), QCryptographicHash::Sha256)
+            .toHex());
     const QString thumbnail = directory + u'/' + key + QStringLiteral(".jpg");
     if (QFileInfo(thumbnail).isFile()) {
         m_videoThumbnails.insert(attachmentId, QUrl::fromLocalFile(thumbnail));
@@ -261,10 +466,13 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
     }
 
     m_videoThumbnailRequests.insert(attachmentId);
+    const quint64 generation = m_artworkCache.generation();
     m_link.request(
         QStringLiteral("attachment.download"),
         {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}, {"size", size}},
-        [this, attachmentId, filename, ffmpeg, thumbnail](const ipc::Reply& r) {
+        [this, attachmentId, filename, ffmpeg, thumbnail, generation](const ipc::Reply& r) {
+            if (generation != m_artworkCache.generation())
+                return;
             if (!r.ok) {
                 m_videoThumbnailRequests.remove(attachmentId);
                 m_videoThumbnails.insert(attachmentId, false);
@@ -293,7 +501,11 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
                 openVideoAttachment(attachmentId, filename);
             auto* process = new QProcess(this);
             connect(process, &QProcess::finished, this,
-                [this, process, attachmentId, thumbnail](int exitCode, QProcess::ExitStatus status) {
+                [this, process, attachmentId, thumbnail, generation](int exitCode, QProcess::ExitStatus status) {
+                    if (generation != m_artworkCache.generation()) {
+                        process->deleteLater();
+                        return;
+                    }
                     m_videoThumbnailRequests.remove(attachmentId);
                     if (status == QProcess::NormalExit && exitCode == 0 && QFileInfo(thumbnail).size() > 0) {
                         m_videoThumbnails.insert(attachmentId, QUrl::fromLocalFile(thumbnail));
@@ -305,8 +517,12 @@ void AppController::requestVideoThumbnail(const QString& attachmentId, const QSt
                     }
                     process->deleteLater();
                 });
-            connect(
-                process, &QProcess::errorOccurred, this, [this, process, attachmentId](QProcess::ProcessError error) {
+            connect(process, &QProcess::errorOccurred, this,
+                [this, process, attachmentId, generation](QProcess::ProcessError error) {
+                    if (generation != m_artworkCache.generation()) {
+                        process->deleteLater();
+                        return;
+                    }
                     if (error == QProcess::FailedToStart) {
                         m_videoThumbnailRequests.remove(attachmentId);
                         m_videoThumbnails.insert(attachmentId, false);
@@ -345,10 +561,13 @@ void AppController::saveAttachment(const QString& attachmentId, const QString& f
 
 void AppController::openAttachment(const QString& attachmentId, const QString& filename, double size)
 {
+    const quint64 generation = m_artworkCache.generation();
     m_link.request(
         QStringLiteral("attachment.download"),
         {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}, {"size", size}},
-        [this, attachmentId, filename](const ipc::Reply& r) {
+        [this, attachmentId, filename, generation](const ipc::Reply& r) {
+            if (generation != m_artworkCache.generation())
+                return;
             if (!r.ok) {
                 showNotice(tr("Cannot open %1: %2").arg(filename, r.errorMessage), true);
                 return;
@@ -397,9 +616,12 @@ void AppController::openVideoAttachment(const QString& attachmentId, const QStri
         m_pendingVideoOpens.insert(attachmentId);
         return;
     }
+    const quint64 generation = m_artworkCache.generation();
     m_link.request(
         QStringLiteral("attachment.download"), {{"attachment", attachmentId}, {"filename", filename}, {"to", "cache"}},
-        [this, mpv, filename](const ipc::Reply& r) {
+        [this, mpv, filename, generation](const ipc::Reply& r) {
+            if (generation != m_artworkCache.generation())
+                return;
             if (!r.ok) {
                 showNotice(tr("Cannot open %1: %2").arg(filename, r.errorMessage), true);
                 return;

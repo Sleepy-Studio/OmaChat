@@ -7,9 +7,30 @@ import OmaChat
 Rectangle {
     id: panel
     color: Theme.surface
+    function focusList() { list.forceActiveFocus(); if (list.currentIndex < 0 && list.count > 0) list.currentIndex = 0 }
+    function openProfile() {
+        if (list.currentIndex < 0 || list.currentIndex >= list.count) return
+        profileDialog.userId = list.model.get(list.currentIndex).userId
+        profileDialog.open()
+    }
+    function openMemberMenu(index, item) {
+        if (index < 0 || index >= list.count) return
+        const member = list.model.get(index)
+        list.currentIndex = index
+        memberMenu.userId = member.userId
+        memberMenu.userName = member.name
+        memberMenu.isOwner = member.isOwner
+        if (item) {
+            const point = item.mapToItem(panel, 0, item.height)
+            memberMenu.popup(panel, point.x, point.y)
+        } else {
+            memberMenu.popup()
+        }
+    }
 
     ListView {
         id: list
+        objectName: "memberList"
         anchors.fill: parent
         anchors.topMargin: Metrics.px(8)
         model: App.members
@@ -50,8 +71,7 @@ Rectangle {
             radius: Metrics.px(4)
             color: area.containsMouse ? Theme.raised : "transparent"
             border.width: list.activeFocus && list.currentIndex === index ? 2 : 0
-            border.color: Theme.accent
-            opacity: status === "offline" ? 0.55 : 1
+            border.color: Theme.focus
 
             Accessible.role: Accessible.ListItem
             Accessible.name: name + ", " + (status === "dnd" ? qsTr("do not disturb") : status)
@@ -87,10 +107,7 @@ Rectangle {
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
-                    memberMenu.userId = row.userId
-                    memberMenu.userName = row.name
-                    memberMenu.isOwner = row.isOwner
-                    memberMenu.popup()
+                    panel.openMemberMenu(row.index, row)
                 }
             }
             ToolTip.visible: area.containsMouse
@@ -98,39 +115,53 @@ Rectangle {
             ToolTip.text: "@" + row.username
         }
 
-        Keys.onReturnPressed: {
-            const r = model.get(currentIndex)
-            profileDialog.userId = r.userId
-            profileDialog.open()
+        Keys.onReturnPressed: panel.openProfile()
+        Keys.onEnterPressed: panel.openProfile()
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                panel.openMemberMenu(currentIndex, currentItem)
+                event.accepted = true
+            }
         }
     }
 
     MenuPopup {
         id: memberMenu
+        objectName: "memberContextMenu"
+        // Restore the list before deferred actions open profiles or confirmations.
+        onClosed: panel.focusList()
         property string userId
         property string userName
         property bool isOwner
         readonly property bool isSelf: userId === App.selfId
-        MenuAction { text: qsTr("View profile"); onTriggered: { profileDialog.userId = memberMenu.userId; profileDialog.open() } }
+        MenuAction { text: qsTr("View profile"); onTriggered: { profileDialog.userId = memberMenu.userId; Qt.callLater(() => profileDialog.open()) } }
         MenuAction { text: qsTr("Message"); enabled: !memberMenu.isSelf; onTriggered: App.openDm(memberMenu.userId) }
-        MenuAction { text: qsTr("Mention"); onTriggered: App.copyText("@" + App.members.get(App.members.indexOf("userId", memberMenu.userId)).username) }
+        MenuAction {
+            text: qsTr("Mention")
+            onTriggered: {
+                const index = App.members.indexOf("userId", memberMenu.userId)
+                if (index >= 0) App.copyText("@" + App.members.get(index).username)
+            }
+        }
         MenuAction { text: qsTr("Copy user ID"); onTriggered: App.copyText(memberMenu.userId) }
         MenuAction {
             text: qsTr("Kick %1").arg(memberMenu.userName)
             danger: true
             enabled: App.canKick && !memberMenu.isSelf && !memberMenu.isOwner
-            onTriggered: { modConfirm.action = "kick"; modConfirm.open() }
+            onTriggered: { modConfirm.action = "kick"; Qt.callLater(() => modConfirm.open()) }
         }
         MenuAction {
             text: qsTr("Ban %1").arg(memberMenu.userName)
             danger: true
             enabled: App.canBan && !memberMenu.isSelf && !memberMenu.isOwner
-            onTriggered: { modConfirm.action = "ban"; modConfirm.open() }
+            onTriggered: { modConfirm.action = "ban"; Qt.callLater(() => modConfirm.open()) }
         }
     }
 
     Dialog {
         id: profileDialog
+        objectName: "memberProfile"
+        onClosed: panel.focusList()
         property string userId
         readonly property var profile: {
             App.profilesRevision
@@ -138,6 +169,7 @@ Rectangle {
         }
         title: qsTr("Profile")
         width: Math.min(Metrics.px(380), (parent ? parent.width : 420) - Metrics.px(32))
+        height: Math.min(implicitHeight, Math.max(0, (parent ? parent.height : 600) - Metrics.px(32)))
         contentItem: ColumnLayout {
             spacing: Metrics.px(12)
             RowLayout {
@@ -145,44 +177,63 @@ Rectangle {
                 Text { text: profileDialog.title; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(16); Layout.fillWidth: true }
                 IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: profileDialog.close() }
             }
-            Avatar {
-                Layout.alignment: Qt.AlignHCenter
-                userId: profileDialog.userId
-                name: profileDialog.profile.display_name || ""
-                avatarUrl: profileDialog.profile.avatar_url || ""
-                size: Metrics.px(72)
-            }
-            Text {
+            ScrollView {
+                objectName: "memberProfileScroll"
                 Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                text: profileDialog.profile.display_name || ""
-                color: Theme.text
-                font.bold: true
-                font.pixelSize: Metrics.px(17)
-            }
-            Text {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                text: "@" + (profileDialog.profile.username || "")
-                color: Theme.textMuted
-                font.pixelSize: Metrics.px(12)
-            }
-            Text {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                text: profileDialog.profile.status === "dnd" ? qsTr("Do not disturb")
-                    : profileDialog.profile.status === "idle" ? qsTr("Idle")
-                    : profileDialog.profile.status === "online" ? qsTr("Online") : qsTr("Offline")
-                color: Theme.textMuted
-                font.pixelSize: Metrics.px(12)
-            }
-            Text {
-                Layout.fillWidth: true
-                text: profileDialog.profile.bio || qsTr("No bio yet")
-                color: profileDialog.profile.bio ? Theme.text : Theme.textFaint
-                wrapMode: Text.Wrap
-                textFormat: Text.PlainText
-                font.pixelSize: Metrics.px(13)
+                Layout.fillHeight: true
+                Layout.minimumHeight: 0
+                Layout.preferredHeight: profileContent.implicitHeight
+                contentWidth: availableWidth
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                ColumnLayout {
+                    id: profileContent
+                    width: parent.width
+                    spacing: Metrics.px(12)
+                    Avatar {
+                        Layout.alignment: Qt.AlignHCenter
+                        userId: profileDialog.userId
+                        name: profileDialog.profile.display_name || ""
+                        avatarUrl: profileDialog.profile.avatar_url || ""
+                        size: Metrics.px(72)
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: profileDialog.profile.display_name || ""
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WrapAnywhere
+                        color: Theme.text
+                        font.bold: true
+                        font.pixelSize: Metrics.px(17)
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "@" + (profileDialog.profile.username || "")
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WrapAnywhere
+                        color: Theme.textMuted
+                        font.pixelSize: Metrics.px(12)
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: profileDialog.profile.status === "dnd" ? qsTr("Do not disturb")
+                            : profileDialog.profile.status === "idle" ? qsTr("Idle")
+                            : profileDialog.profile.status === "online" ? qsTr("Online") : qsTr("Offline")
+                        color: Theme.textMuted
+                        font.pixelSize: Metrics.px(12)
+                    }
+                    Text {
+                        objectName: "memberProfileBio"
+                        Layout.fillWidth: true
+                        text: profileDialog.profile.bio || qsTr("No bio yet")
+                        color: profileDialog.profile.bio ? Theme.text : Theme.textMuted
+                        wrapMode: Text.WrapAnywhere
+                        textFormat: Text.PlainText
+                        font.pixelSize: Metrics.px(13)
+                    }
+                }
             }
             FlatButton {
                 Layout.alignment: Qt.AlignHCenter

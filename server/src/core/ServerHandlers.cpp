@@ -891,6 +891,74 @@ void ChatServer::handleDeleteChannel(Session& s, std::uint64_t rid, const proto:
     }
     const Id channelId = c->id;
     const Id serverId = c->serverId;
+    if (c->kind == ChannelKind::Category) {
+        std::vector<ChannelRecord> children;
+        std::vector<ChannelRecord> topLevel;
+        for (Id id : m_state.server(serverId)->channels) {
+            const ChannelRecord* item = m_state.channel(id);
+            if (!item || item->id == channelId)
+                continue;
+            if (item->parentId == channelId) {
+                if (!m_state.can(item->id, s.userId, ManageChannel)
+                    && !m_state.canInServer(serverId, s.userId, ManageChannel)) {
+                    replyError(s, rid, proto::ERROR_PERMISSION_DENIED,
+                        QStringLiteral("you must be able to manage every channel in this category"));
+                    return;
+                }
+                children.push_back(*item);
+            } else if (!item->parentId && item->kind != ChannelKind::Category) {
+                topLevel.push_back(*item);
+            }
+        }
+        // Reparenting removes the inherited permission layer. Do not silently
+        // expose private children or drop inherited restrictions during deletion.
+        if (!children.empty() && !m_state.overridesFor(channelId).empty()) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                QStringLiteral("this category has inherited permission overrides; review and move its channels before deleting it"));
+            return;
+        }
+        const auto byPosition = [](const auto& a, const auto& b) {
+            return a.position != b.position ? a.position < b.position : a.id < b.id;
+        };
+        std::sort(topLevel.begin(), topLevel.end(), byPosition);
+        std::sort(children.begin(), children.end(), byPosition);
+        for (auto& child : children) {
+            child.parentId = 0;
+            topLevel.push_back(child);
+        }
+        if (!m_store.begin()) {
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not start category deletion"));
+            return;
+        }
+        for (size_t i = 0; i < topLevel.size(); ++i) {
+            topLevel[i].position = static_cast<std::uint32_t>(i);
+            if (!m_store.updateChannel(topLevel[i])) {
+                m_store.rollback();
+                replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not move category channels"));
+                return;
+            }
+        }
+        if (!m_store.deleteChannel(channelId) || !m_store.commit()) {
+            m_store.rollback();
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not delete category"));
+            return;
+        }
+        // Publish only after the complete storage mutation succeeds.
+        for (const auto& item : topLevel)
+            m_state.putChannel(item);
+        m_state.removeChannel(channelId);
+        std::vector<Id> audience;
+        for (const auto& [uid, member] : m_state.server(serverId)->members)
+            audience.push_back(uid);
+        proto::Event e;
+        auto* deleted = e.mutable_channel_delete();
+        deleted->set_channel_id(channelId);
+        deleted->set_server_id(serverId);
+        publish(e, audience);
+        publishPermissionsChanged(serverId);
+        replyOk(s, rid);
+        return;
+    }
     std::vector<Id> inVoice;
     for (const auto& [uid, v] : m_voice) {
         if (v.channelId == channelId)

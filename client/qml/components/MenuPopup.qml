@@ -24,6 +24,8 @@ Menu {
         background: Rectangle {
             radius: Metrics.px(3)
             color: item.highlighted ? Theme.selection : "transparent"
+            border.width: item.visualFocus ? Metrics.px(2) : 0
+            border.color: Theme.focus
         }
     }
 

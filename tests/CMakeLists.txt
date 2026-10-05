@@ -29,6 +29,7 @@ add_executable(omachat_unit_tests
 )
 if(OMACHAT_BUILD_CLIENT)
     target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp
+        unit/test_artwork_cache.cpp ../client/src/platform/ArtworkCache.cpp
         unit/test_audio_levels.cpp unit/test_message_list_model.cpp
         ../client/src/views/AudioLevels.cpp ../client/src/models/MessageListModel.cpp)
     target_include_directories(omachat_unit_tests PRIVATE ../client/src)
@@ -55,6 +56,15 @@ if(OMACHAT_BUILD_CLIENT)
         GTest::gtest Qt6::Quick omachat_shared)
     omachat_set_warnings(omachat_theme_tests)
     gtest_discover_tests(omachat_theme_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS gui)
+
+    qt_add_executable(omachat_theme_state_tests gui/test_theme_states.cpp
+        ../client/src/platform/ThemeProvider.cpp ../client/src/platform/ThemeProvider.hpp)
+    target_include_directories(omachat_theme_state_tests PRIVATE ../client/src)
+    target_compile_definitions(omachat_theme_state_tests PRIVATE OMACHAT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(omachat_theme_state_tests PRIVATE
+        GTest::gtest Qt6::Quick Qt6::Test omachat_shared)
+    omachat_set_warnings(omachat_theme_state_tests)
+    gtest_discover_tests(omachat_theme_state_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS gui)
 endif()
 
 # Integration tests: real server, real TLS, real daemons (null audio device).
@@ -64,6 +74,7 @@ add_executable(omachat_integration_tests
     integration/test_protocol.cpp
     integration/test_daemon.cpp
     integration/test_voice.cpp
+    integration/test_category_delete.cpp
 )
 omachat_set_warnings(omachat_integration_tests)
 target_include_directories(omachat_integration_tests PRIVATE integration)
@@ -87,4 +98,30 @@ if(OMACHAT_ENABLE_FUZZERS)
         target_link_options(fuzz_${target} PRIVATE -fsanitize=fuzzer,address,undefined)
         target_link_libraries(fuzz_${target} PRIVATE omachat_shared omachat_daemon_core)
     endforeach()
+endif()
+
+if(OMACHAT_BUILD_CLIENT)
+    qt_add_executable(omachat_operation_tests gui/test_operations.cpp integration/Harness.cpp)
+    target_sources(omachat_operation_tests PRIVATE ../client/src/platform/ArtworkCache.cpp)
+    file(GLOB operation_icons "${CMAKE_SOURCE_DIR}/client/icons/*.svg")
+    qt_add_resources(omachat_operation_tests operation_icons
+        PREFIX "/qt/qml/OmaChat" BASE "${CMAKE_SOURCE_DIR}/client" FILES ${operation_icons}
+        "${CMAKE_SOURCE_DIR}/client/data/emoji.json")
+    target_sources(omachat_operation_tests PRIVATE
+        ../client/src/application/DaemonLink.cpp ../client/src/application/DaemonLink.hpp
+        ../client/src/controllers/AppController.cpp ../client/src/controllers/AppController.hpp
+        ../client/src/controllers/AppActions.cpp ../client/src/controllers/AttachmentActions.cpp
+        ../client/src/controllers/EmojiActions.cpp ../client/src/controllers/RoleActions.cpp
+        ../client/src/models/RowListModel.cpp ../client/src/models/RowListModel.hpp
+        ../client/src/models/MessageListModel.cpp ../client/src/models/MessageListModel.hpp
+        ../client/src/views/VideoFrameItem.cpp ../client/src/views/VideoFrameItem.hpp
+        ../client/src/views/AudioLevels.cpp ../client/src/views/AudioLevels.hpp
+        ../client/src/platform/ThemeProvider.cpp ../client/src/platform/ThemeProvider.hpp)
+    target_compile_definitions(omachat_operation_tests PRIVATE OMACHAT_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+    target_include_directories(omachat_operation_tests PRIVATE ../client/src integration)
+    target_link_libraries(omachat_operation_tests PRIVATE omachat_client_text omachat_shared
+        omachat_daemon_core omachat_server_core GTest::gtest Qt6::Quick Qt6::DBus Qt6::Test Qt6::Multimedia)
+    omachat_set_warnings(omachat_operation_tests)
+    gtest_discover_tests(omachat_operation_tests DISCOVERY_TIMEOUT 30
+        PROPERTIES LABELS "gui;integration" TIMEOUT 120)
 endif()

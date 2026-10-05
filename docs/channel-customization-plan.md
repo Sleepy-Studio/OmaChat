@@ -1,6 +1,6 @@
 # Channel customization plan
 
-Status: staged roadmap, 2026-09-29. The first channel identity increment is implemented in this working tree; the tables below describe the intended complete feature set, including work still open.
+Status: staged roadmap, reviewed 2026-10-04. The channel identity increment, bounded artwork cache and conservative safe category deletion are implemented in this working tree; the tables below include work still open.
 
 ### Implemented in the first increment
 
@@ -9,11 +9,13 @@ Status: staged roadmap, 2026-09-29. The first channel identity increment is impl
 - Initial category, topic, description, icon, and banner choices during channel creation.
 - Moving channels between categories and reordering siblings through menu actions; server stores positions transactionally.
 - Server validation and image normalization, schema migration, protocol fields, daemon methods, GUI controls, and CLI commands.
+- Account/endpoint/user/certificate-pin scoped artwork cache: 64 MiB/256 completed entries globally, active-file protection, corruption/replacement/access-loss handling and offline GUI restart.
+- Keyboard Menu/Shift+F10 moves and category activation; transactional category deletion moves children to top level, preserving messages/child overrides. Nonempty categories with inherited overrides require explicit review/moves before deletion.
 
 ### Still open in Phase 1
 
-- Artwork crop and focal point controls, image variants and bounded disk cache, and appearance controls in the quick switcher and voice room.
-- Pointer drag and drop and full keyboard placement controls, category deletion choices, and a combined settings view with effective permissions.
+- Artwork crop and focal point controls, image variants, and appearance controls in the quick switcher and voice room. Async cache validation remains a performance follow-on.
+- Pointer drag and drop, full keyboard placement controls, and a combined settings view with effective permissions. Category move-to-top-level/Cancel is implemented; preserving inherited overrides automatically during deletion remains open.
 - Secure channel duplication and undo safe editing with conflict handling.
 - A full permission review before channel creation.
 

@@ -30,10 +30,19 @@ Button {
 
     background: Rectangle {
         radius: Metrics.px(4)
-        color: control.primary ? (control.down ? Qt.darker(Theme.accent, 1.2) : control.hovered ? Qt.lighter(Theme.accent, 1.1) : Theme.accent)
+        color: control.primary ? (control.down ? Theme.accentPressed : control.hovered ? Theme.accentHover : Theme.accent)
                                : (control.down ? Theme.selection : control.hovered ? Theme.raised : Theme.surfaceAlt)
         opacity: control.enabled ? 1 : 0.5
-        border.width: control.visualFocus ? 2 : (control.primary ? 0 : 1)
-        border.color: control.visualFocus ? Theme.text : Theme.border
+        border.width: control.primary ? 0 : 1
+        border.color: Theme.controlBorder
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -Metrics.px(3)
+            color: "transparent"
+            radius: Metrics.px(6)
+            border.width: Metrics.px(2)
+            border.color: Theme.focus
+            visible: control.visualFocus && control.enabled
+        }
     }
 }

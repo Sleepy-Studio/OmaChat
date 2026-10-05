@@ -47,7 +47,7 @@ Item {
                     s += parts[1][0]
                 return s.toUpperCase()
             }
-            color: Theme.dark ? "#101010" : "#ffffff"
+            color: Theme.contrastingText(circle.color)
             font.pixelSize: root.size * 0.4
             font.bold: true
         }

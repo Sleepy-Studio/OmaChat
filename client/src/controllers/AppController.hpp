@@ -3,6 +3,7 @@
 #include "application/DaemonLink.hpp"
 #include "models/MessageListModel.hpp"
 #include "models/RowListModel.hpp"
+#include "platform/ArtworkCache.hpp"
 #include "omachat/config/ClientConfig.hpp"
 #include "text/MarkdownRenderer.hpp"
 
@@ -128,7 +129,10 @@ class AppController : public QObject {
     // transient feedback
     Q_PROPERTY(QVariantList pendingFiles READ pendingFiles NOTIFY attachmentsChanged)
     Q_PROPERTY(QVariantList uploads READ uploads NOTIFY attachmentsChanged)
+    Q_PROPERTY(QVariantList sendOperations READ sendOperations NOTIFY sendOperationsChanged)
+    Q_PROPERTY(int failedSendCount READ failedSendCount NOTIFY sendOperationsChanged)
     Q_PROPERTY(QVariantMap previews READ previews NOTIFY previewsChanged)
+    Q_PROPERTY(QVariantMap previewErrors READ previewErrors NOTIFY previewsChanged)
     Q_PROPERTY(QVariantMap videoThumbnails READ videoThumbnails NOTIFY videoThumbnailsChanged)
     Q_PROPERTY(bool attachmentsSupported READ attachmentsSupported NOTIFY statusChanged)
     // Every saved account (status.accounts): id, host, username, state, active, unread, mentions.
@@ -261,7 +265,10 @@ public:
     QString typingText() const { return m_typingText; }
     QVariantList pendingFiles() const { return m_pendingFiles; }
     QVariantList uploads() const;
+    QVariantList sendOperations() const;
+    int failedSendCount() const;
     QVariantMap previews() const { return m_previews; }
+    QVariantMap previewErrors() const { return m_previewErrors; }
     QVariantMap videoThumbnails() const { return m_videoThumbnails; }
     bool attachmentsSupported() const { return maxUploadBytes() > 0; }
     QVariantList accounts() const { return m_status.value(QStringLiteral("accounts")).toArray().toVariantList(); }
@@ -341,6 +348,10 @@ public:
     Q_INVOKABLE void toggleCategory(const QString& id);
 
     Q_INVOKABLE bool sendComposer(const QString& text);
+    Q_INVOKABLE void retrySend(const QString& id);
+    Q_INVOKABLE void reviewFailedSend();
+    Q_INVOKABLE void dismissSend(const QString& id);
+    Q_INVOKABLE void dismissTransfer(const QString& id);
     Q_INVOKABLE void editMessage(const QString& id, const QString& text);
     Q_INVOKABLE void deleteMessage(const QString& id);
     Q_INVOKABLE void toggleReaction(const QString& messageId, const QString& emoji);
@@ -484,6 +495,8 @@ signals:
     void requestScreenAudioConsent();
     void selectionChanged();
     void channelDataChanged(const QString& channelId);
+    void administrationFinished(const QString& operation, const QString& id, const QString& error,
+        const QVariantMap& saved = {});
     void channelDetailsSaved(const QString& channelId);
     void serverDataChanged(const QString& serverId);
     void serverDetailsSaved(const QString& serverId);
@@ -504,6 +517,7 @@ signals:
     void overridesChanged();
     // QML hooks
     void composerRestore(const QString& text);
+    void sendOperationsChanged();
     void focusComposer();
     void requestInviteJoin(const QString& invite);
 
@@ -522,7 +536,7 @@ private:
     void updateTyping();
     void showNotice(const QString& text, bool error = false);
     void call(const QString& method, const QJsonObject& params = {}, std::function<void(const QJsonObject&)> onOk = {},
-        const QString& failurePrefix = {});
+        const QString& failurePrefix = {}, std::function<void(const QString&)> onError = {});
     QJsonObject account() const { return m_status.value(QStringLiteral("account")).toObject(); }
     QJsonObject voice() const { return m_status.value(QStringLiteral("voice")).toObject(); }
     QJsonObject channel(const QString& id) const { return m_channelsById.value(id); }
@@ -599,8 +613,20 @@ private:
     QString m_lastTypingChannel;
 
     QVariantList m_pendingFiles; // {path, name, size} waiting in the composer
-    QHash<QString, QJsonObject> m_uploads; // transfer id -> progress
+    QHash<QString, QJsonObject> m_uploads; // account + transfer id -> progress
+    struct SendOperation {
+        QString account, channel, content, replyTo, original, error;
+        QVariantList files;
+        bool action = false, pending = true, retryable = false;
+    };
+    QHash<QString, SendOperation> m_sendOperations;
+    void dispatchSend(const QString& id);
+    void refreshTransfers();
+    void refreshArtworkCache(bool modelReady = false);
+    ArtworkCache m_artworkCache;
+    QString m_artworkModelIdentity;
     QVariantMap m_previews; // attachment id -> local file URL
+    QVariantMap m_previewErrors; // attachment id -> failed eager download
     QSet<QString> m_previewRequests;
     QVariantMap m_videoThumbnails; // attachment id -> local JPEG URL
     QSet<QString> m_videoThumbnailRequests;

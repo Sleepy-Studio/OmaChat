@@ -30,10 +30,11 @@ AbstractButton {
         radius: Metrics.px(4)
         color: control.down ? Theme.selection : (control.hovered ? Theme.raised : "transparent")
         border.width: control.visualFocus ? 2 : 0
-        border.color: Theme.accent
+        border.color: Theme.focus
     }
 
     contentItem: Item {
+        opacity: control.enabled ? 1 : 0.5
         Icon {
             anchors.centerIn: parent
             name: control.iconName
