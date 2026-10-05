@@ -6,9 +6,32 @@ Updated: 2026-10-04. Resume desktop development from this file.
 
 Desktop work is the active priority. **The October 4 parallel continuation adds
 measured theme states, keyboard/layout polish, bounded artwork caching and safe
-category deletion in source. The earlier installed checkpoint is unchanged.**
-Current verification and remaining scopes are recorded below; preserve all dirty
-work and continue with the same coordinated ownership/build discipline.
+category deletion. Implementation commit `f285540` and fresh main/debug packages
+are locally installed; the hosted server is unchanged.**
+Current verification and remaining scopes are recorded below. Continue with the
+same coordinated ownership/build discipline.
+
+## Committed continuation installed — 2026-10-04
+
+At the user's explicit request, implementation commit `f285540` is locally
+committed on `feature/desktop-accessibility` and fresh main/debug **0.2.2-1**
+packages built from its git archive are installed. Independent pre-commit review
+identified and cleared the cache-root substitution defect; pruning and registered
+staging cleanup reject substituted root/staging directories. Both new regressions
+fail against the previous implementation and pass the fix.
+
+The final Release suite passes **238/238** tests, including **15 cache** checks.
+Both QML lint targets pass with existing warnings. The clean package build passes
+**232 package checks plus 6 theme checks**. Package hashes/provenance and logs are
+retained in `build/desktop-install-f285540/`; **124 installed regular files and
+symlinks** match extracted artifacts and package integrity reports zero altered
+paths. The updated native Wayland client is mapped and the daemon is active and
+connected. Voice was not joined during the upgrade.
+
+A subsequent documentation-only commit records this outcome; its code matches the
+installed implementation commit. No push, merge, public release, AUR update or
+hosted server deployment occurred. The locally installed server binary includes
+the category safeguard; the hosted server still needs deployment.
 
 ## Parallel desktop continuation — 2026-10-04
 
@@ -26,7 +49,7 @@ work and continue with the same coordinated ownership/build discipline.
   disk scope, a global completed-file budget of **64 MiB/256 entries**, authorized
   model reconciliation, replacement/revocation removal and protected active
   files. Unknown startup authorization waits for the snapshot before purging.
-  Decode/byte checks reject corrupt entries; substituted scope symlinks are
+  Decode/byte checks reject corrupt entries; substituted root/scope/staging symlinks are
   rejected. Sixteen download slots admit excess requests through deduplicated
   timers. Supported server artwork is limited to 2 MiB; active staging can add
   up to 32 MiB separately from the completed-file budget. Abandoned staging is
@@ -45,8 +68,8 @@ work and continue with the same coordinated ownership/build discipline.
   unimplemented. Plaintext LocalStore is unsuitable for content/paths; establish
   keyring size/failure/ordering contracts before persistence-before-send wiring.
 
-Verification: a clean Release configure/build and the final **236/236 CTest**
-pass, including **13 cache**, **4 theme-state**, **4 category deletion** and
+Verification: a clean Release configure/build and the final **238/238 CTest**
+pass, including **15 cache**, **4 theme-state**, **4 category deletion** and
 **16 production-operation** tests. Both QML lint targets pass with existing
 warnings; whitespace checks pass. The native Wayland conversation, oversized
 search metadata and sidebar-menu/confirmation flows pass, as does the compact/
@@ -61,9 +84,9 @@ The oversized profile fixture now respects the server's 300-character bio limit.
 All verification uses isolated fixture accounts/servers/daemons. This is automated
 acceptance, not independent human acceptance or physical Android validation.
 
-No installation, commit, push, merge, release, AUR update or hosted deployment
-occurred during this continuation. Old package artifacts remain the installed
-checkpoint; the current source requires new packaging before later installation.
+The source continuation was subsequently committed and installed at explicit user
+request, as recorded above. No push, merge, release, AUR update or hosted deployment
+occurred. Earlier package artifacts are superseded by the committed build.
 
 Next ready slices: artwork crop/focal points and variants, effective-permission
 review, pointer placement, atomic restricted-channel duplication/conflict-aware

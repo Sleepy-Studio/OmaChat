@@ -19,13 +19,15 @@ Future restart-persistent send recovery is scoped in
 [desktop-send-recovery-design.md](desktop-send-recovery-design.md), not implemented.
 
 The parallel source continuation passes clean Release configure/build,
-**236/236 CTest**, both QML lint targets (existing warnings), and native Wayland
+**238/238 CTest**, both QML lint targets (existing warnings), and native Wayland
 keyboard/conversation/search/sidebar acceptance. The dark/light compact/wide
 matrix passes at 100%/150%, with one-pixel compositor rounding permitted for the
 wide size. All 22 installed palettes pass the native shared-control audit.
 Evidence is retained in `build/desktop-continuation-validation/evidence/`.
-Current source is uncommitted and uninstalled; earlier package artifacts do not
-contain these later changes.
+Implementation commit `f285540` is locally committed and installed from fresh
+main/debug packages at explicit user request. The package passes 232 checks plus
+6 theme checks; artifact/file integrity is verified. Build provenance and install
+logs are retained in `build/desktop-install-f285540/`. No push or hosted deployment.
 
 ## Next-session execution preference — 2026-10-04
 
