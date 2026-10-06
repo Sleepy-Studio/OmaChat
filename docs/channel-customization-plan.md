@@ -1,6 +1,6 @@
 # Channel customization plan
 
-Status: staged roadmap, reviewed 2026-10-04. The channel identity increment, bounded artwork cache and conservative safe category deletion are implemented in this working tree; the tables below include work still open.
+Status: staged roadmap, reviewed 2026-10-05. The channel identity increment, bounded artwork cache and conservative safe category deletion are implemented in this working tree; the tables below include work still open.
 
 ### Implemented in the first increment
 
@@ -12,10 +12,14 @@ Status: staged roadmap, reviewed 2026-10-04. The channel identity increment, bou
 - Account/endpoint/user/certificate-pin scoped artwork cache: 64 MiB/256 completed entries globally, active-file protection, corruption/replacement/access-loss handling and offline GUI restart.
 - Keyboard Menu/Shift+F10 moves and category activation; transactional category deletion moves children to top level, preserving messages/child overrides. Nonempty categories with inherited overrides require explicit review/moves before deletion.
 
+- Exact keyboard/pointer placement dialog with atomic server-resolved before-sibling/end ordering, including hidden siblings; capability-gated CLI parity.
+- Current-user effective-permission review from authoritative server masks, category path explanation, read-only member access and keyboard scrolling. Other-member/source previews remain open.
+- Bounded pre-upload channel-settings crop with pointer/keyboard position, zoom and canonical icon/banner sizes; source/account fingerprint guards and pending/error feedback. This is a flattened asset, not persisted focal-point metadata or multiple server variants.
+
 ### Still open in Phase 1
 
-- Artwork crop and focal point controls, image variants, and appearance controls in the quick switcher and voice room. Async cache validation remains a performance follow-on.
-- Pointer drag and drop, full keyboard placement controls, and a combined settings view with effective permissions. Category move-to-top-level/Cancel is implemented; preserving inherited overrides automatically during deletion remains open.
+- Persisted focal-point metadata, crop in creation/server artwork, image variants, and appearance controls in the quick switcher and voice room. Async cache validation remains a performance follow-on.
+- Pointer drag and drop, unified settings navigation, and permission-source/other-member previews. Exact keyboard placement and current-user review are implemented. Category move-to-top-level/Cancel is implemented; preserving inherited overrides automatically during deletion remains open.
 - Secure channel duplication and undo safe editing with conflict handling.
 - A full permission review before channel creation.
 

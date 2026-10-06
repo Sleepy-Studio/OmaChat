@@ -23,6 +23,7 @@ protocol ([media.md](media.md)), and the local IPC protocol.
     `attachments`; since 1.2 `search.server`, `dm.group`,
     `attachments.resume`, `video.h264`, `e2e.v1`; `profile.v1` adds editable profiles;
     `channel.identity.v1` adds channel descriptions plus icon/banner artwork;
+    `channel.placement.v1` adds atomic placement before a visible sibling;
     `server.identity.v1` adds server descriptions plus icon/banner artwork;
     `discord.import` enables owner-only channel history import). `HelloReply.max_upload_bytes` is 0
    when a server takes no attachments. Clients check a capability before
@@ -217,6 +218,18 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | audio | `audio.devices`, `audio.settings`, `audio.set`, `audio.user_volume` |
 | moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update` (fields left out are kept), `role.delete`, `role.assign`, `override.set {channel, role \| user, allow, deny, remove?}`, `override.list` |
 | ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.set_ui`, `config.reload` |
+
+`channel.update {channel, parent?, before?}` accepts a decimal string sibling ID
+when `channel.placement.v1` is advertised. `before: "0"` appends to the destination;
+`before` and numeric `position` are mutually exclusive. The server resolves the
+sibling after excluding the moved channel, validates destination/type/visibility,
+and writes dense positions transactionally, including siblings hidden from the
+actor. A missing or moved target rejects the operation without changing storage.
+Existing numeric position requests remain supported. CLI parity is
+`omachatctl channel place CHANNEL CATEGORY_ID [BEFORE_CHANNEL_ID]`.
+Channel JSON now includes `permissions`, the names of the server-reported effective
+permissions for the current user, alongside the existing `can_*` convenience flags.
+These are final results, not attribution to individual roles or overrides.
 
 `account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
 

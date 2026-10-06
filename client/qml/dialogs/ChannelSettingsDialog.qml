@@ -94,7 +94,12 @@ Dialog {
         property string kind
         title: kind === "icon" ? qsTr("Choose channel icon") : qsTr("Choose channel banner")
         nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.webp)")]
-        onAccepted: App.setChannelArtwork(dialog.channelId, kind, selectedFile)
+        onAccepted: artworkCrop.openFor(dialog.channelId, kind, selectedFile)
+    }
+
+    ArtworkCropDialog {
+        id: artworkCrop
+        onClosed: { if (dialog.visible) dialog.contentItem.forceActiveFocus() }
     }
 
     contentItem: ColumnLayout {

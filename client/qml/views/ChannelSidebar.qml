@@ -476,6 +476,11 @@ Rectangle {
         onConfirmed: App.isServerOwner ? App.deleteServer(App.selectedServerId) : App.leaveServer(App.selectedServerId)
     }
 
+    ChannelPlacementDialog {
+        id: placementDialog
+        onClosed: list.forceActiveFocus()
+    }
+
     MenuPopup {
         id: categoryMenu
         objectName: "categoryContextMenu"
@@ -493,6 +498,11 @@ Rectangle {
             onTriggered: Qt.callLater(() => sidebar.openChannelDetails(categoryMenu.channelId))
         }
         MenuAction {
+            text: qsTr("Place category…")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.placement.v1") >= 0
+            onTriggered: Qt.callLater(() => placementDialog.openFor(categoryMenu.channelId))
+        }
+        MenuAction {
             text: qsTr("Move up")
             enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
             onTriggered: App.moveChannelRelative(categoryMenu.channelId, -1)
@@ -503,8 +513,8 @@ Rectangle {
             onTriggered: App.moveChannelRelative(categoryMenu.channelId, 1)
         }
         MenuAction {
-            text: qsTr("Permissions")
-            enabled: App.canManageRoles
+            text: qsTr("Access and permissions")
+            enabled: App.ready
             onTriggered: Qt.callLater(() => sidebar.openChannelPermissions(categoryMenu.channelId, categoryMenu.channelName))
         }
         MenuAction {
@@ -562,6 +572,12 @@ Rectangle {
             onTriggered: Qt.callLater(() => sidebar.openChannelSettings(channelMenu.channelId))
         }
         MenuAction {
+            text: qsTr("Place channel…")
+            enabled: App.canManageChannels && App.capabilities.indexOf("channel.placement.v1") >= 0
+                     && channelMenu.userId.length === 0 && !channelMenu.isGroup
+            onTriggered: Qt.callLater(() => placementDialog.openFor(channelMenu.channelId))
+        }
+        MenuAction {
             text: qsTr("Move up")
             enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
                      && channelMenu.userId.length === 0 && !channelMenu.isGroup
@@ -574,8 +590,8 @@ Rectangle {
             onTriggered: App.moveChannelRelative(channelMenu.channelId, 1)
         }
         MenuAction {
-            text: qsTr("Permissions")
-            enabled: App.canManageRoles && channelMenu.userId.length === 0
+            text: qsTr("Access and permissions")
+            enabled: App.ready && channelMenu.userId.length === 0 && !channelMenu.isGroup
             onTriggered: Qt.callLater(() => sidebar.openChannelPermissions(channelMenu.channelId, channelMenu.channelName))
         }
         MenuAction {

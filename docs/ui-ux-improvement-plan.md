@@ -1,6 +1,6 @@
 # OmaChat UI/UX improvement plan
 
-Last reviewed: 2026-10-04. Conversation-flow improvements shipped in v0.2.2. Desktop appearance, persistent operation feedback and administration safeguards are implemented; minimum-size dark/light conversation acceptance and artwork loading stability pass; compact administration and drawer/focus acceptance also pass.
+Last reviewed: 2026-10-05. Conversation-flow improvements shipped in v0.2.2. Desktop appearance, persistent operation feedback and administration safeguards are implemented; minimum-size dark/light conversation acceptance and artwork loading stability pass; compact administration and drawer/focus acceptance also pass.
 
 ## Resume and user acceptance
 
@@ -28,6 +28,15 @@ Implementation commit `f285540` is locally committed and installed from fresh
 main/debug packages at explicit user request. The package passes 232 checks plus
 6 theme checks; artifact/file integrity is verified. Build provenance and install
 logs are retained in `build/desktop-install-f285540/`. No push or hosted deployment.
+
+## Channel foundation continuation — 2026-10-05
+
+Three parallel desktop lanes add exact placement using stable server-resolved
+sibling IDs, authoritative current-user effective-permission review, and bounded
+pre-upload icon/banner crop controls. New dialogs support keyboard and pointer
+input with retained pending/error feedback. This continuation is source-only;
+the installed October 4 implementation and hosted server remain unchanged.
+See the handoff for final validation and the remaining Phase 1 scopes.
 
 ## Next-session execution preference — 2026-10-04
 

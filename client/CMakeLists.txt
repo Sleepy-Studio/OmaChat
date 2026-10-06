@@ -33,6 +33,7 @@ qt_add_qml_module(omachat
         src/models/MessageListModel.hpp src/models/MessageListModel.cpp
         src/platform/ThemeProvider.hpp src/platform/ThemeProvider.cpp
         src/platform/ArtworkCache.hpp src/platform/ArtworkCache.cpp
+        src/platform/ArtworkCrop.hpp src/platform/ArtworkCrop.cpp
         src/platform/SingleInstance.hpp src/platform/SingleInstance.cpp
         src/views/VideoFrameItem.hpp src/views/VideoFrameItem.cpp
         src/views/AudioLevels.hpp src/views/AudioLevels.cpp
@@ -86,6 +87,8 @@ qt_add_qml_module(omachat
         qml/dialogs/PeoplePickerDialog.qml
         qml/dialogs/SafetyDialog.qml
         qml/dialogs/ChannelPermissionsDialog.qml
+        qml/dialogs/ChannelPlacementDialog.qml
+        qml/dialogs/ArtworkCropDialog.qml
         qml/dialogs/ChannelSettingsDialog.qml
         qml/dialogs/ChannelDetailsDialog.qml
     RESOURCES

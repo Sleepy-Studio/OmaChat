@@ -1,15 +1,81 @@
 # OmaChat desktop session handoff
 
-Updated: 2026-10-04. Resume desktop development from this file.
+Updated: 2026-10-05. Resume desktop development from this file.
 
 ## Current direction
 
-Desktop work is the active priority. **The October 4 parallel continuation adds
-measured theme states, keyboard/layout polish, bounded artwork caching and safe
-category deletion. Implementation commit `f285540` and fresh main/debug packages
-are locally installed; the hosted server is unchanged.**
-Current verification and remaining scopes are recorded below. Continue with the
-same coordinated ownership/build discipline.
+Desktop work is the active priority. **The October 5 source continuation adds
+server-resolved exact channel placement, current-user effective-permission review,
+and bounded pre-upload artwork cropping.** The three lanes were assigned to
+subagents with separate ownership; the parent completed integration and review
+when the worker runs stopped due to workspace credits.
+
+Standing workflow authorized by the user on October 5: always install client-side
+changes locally for testing. When changes affect the server, also commit and push
+to the deployment branch so the server redeploys. This supersedes earlier
+session-specific installation and no-push limits. Review and package validation
+still apply; public versioned releases and AUR publication remain separate.
+
+At this source checkpoint, the continuation awaits the authorized local install
+and server push. The previous installed implementation is `f285540`. Exact
+placement requires the new server's `channel.placement.v1` capability; old-server
+menu actions remain. Docker publication is triggered by pushes to `main`.
+
+## Channel foundation continuation — 2026-10-05
+
+- Exact placement opens a keyboard/pointer dialog from channel/category menus,
+  selecting a destination category and a visible sibling or end. Pending saves
+  block repeat/close; rejection retains choices; feedback stays above the footer.
+  The additive `UpdateChannel.before_id/set_before` fields let the server resolve
+  current order, including hidden siblings and interleaved category positions,
+  before the existing checked transaction. Missing/moved/inaccessible/self or
+  wrong-type targets reject without a mutation. Existing numeric placement stays
+  compatible. CLI: `omachatctl channel place CHANNEL CATEGORY_ID [BEFORE_CHANNEL_ID]`.
+- Access and permissions opens for members as well as managers. Your access shows
+  the latest server-reported effective permission names for the current account,
+  with known category hierarchy and an explanation of precedence/owner bypass.
+  Server-wide actions are excluded. Offline or unavailable results are explicit;
+  the view makes no per-bit source attribution or previews for another member.
+  Managers can switch to the existing override editor. The review scrolls with
+  arrows, Page Up/Down, Home/End and pointer input.
+- Choosing channel settings artwork opens an icon/banner crop review. Pointer drag,
+  arrows, Shift+arrows, zoom and Reset select the region. Decode/transform jobs run
+  off the GUI thread, with at most two outstanding jobs. Static PNG/JPEG/WebP inputs
+  are bounded to 2 MiB, 8192-pixel edges and 16 megapixels. Canonical metadata-free
+  PNG output is 512×512 for icons or 1024×256 for banners, also at most 2 MiB.
+  Bounded preview pixels preserve original aspect geometry. Pixel/account-scope
+  fingerprints reject source replacement or preview reuse across accounts; stale
+  worker completions use guarded GUI callbacks. Private temporary crops stay owned
+  through daemon completion. Pending uploads block repeat/close; failure stays in
+  the crop dialog. This uploads a flattened crop, not persisted focal metadata or
+  multiple server-generated variants. Cropping currently applies through channel
+  settings, not the initial creation picker or server artwork.
+
+Validation: fresh Release configure/build completes; the full **255/255 CTest**
+suite passes. Both QML lint targets pass with existing warnings. Final focused
+checks pass 18/18, followed by 5/5 strengthened crop/permission interaction checks
+and the final placement check. Native Wayland checks cover all three new dialogs,
+sidebar keyboard behavior and source/account crop guards. Final crop drag/zoom/
+Reset and placement post-save/nested-dropdown Escape refinements also pass native
+checks. Compact/wide captures are **720×460 at 150%** and **1440×900 at 100%** in
+both dark/light themes; inspected captures retain readable controls and fixed
+feedback. The last full suite preceded the final placement Escape refinement;
+its focused offscreen and native checks pass after that refinement. The isolated
+checks use unique fixture accounts, TLS servers, daemons and temporary cache roots;
+no live account or phone actions. This is automated acceptance, not human review.
+Evidence and source hashes: `build/desktop-phase1-validation/evidence/`.
+This source checkpoint preceded packaging, installation and publication. The
+standing workflow above authorizes those steps after release verification.
+Pre-commit review additionally requires pending placement/crop dialogs to cancel
+on artwork generation changes, superseded completion guards, and selected-server
+checks before deferred crop submission; focused regressions cover both dialogs.
+
+Remaining ready slices: pointer drag-and-drop, permission-source/other-member and
+creation previews, atomic restricted-channel duplication/conflict-aware detail
+edits, persisted focal/variant metadata, and the scoped encrypted send recovery.
+Android physical audio and MLS/SFrame remain independent gates. Desktop voice and
+streaming retain user-confirmed acceptance; automated UI checks remain distinct
+from independent human acceptance.
 
 ## Committed continuation installed — 2026-10-04
 
@@ -106,13 +172,14 @@ forward secrecy, end-to-end voice encryption, stereo, or per-app capture.
 
 - Repository: `/home/howie/Documents/Github/HowieDuhzit/OmaChat`.
 - Current branch: `feature/desktop-accessibility`.
-- Implementation HEAD: `92ec294` — pushed to origin; not merged to main.
+- Source base HEAD: `3b26f84` (documentation); installed implementation `f285540`.
+  Last pushed implementation checkpoint: `92ec294`; not merged to main.
 - Android checkpoint: `536b857`, with CI repairs through `0206785`, pushed on
   `feature/android-client`. Desktop branch includes equivalent CI repair commits
   `596ee86` and `03b229c`.
-- The new transfer/send feedback, administration and artwork implementation, tests, handoff and plan updates
-  are uncommitted. The last pushed implementation checkpoint remains `92ec294`;
-  its green CI does not cover this new working-tree slice.
+- October 4 feedback/administration/artwork work is committed in `f285540`.
+  October 5 placement/review/crop changes and tests/docs are uncommitted. Existing
+  remote CI covers `92ec294`, not this continuation.
 - Local desktop package last verified installed: refreshed `omachat`/`omachat-debug`
   `0.2.2-1` checkpoint installed October 4 with explicit user authorization.
   Installed files match the checkpoint packages; both host package integrity

@@ -77,9 +77,8 @@ enum class ChannelKind : int { Text = 0, Voice = 1, Category = 2, Dm = 3, GroupD
 
 struct ChannelRecord {
     ChannelRecord() = default;
-    ChannelRecord(Id channelId, Id server, QString channelName, ChannelKind channelKind, Id parent,
-        std::uint32_t order, QString channelTopic, std::vector<Id> users, QString channelDescription = {},
-        Id iconId = 0, Id bannerId = 0)
+    ChannelRecord(Id channelId, Id server, QString channelName, ChannelKind channelKind, Id parent, std::uint32_t order,
+        QString channelTopic, std::vector<Id> users, QString channelDescription = {}, Id iconId = 0, Id bannerId = 0)
         : id(channelId)
         , serverId(server)
         , name(std::move(channelName))

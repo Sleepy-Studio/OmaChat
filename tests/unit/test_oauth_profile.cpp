@@ -15,8 +15,8 @@ TEST(OAuthProfile, DiscordDisplayNameAndAvatar)
     ASSERT_TRUE(profile);
     EXPECT_EQ(profile->displayName, QStringLiteral("Alice Smith"));
     ASSERT_TRUE(profile->avatarUrl);
-    EXPECT_EQ(*profile->avatarUrl,
-        QStringLiteral("https://cdn.discordapp.com/avatars/123456789/a_abcdef123.png?size=256"));
+    EXPECT_EQ(
+        *profile->avatarUrl, QStringLiteral("https://cdn.discordapp.com/avatars/123456789/a_abcdef123.png?size=256"));
     EXPECT_FALSE(profile->bio); // Discord's identify response has no bio.
 }
 

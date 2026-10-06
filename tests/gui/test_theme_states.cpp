@@ -269,14 +269,16 @@ Item {
         ASSERT_TRUE(indicator);
         ASSERT_FALSE(indicator->childItems().isEmpty());
         for (auto* child : indicator->childItems())
-            if (child->property("text").isValid())
+            if (child->property("text").isValid()) {
                 EXPECT_GE(
                     contrast(child->property("color").value<QColor>(), indicator->property("color").value<QColor>()),
                     4.5);
+            }
         for (auto* child : badge->childItems())
-            if (child->property("text").isValid())
+            if (child->property("text").isValid()) {
                 EXPECT_GE(
                     contrast(child->property("color").value<QColor>(), badge->property("color").value<QColor>()), 4.5);
+            }
         check->setProperty("enabled", false);
         EXPECT_LT(indicator->opacity(), 1.0);
     }

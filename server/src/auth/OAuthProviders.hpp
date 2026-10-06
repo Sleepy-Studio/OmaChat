@@ -3,8 +3,8 @@
 #include "config/ServerConfig.hpp"
 #include "network.pb.h"
 
-#include <QObject>
 #include <QJsonObject>
+#include <QObject>
 #include <QString>
 
 #include <functional>
@@ -51,7 +51,7 @@ std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJ
 // `code_verifier`/`redirect_uri` must match what the client sent the
 // provider during authorization (PKCE, RFC 7636).
 void exchangeAndFetchProfile(QNetworkAccessManager& net, const OAuthProviderMeta& meta,
-    const OAuthProviderSettings& settings, const QString& code, const QString& codeVerifier,
-    const QString& redirectUri, std::function<void(std::optional<OAuthProfile>, QString error)> done);
+    const OAuthProviderSettings& settings, const QString& code, const QString& codeVerifier, const QString& redirectUri,
+    std::function<void(std::optional<OAuthProfile>, QString error)> done);
 
 } // namespace omachat::server::auth

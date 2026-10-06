@@ -46,7 +46,8 @@ protected:
         ASSERT_TRUE(reply && reply->has_server());
         const auto state = sync(*owner);
         for (const auto& user : state.users())
-            if (user.username() == "category-member") memberId = user.id();
+            if (user.username() == "category-member")
+                memberId = user.id();
         ASSERT_NE(memberId, 0u);
     }
     proto::SyncState sync(RawClient& c)
@@ -90,11 +91,12 @@ protected:
     static proto::Channel find(const proto::SyncState& state, std::uint64_t id)
     {
         for (const auto& channel : state.channels())
-            if (channel.id() == id) return channel;
+            if (channel.id() == id)
+                return channel;
         return {};
     }
 };
-}
+} // namespace
 
 TEST_F(CategoryDeletion, RetainsChildrenMessagesOverridesAndOrderAcrossRestart)
 {
@@ -126,10 +128,12 @@ TEST_F(CategoryDeletion, RetainsChildrenMessagesOverridesAndOrderAcrossRestart)
         EXPECT_EQ(find(state, second.id()).position(), find(state, first.id()).position() + 1);
         std::vector<std::uint32_t> positions;
         for (const auto& channel : state.channels())
-            if (channel.server_id() == serverId && channel.parent_id() == 0 && channel.type() != proto::CHANNEL_TYPE_CATEGORY)
+            if (channel.server_id() == serverId && channel.parent_id() == 0
+                && channel.type() != proto::CHANNEL_TYPE_CATEGORY)
                 positions.push_back(channel.position());
         std::sort(positions.begin(), positions.end());
-        for (size_t i = 0; i < positions.size(); ++i) EXPECT_EQ(positions[i], i);
+        for (size_t i = 0; i < positions.size(); ++i)
+            EXPECT_EQ(positions[i], i);
         request.Clear();
         request.mutable_get_messages()->set_channel_id(first.id());
         const auto history = c.call(request);
@@ -204,9 +208,9 @@ TEST_F(CategoryDeletion, RollsBackReparentingWhenCategoryDeletionFails)
     ASSERT_FALSE(connection.isEmpty());
     auto db = QSqlDatabase::database(connection);
     QSqlQuery query(db);
-    ASSERT_TRUE(query.exec(QStringLiteral(
-        "CREATE TRIGGER reject_category_delete BEFORE DELETE ON channels "
-        "WHEN OLD.id = %1 BEGIN SELECT RAISE(ABORT, 'test category failure'); END").arg(category.id())));
+    ASSERT_TRUE(query.exec(QStringLiteral("CREATE TRIGGER reject_category_delete BEFORE DELETE ON channels "
+                                          "WHEN OLD.id = %1 BEGIN SELECT RAISE(ABORT, 'test category failure'); END")
+            .arg(category.id())));
     owner->clearEvents();
     member->clearEvents();
     const auto failed = remove(*owner, category.id());
@@ -222,12 +226,16 @@ TEST_F(CategoryDeletion, RollsBackReparentingWhenCategoryDeletionFails)
     EXPECT_EQ(query.value(0).toULongLong(), category.id());
     EXPECT_EQ(query.value(1).toUInt(), child.position());
     query.finish();
-    EXPECT_FALSE(member->waitEvent([&](const proto::Event& e) {
-        return e.has_channel_delete() && e.channel_delete().channel_id() == category.id();
-    }, 100));
-    EXPECT_FALSE(member->waitEvent([&](const proto::Event& e) {
-        return e.has_permissions_changed() && e.permissions_changed().server_id() == serverId;
-    }, 100));
+    EXPECT_FALSE(member->waitEvent(
+        [&](const proto::Event& e) {
+            return e.has_channel_delete() && e.channel_delete().channel_id() == category.id();
+        },
+        100));
+    EXPECT_FALSE(member->waitEvent(
+        [&](const proto::Event& e) {
+            return e.has_permissions_changed() && e.permissions_changed().server_id() == serverId;
+        },
+        100));
     ASSERT_TRUE(query.exec(QStringLiteral("DROP TRIGGER reject_category_delete")));
     EXPECT_TRUE(remove(*owner, category.id()).has_ok());
     EXPECT_EQ(find(sync(*owner), child.id()).parent_id(), 0u);

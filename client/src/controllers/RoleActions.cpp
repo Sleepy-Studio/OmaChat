@@ -67,6 +67,52 @@ QVariantList AppController::permissionCatalog() const
     return out;
 }
 
+QVariantMap AppController::channelPermissionReview(const QString& channelId) const
+{
+    const QJsonObject c = channel(channelId);
+    const bool available = state() == u"connected" && !c.isEmpty() && c.value(QStringLiteral("permissions")).isArray();
+    QVariantMap review{{"available", available}, {"rows", QVariantList{}},
+        {"source",
+            available ? tr("Latest server-reported permissions for your account.")
+                      : (state() == u"connected" ? tr("Current permissions for this channel are unavailable.")
+                                                 : tr("Connect to load current permissions for this channel."))}};
+    if (!available)
+        return review;
+
+    const QStringList effective = toStringList(c.value(QStringLiteral("permissions")));
+    const QString type = c.value(QStringLiteral("type")).toString();
+    QVariantList rows;
+    for (const QVariant& item : permissionCatalog()) {
+        QVariantMap row = item.toMap();
+        const QString group = row.value(QStringLiteral("group")).toString();
+        const QString name = row.value(QStringLiteral("name")).toString();
+        // Channel review includes only channel-scoped actions. Categories can
+        // affect both text and voice children, so retain both groups there.
+        if (group == tr("Members") || name == u"CREATE_INVITES" || name == u"MANAGE_SERVER" || name == u"MANAGE_ROLES"
+            || name == u"ADMINISTRATOR" || name == u"CREATE_CHANNEL")
+            continue;
+        if ((type == u"text" && group == tr("Voice")) || (type == u"voice" && group == tr("Text")))
+            continue;
+        row.insert(QStringLiteral("allowed"), effective.contains(name));
+        rows.append(row);
+    }
+    review.insert(QStringLiteral("rows"), rows);
+    const QString parentId = c.value(QStringLiteral("parent_id")).toString();
+    const QJsonObject parent = channel(parentId);
+    review.insert(QStringLiteral("categoryId"), parentId);
+    review.insert(QStringLiteral("category"), parent.value(QStringLiteral("name")).toString());
+    const bool hasCategory = !parentId.isEmpty() && parentId != u"0";
+    review.insert(QStringLiteral("inheritance"),
+        !hasCategory
+            ? tr("Server roles → channel overrides. Member overrides take precedence within each layer.")
+            : tr("Server roles → category #%1 → channel overrides. Member overrides take precedence within each layer.")
+                  .arg(parent.value(QStringLiteral("name")).toString(tr("Unavailable category"))));
+    review.insert(QStringLiteral("explanation"),
+        tr("Owners and administrators bypass overrides. The server supplies the final result; per-role source details "
+           "and previews for other members are unavailable."));
+    return review;
+}
+
 bool AppController::canManageRoles() const
 {
     return !homeSelected() && serverPermission("MANAGE_ROLES");
@@ -163,15 +209,15 @@ void AppController::updateRole(
         emit administrationFinished(QStringLiteral("role.update"), roleId, tr("This role is no longer available."));
         return;
     }
-    call(QStringLiteral("role.update"),
+    call(
+        QStringLiteral("role.update"),
         {{"role", roleId}, {"name", name.trimmed()}, {"color", color.isEmpty() ? QStringLiteral("000000") : color},
             {"permissions", toJsonArray(permissions)},
             {"position", std::max(1, role.value(QStringLiteral("position")).toInt())}},
-        [this, roleId](const QJsonObject&) {
-            emit administrationFinished(QStringLiteral("role.update"), roleId, {});
-        }, tr("Cannot update role"), [this, roleId](const QString& error) {
-            emit administrationFinished(QStringLiteral("role.update"), roleId, error);
-        });
+        [this, roleId](const QJsonObject&) { emit administrationFinished(QStringLiteral("role.update"), roleId, {}); },
+        tr("Cannot update role"),
+        [this, roleId](
+            const QString& error) { emit administrationFinished(QStringLiteral("role.update"), roleId, error); });
 }
 
 void AppController::moveRole(const QString& roleId, int delta)

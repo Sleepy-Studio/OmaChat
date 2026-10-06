@@ -445,12 +445,15 @@ QJsonObject ClientState::channelJson(const proto::Channel& c) const
         name = others.join(QStringLiteral(", "));
     }
     const auto p = c.effective_permissions();
+    QJsonArray effective;
+    for (auto n : permissions::names(p))
+        effective.append(QString::fromLatin1(n.data(), static_cast<qsizetype>(n.size())));
     return {{"id", idString(c.id())}, {"server_id", idString(c.server_id())}, {"name", name},
         {"type", channelTypeName(c.type())}, {"parent_id", idString(c.parent_id())},
         {"position", static_cast<int>(c.position())}, {"topic", QString::fromStdString(c.topic())},
         {"description", QString::fromStdString(c.description())},
         {"icon_attachment_id", idString(c.icon_attachment_id())},
-        {"banner_attachment_id", idString(c.banner_attachment_id())},
+        {"banner_attachment_id", idString(c.banner_attachment_id())}, {"permissions", effective},
         {"recipients", recipients}, {"can_send", permissions::has(p, permissions::SendMessages)},
         {"can_connect", permissions::has(p, permissions::ConnectVoice)},
         {"can_speak", permissions::has(p, permissions::Speak)},

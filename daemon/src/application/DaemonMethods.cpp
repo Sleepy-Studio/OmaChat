@@ -125,10 +125,12 @@ std::optional<DiscordImportPlan> prepareDiscordImport(const QJsonArray& paths, Q
         const auto doc = QJsonDocument::fromJson(file.readAll(), &parseError);
         const QJsonObject data = doc.object();
         const QJsonObject channel = data.value(QStringLiteral("channel")).toObject();
-        const QString guild = discordStringId(data.value(QStringLiteral("guild")).toObject().value(QStringLiteral("id")));
+        const QString guild
+            = discordStringId(data.value(QStringLiteral("guild")).toObject().value(QStringLiteral("id")));
         const QString channelId = discordStringId(channel.value(QStringLiteral("id")));
-        if (parseError.error != QJsonParseError::NoError || !doc.isObject() || !data.value(QStringLiteral("messages")).isArray()
-            || guild.isEmpty() || channelId.isEmpty() || (!plan.guildId.isEmpty() && plan.guildId != guild)) {
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()
+            || !data.value(QStringLiteral("messages")).isArray() || guild.isEmpty() || channelId.isEmpty()
+            || (!plan.guildId.isEmpty() && plan.guildId != guild)) {
             *error = QStringLiteral("invalid or mixed-guild Discord JSON exports: %1").arg(path);
             return std::nullopt;
         }
@@ -149,7 +151,8 @@ std::optional<DiscordImportPlan> prepareDiscordImport(const QJsonArray& paths, Q
             const QJsonObject author = message.value(QStringLiteral("author")).toObject();
             const QString messageId = discordStringId(message.value(QStringLiteral("id")));
             const QString authorId = discordStringId(author.value(QStringLiteral("id")));
-            const QDateTime date = QDateTime::fromString(message.value(QStringLiteral("timestamp")).toString(), Qt::ISODateWithMs);
+            const QDateTime date
+                = QDateTime::fromString(message.value(QStringLiteral("timestamp")).toString(), Qt::ISODateWithMs);
             if (messageId.isEmpty() || authorId.isEmpty() || !date.isValid()) {
                 *error = QStringLiteral("message has an invalid ID or timestamp in %1").arg(path);
                 return std::nullopt;
@@ -157,13 +160,16 @@ std::optional<DiscordImportPlan> prepareDiscordImport(const QJsonArray& paths, Q
             auto* imported = batch.add_messages();
             imported->set_discord_id(messageId.toStdString());
             imported->set_author_id(authorId.toStdString());
-            imported->set_author_name(author.value(QStringLiteral("nickname")).toString(
-                author.value(QStringLiteral("name")).toString()).toStdString());
+            imported->set_author_name(author.value(QStringLiteral("nickname"))
+                    .toString(author.value(QStringLiteral("name")).toString())
+                    .toStdString());
             imported->set_timestamp(date.toMSecsSinceEpoch());
-            const QDateTime edited = QDateTime::fromString(message.value(QStringLiteral("timestampEdited")).toString(), Qt::ISODateWithMs);
+            const QDateTime edited
+                = QDateTime::fromString(message.value(QStringLiteral("timestampEdited")).toString(), Qt::ISODateWithMs);
             if (edited.isValid())
                 imported->set_edited_at(edited.toMSecsSinceEpoch());
-            const QString reply = discordStringId(message.value(QStringLiteral("reference")).toObject().value(QStringLiteral("messageId")));
+            const QString reply = discordStringId(
+                message.value(QStringLiteral("reference")).toObject().value(QStringLiteral("messageId")));
             imported->set_reply_discord_id(reply.toStdString());
             QString content = message.value(QStringLiteral("content")).toString();
             for (const auto& attachmentValue : message.value(QStringLiteral("attachments")).toArray()) {
@@ -180,7 +186,8 @@ std::optional<DiscordImportPlan> prepareDiscordImport(const QJsonArray& paths, Q
                     QFile asset(local);
                     if (asset.open(QIODevice::ReadOnly)) {
                         auto* a = imported->add_assets();
-                        a->set_filename(attachment.value(QStringLiteral("fileName")).toString(assetInfo.fileName()).toStdString());
+                        a->set_filename(
+                            attachment.value(QStringLiteral("fileName")).toString(assetInfo.fileName()).toStdString());
                         a->set_mime_type(mime.mimeTypeForFile(assetInfo).name().toStdString());
                         a->set_data(asset.readAll().toStdString());
                         continue;
@@ -210,15 +217,16 @@ std::optional<DiscordImportPlan> prepareDiscordImport(const QJsonArray& paths, Q
                 if (!id.isEmpty()) {
                     auto* person = imported->add_mentions();
                     person->set_id(id.toStdString());
-                    person->set_name(mention.value(QStringLiteral("nickname")).toString(
-                        mention.value(QStringLiteral("name")).toString()).toStdString());
+                    person->set_name(mention.value(QStringLiteral("nickname"))
+                            .toString(mention.value(QStringLiteral("name")).toString())
+                            .toStdString());
                 }
             }
             for (const auto& reactionValue : message.value(QStringLiteral("reactions")).toArray()) {
                 const QJsonObject reaction = reactionValue.toObject();
                 const QJsonObject emoji = reaction.value(QStringLiteral("emoji")).toObject();
-                const QString symbol = emoji.value(QStringLiteral("code")).toString(
-                    emoji.value(QStringLiteral("name")).toString());
+                const QString symbol
+                    = emoji.value(QStringLiteral("code")).toString(emoji.value(QStringLiteral("name")).toString());
                 if (symbol.isEmpty())
                     continue;
                 auto* importedReaction = imported->add_reactions();
@@ -851,8 +859,8 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("unknown sign-in provider"));
             return;
         }
-        OAuthLoginFlow::start(*m_conn, it.value(), OAuthLoginFlow::Mode::Link,
-            [r](bool ok, const QString& code, const QString& message) {
+        OAuthLoginFlow::start(
+            *m_conn, it.value(), OAuthLoginFlow::Mode::Link, [r](bool ok, const QString& code, const QString& message) {
                 if (ok)
                     r.ok();
                 else
@@ -1061,8 +1069,7 @@ void Daemon::registerMethods()
     m[QStringLiteral("server.create")] = [createOrJoin](const QJsonObject& p, const Responder& r) {
         proto::Envelope env;
         env.mutable_create_server()->set_name(p.value(QStringLiteral("name")).toString().toStdString());
-        env.mutable_create_server()->set_description(
-            p.value(QStringLiteral("description")).toString().toStdString());
+        env.mutable_create_server()->set_description(p.value(QStringLiteral("description")).toString().toStdString());
         createOrJoin(std::move(env), r);
     };
     m[QStringLiteral("server.create_from_discord")] = [this, model](const QJsonObject& p, const Responder& r) {
@@ -1104,7 +1111,8 @@ void Daemon::registerMethods()
                 if (*index == plan->batches.size()) {
                     m_conn->resync([this, r, model, server, imported](bool ok) {
                         if (!ok) {
-                            r.error(e::NotConnected, QStringLiteral("import finished, but refresh failed; reconnect to see it"));
+                            r.error(e::NotConnected,
+                                QStringLiteral("import finished, but refresh failed; reconnect to see it"));
                             return;
                         }
                         const auto* synced = model->server(server.id());
@@ -1217,9 +1225,8 @@ void Daemon::registerMethods()
                 update->set_set_icon(true);
             else
                 update->set_set_banner(true);
-            forward(std::move(env), r, [model](const proto::Envelope& reply) {
-                return model->serverJson(reply.server());
-            });
+            forward(
+                std::move(env), r, [model](const proto::Envelope& reply) { return model->serverJson(reply.server()); });
             return;
         }
         // Server artwork reuses the channel upload pipeline: pick any channel
@@ -1236,7 +1243,8 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("this server needs a channel before it can have artwork"));
             return;
         }
-        m_transfers->upload(carrier, path,
+        m_transfers->upload(
+            carrier, path,
             [this, model, sid, kind, r](const FileTransfers::Result& result) {
                 if (!result.ok) {
                     r.error(result.code, result.message);
@@ -1252,10 +1260,10 @@ void Daemon::registerMethods()
                     update->set_set_banner(true);
                     update->set_banner_attachment_id(result.attachment.id());
                 }
-                forward(std::move(env), r, [model](const proto::Envelope& reply) {
-                    return model->serverJson(reply.server());
-                });
-            }, true);
+                forward(std::move(env), r,
+                    [model](const proto::Envelope& reply) { return model->serverJson(reply.server()); });
+            },
+            true);
     };
     m[QStringLiteral("invite.create")] = [this](const QJsonObject& p, const Responder& r) {
         const Id sid = serverParam(p, r);
@@ -1345,6 +1353,24 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("this server does not support channel identity settings"));
             return;
         }
+        if (p.contains(QStringLiteral("before"))) {
+            if (!m_conn->capabilities().contains(QStringLiteral("channel.placement.v1"))) {
+                r.error(e::BadRequest, QStringLiteral("this server does not support exact channel placement"));
+                return;
+            }
+            if (p.contains(QStringLiteral("position"))) {
+                r.error(e::BadRequest, QStringLiteral("before and position are mutually exclusive"));
+                return;
+            }
+            bool valid = false;
+            if (p.value(QStringLiteral("before")).isString())
+                p.value(QStringLiteral("before")).toString().toULongLong(&valid);
+            if (!valid) {
+                r.error(
+                    e::BadRequest, QStringLiteral("before must be a decimal channel ID string, or \"0\" to append"));
+                return;
+            }
+        }
         proto::Envelope env;
         auto* u = env.mutable_update_channel();
         u->set_channel_id(cid);
@@ -1373,6 +1399,10 @@ void Daemon::registerMethods()
             u->set_set_position(true);
             u->set_position(static_cast<std::uint32_t>(p.value(QStringLiteral("position")).toInt()));
         }
+        if (p.contains(QStringLiteral("before"))) {
+            u->set_set_before(true);
+            u->set_before_id(idFromJson(p.value(QStringLiteral("before"))));
+        }
         forward(
             std::move(env), r, [model](const proto::Envelope& reply) { return model->channelJson(reply.channel()); });
     };
@@ -1398,12 +1428,12 @@ void Daemon::registerMethods()
                 update->set_set_icon(true);
             else
                 update->set_set_banner(true);
-            forward(std::move(env), r, [model](const proto::Envelope& reply) {
-                return model->channelJson(reply.channel());
-            });
+            forward(std::move(env), r,
+                [model](const proto::Envelope& reply) { return model->channelJson(reply.channel()); });
             return;
         }
-        m_transfers->upload(cid, path,
+        m_transfers->upload(
+            cid, path,
             [this, model, cid, kind, r](const FileTransfers::Result& result) {
                 if (!result.ok) {
                     r.error(result.code, result.message);
@@ -1419,10 +1449,10 @@ void Daemon::registerMethods()
                     update->set_set_banner(true);
                     update->set_banner_attachment_id(result.attachment.id());
                 }
-                forward(std::move(env), r, [model](const proto::Envelope& reply) {
-                    return model->channelJson(reply.channel());
-                });
-            }, true);
+                forward(std::move(env), r,
+                    [model](const proto::Envelope& reply) { return model->channelJson(reply.channel()); });
+            },
+            true);
     };
     m[QStringLiteral("channel.delete")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
@@ -1897,8 +1927,8 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("not sharing your screen"));
             return;
         }
-        m_video->sendPointer(p.value(QStringLiteral("active")).toBool(),
-            p.value(QStringLiteral("x")).toDouble(), p.value(QStringLiteral("y")).toDouble());
+        m_video->sendPointer(p.value(QStringLiteral("active")).toBool(), p.value(QStringLiteral("x")).toDouble(),
+            p.value(QStringLiteral("y")).toDouble());
         r.ok();
     };
     m[QStringLiteral("voice.mode")] = [this](const QJsonObject& p, const Responder& r) {
@@ -2234,7 +2264,8 @@ void Daemon::registerMethods()
         const auto motion = p.value(QStringLiteral("reduced_motion"));
         if ((!scale.isUndefined() && (!scale.isDouble() || scale.toDouble() < 0.5 || scale.toDouble() > 3.0))
             || (!motion.isUndefined() && !motion.isBool())) {
-            r.error(e::BadRequest, QStringLiteral("scale must be a number from 0.5 to 3; reduced_motion must be boolean"));
+            r.error(
+                e::BadRequest, QStringLiteral("scale must be a number from 0.5 to 3; reduced_motion must be boolean"));
             return;
         }
         const auto previous = m_config.ui;

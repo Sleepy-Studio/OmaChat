@@ -40,8 +40,8 @@ AppController::AppController(const config::ClientConfig& config, QObject* parent
     , m_channels({"key", "itemId", "rowType", "name", "depth", "unread", "mentions", "muted", "locked", "selected",
           "collapsed", "speaking", "userMuted", "userDeafened", "userId", "presence", "voiceCount", "topic",
           "streaming"})
-    , m_members(
-          {"key", "userId", "name", "username", "avatarUrl", "status", "nameColor", "section", "isOwner", "inVoice", "speaking"})
+    , m_members({"key", "userId", "name", "username", "avatarUrl", "status", "nameColor", "section", "isOwner",
+          "inVoice", "speaking"})
     , m_switcher({"key", "kind", "itemId", "label", "detail"})
     , m_searchResults({"key", "itemId", "channelId", "channel", "author", "preview", "time"})
 {
@@ -122,17 +122,18 @@ QString AppController::version() const
 void AppController::call(const QString& method, const QJsonObject& params, std::function<void(const QJsonObject&)> onOk,
     const QString& failurePrefix, std::function<void(const QString&)> onError)
 {
-    m_link.request(method, params, [this, onOk = std::move(onOk), failurePrefix, onError = std::move(onError)](const ipc::Reply& r) {
-        if (!r.ok) {
-            const QString msg = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
-            showNotice(failurePrefix.isEmpty() ? msg : failurePrefix + QStringLiteral(": ") + msg, true);
-            if (onError)
-                onError(msg);
-            return;
-        }
-        if (onOk)
-            onOk(r.result);
-    });
+    m_link.request(method, params,
+        [this, onOk = std::move(onOk), failurePrefix, onError = std::move(onError)](const ipc::Reply& r) {
+            if (!r.ok) {
+                const QString msg = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
+                showNotice(failurePrefix.isEmpty() ? msg : failurePrefix + QStringLiteral(": ") + msg, true);
+                if (onError)
+                    onError(msg);
+                return;
+            }
+            if (onOk)
+                onOk(r.result);
+        });
 }
 
 void AppController::showNotice(const QString& text, bool error)

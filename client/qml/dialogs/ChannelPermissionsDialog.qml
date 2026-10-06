@@ -20,13 +20,20 @@ Dialog {
     property var allow: []
     property var deny: []
     property bool dirty: false
+    property bool editingOverrides: false
+    property var review: ({ available: false, rows: [] })
+
+    function refreshReview() {
+        review = App.channelPermissionReview(channelId)
+    }
 
     function openFor(id, name) {
         channelId = id
         channelName = name
         target = null
         dirty = false
-        App.loadOverrides(id)
+        editingOverrides = false
+        refreshReview()
         open()
     }
     function select(t) {
@@ -64,6 +71,12 @@ Dialog {
 
     Connections {
         target: App
+        function onStatusChanged() { dialog.refreshReview() }
+        function onSelectionChanged() { dialog.refreshReview() }
+        function onChannelDataChanged(id) {
+            if (id === dialog.channelId || id === dialog.review.categoryId)
+                dialog.refreshReview()
+        }
         function onOverridesChanged() {
             if (!dialog.target || dialog.dirty)
                 return
@@ -79,11 +92,105 @@ Dialog {
         spacing: Metrics.px(10)
 
         RowLayout {
-            Text { text: dialog.title; color: Theme.text; font.pixelSize: Metrics.px(16); font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
+            Text { text: dialog.title; textFormat: Text.PlainText; color: Theme.text; font.pixelSize: Metrics.px(16); font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
             IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: dialog.close() }
         }
 
         RowLayout {
+            Layout.fillWidth: true
+            FlatButton {
+                objectName: "permissionReviewTab"
+                text: qsTr("Your access")
+                primary: !dialog.editingOverrides
+                onClicked: { dialog.editingOverrides = false; dialog.refreshReview() }
+            }
+            FlatButton {
+                objectName: "permissionOverridesTab"
+                text: qsTr("Role and member overrides")
+                primary: dialog.editingOverrides
+                enabled: App.state === "connected" && App.canManageRoles
+                onClicked: { dialog.editingOverrides = true; App.loadOverrides(dialog.channelId) }
+            }
+            Item { Layout.fillWidth: true }
+        }
+
+        ScrollView {
+            objectName: "effectivePermissionReview"
+            activeFocusOnTab: true
+            Accessible.name: qsTr("Your effective permissions")
+            Keys.onPressed: event => {
+                const view = contentItem as Flickable
+                if (!view) return
+                const maximum = Math.max(0, view.contentHeight - view.height)
+                if (event.key === Qt.Key_End) view.contentY = maximum
+                else if (event.key === Qt.Key_Home) view.contentY = 0
+                else if (event.key === Qt.Key_Down) view.contentY = Math.min(maximum, view.contentY + Metrics.px(32))
+                else if (event.key === Qt.Key_Up) view.contentY = Math.max(0, view.contentY - Metrics.px(32))
+                else if (event.key === Qt.Key_PageDown) view.contentY = Math.min(maximum, view.contentY + view.height)
+                else if (event.key === Qt.Key_PageUp) view.contentY = Math.max(0, view.contentY - view.height)
+                else return
+                event.accepted = true
+            }
+            visible: !dialog.editingOverrides
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            contentWidth: availableWidth
+            ColumnLayout {
+                width: parent.width
+                spacing: Metrics.px(10)
+                Text {
+                    objectName: "permissionReviewSource"
+                    Layout.fillWidth: true
+                    text: dialog.review.source || ""
+                    color: Theme.text
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Metrics.px(13)
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: dialog.review.available
+                    text: dialog.review.inheritance || ""
+                    textFormat: Text.PlainText
+                    color: Theme.textMuted
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Metrics.px(12)
+                }
+                Repeater {
+                    model: dialog.review.rows || []
+                    delegate: RowLayout {
+                        id: accessRow
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Text {
+                            Layout.fillWidth: true
+                            text: accessRow.modelData.label
+                            color: Theme.text
+                            font.pixelSize: Metrics.px(13)
+                            wrapMode: Text.Wrap
+                        }
+                        Text {
+                            objectName: "effectivePermission_" + accessRow.modelData.name
+                            text: accessRow.modelData.allowed ? qsTr("Allowed") : qsTr("Denied")
+                            color: Theme.text
+                            font.pixelSize: Metrics.px(13)
+                            Accessible.name: accessRow.modelData.label + ": " + text
+                        }
+                    }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: dialog.review.available
+                    text: dialog.review.explanation || ""
+                    color: Theme.textMuted
+                    wrapMode: Text.Wrap
+                    font.pixelSize: Metrics.px(12)
+                }
+            }
+        }
+
+        RowLayout {
+            visible: dialog.editingOverrides
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: Metrics.px(14)
@@ -128,7 +235,7 @@ Dialog {
                     visible: App.channelOverrides.length === 0
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: qsTr("No overrides: this channel follows the server roles.")
+                    text: qsTr("No channel overrides. Server roles and any category overrides still apply.")
                     color: Theme.textFaint
                     font.pixelSize: Metrics.px(12)
                 }
@@ -139,7 +246,7 @@ Dialog {
                     model: dialog.candidates
                     textRole: "label"
                     displayText: qsTr("Add a role or member…")
-                    enabled: App.canManageRoles && dialog.candidates.length > 0
+                    enabled: App.state === "connected" && App.canManageRoles && dialog.candidates.length > 0
                     font.pixelSize: Metrics.px(13)
                     palette.button: Theme.surfaceAlt
                     palette.buttonText: Theme.text
@@ -192,7 +299,7 @@ Dialog {
                                 }
                                 TriState {
                                     value: dialog.valueOf(permRow.modelData.name)
-                                    enabled: App.canManageRoles
+                                    enabled: App.state === "connected" && App.canManageRoles
                                     onChanged: v => dialog.setValue(permRow.modelData.name, v)
                                 }
                             }
@@ -204,7 +311,7 @@ Dialog {
                     FlatButton {
                         text: qsTr("Remove override")
                         danger: true
-                        enabled: App.canManageRoles
+                        enabled: App.state === "connected" && App.canManageRoles
                         onClicked: {
                             App.setOverride(dialog.channelId, dialog.target.targetType, dialog.target.targetId, [], [])
                             dialog.target = null
@@ -214,7 +321,7 @@ Dialog {
                     FlatButton {
                         text: qsTr("Save")
                         primary: true
-                        enabled: dialog.dirty && App.canManageRoles
+                        enabled: dialog.dirty && App.state === "connected" && App.canManageRoles
                         onClicked: {
                             App.setOverride(dialog.channelId, dialog.target.targetType, dialog.target.targetId,
                                             dialog.allow, dialog.deny)

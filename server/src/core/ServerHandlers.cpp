@@ -421,8 +421,8 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
     if (m.set_description()) {
         const auto description = validation::serverDescription(QString::fromStdString(m.description()));
         if (!description) {
-            replyError(s, rid, proto::ERROR_BAD_REQUEST,
-                QStringLiteral("server descriptions are at most 2000 characters"));
+            replyError(
+                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("server descriptions are at most 2000 characters"));
             return;
         }
         updated.description = *description;
@@ -439,8 +439,7 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
         }
         const auto asset = m_store.attachment(assetId);
         if (!asset || !asset->artwork || asset->uploaderId != s.userId || asset->messageId
-            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId)
-            || m_store.artworkServer(assetId))
+            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId) || m_store.artworkServer(assetId))
             return false;
         const ChannelRecord* carrier = m_state.channel(asset->channelId);
         if (!carrier || carrier->serverId != srv->id)
@@ -449,9 +448,9 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
         reader.setDecideFormatFromContent(true);
         const QByteArray format = reader.format().toLower();
         const QSize size = reader.size();
-        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid()
-            || size.width() > 6000 || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000
-            || reader.imageCount() > 1 || reader.read().isNull())
+        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid() || size.width() > 6000
+            || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000 || reader.imageCount() > 1
+            || reader.read().isNull())
             return false;
         destination = assetId;
         return true;
@@ -691,8 +690,8 @@ void ChatServer::handleCreateChannel(Session& s, std::uint64_t rid, const proto:
         if (c && c->parentId == parent)
             position = std::max(position, c->position + 1);
     }
-    ChannelRecord c{m_ids.next(), srv->id, *name, static_cast<ChannelKind>(type), parent, position,
-        *topic, {}, *description};
+    ChannelRecord c{
+        m_ids.next(), srv->id, *name, static_cast<ChannelKind>(type), parent, position, *topic, {}, *description};
     if (!m_store.insertChannel(c, now())) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not create channel"));
         return;
@@ -764,16 +763,15 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         }
         const auto asset = m_store.attachment(assetId);
         if (!asset || !asset->artwork || asset->channelId != c->id || asset->uploaderId != s.userId || asset->messageId
-            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId)
-            || m_store.artworkServer(assetId))
+            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId) || m_store.artworkServer(assetId))
             return false;
         QImageReader reader(attachmentPath(assetId));
         reader.setDecideFormatFromContent(true);
         const QByteArray format = reader.format().toLower();
         const QSize size = reader.size();
-        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid()
-            || size.width() > 6000 || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000
-            || reader.imageCount() > 1 || reader.read().isNull())
+        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid() || size.width() > 6000
+            || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000 || reader.imageCount() > 1
+            || reader.read().isNull())
             return false;
         destination = assetId;
         return true;
@@ -786,12 +784,15 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel banner image"));
         return;
     }
-    if (m.set_parent() || m.set_position()) {
+    if (m.set_before() && m.set_position()) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("before and position are mutually exclusive"));
+        return;
+    }
+    if (m.set_parent() || m.set_position() || m.set_before()) {
         if (m.set_parent()) {
             const Id parent = m.parent_id();
             const ChannelRecord* category = parent ? m_state.channel(parent) : nullptr;
-            if ((parent && (!category || category->serverId != c->serverId
-                                   || category->kind != ChannelKind::Category))
+            if ((parent && (!category || category->serverId != c->serverId || category->kind != ChannelKind::Category))
                 || (c->kind == ChannelKind::Category && parent)) {
                 replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid destination category"));
                 return;
@@ -831,8 +832,17 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
             }
         }
         auto destination = siblings(updated.parentId, categories);
-        const size_t insertAt = m.set_position() ? std::min<size_t>(m.position(), destination.size())
-                                                 : destination.size();
+        size_t insertAt = m.set_position() ? std::min<size_t>(m.position(), destination.size()) : destination.size();
+        if (m.set_before() && m.before_id()) {
+            const auto target = std::find_if(destination.begin(), destination.end(),
+                [&](const auto& sibling) { return sibling.id == m.before_id(); });
+            if (target == destination.end() || !m_state.can(target->id, s.userId, ViewChannel)) {
+                replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                    QStringLiteral("the chosen sibling is no longer available in this destination"));
+                return;
+            }
+            insertAt = static_cast<size_t>(std::distance(destination.begin(), target));
+        }
         destination.insert(destination.begin() + static_cast<std::ptrdiff_t>(insertAt), updated);
         for (size_t i = 0; i < destination.size(); ++i) {
             destination[i].position = static_cast<std::uint32_t>(i);
@@ -914,7 +924,8 @@ void ChatServer::handleDeleteChannel(Session& s, std::uint64_t rid, const proto:
         // expose private children or drop inherited restrictions during deletion.
         if (!children.empty() && !m_state.overridesFor(channelId).empty()) {
             replyError(s, rid, proto::ERROR_BAD_REQUEST,
-                QStringLiteral("this category has inherited permission overrides; review and move its channels before deleting it"));
+                QStringLiteral("this category has inherited permission overrides; review and move its channels before "
+                               "deleting it"));
             return;
         }
         const auto byPosition = [](const auto& a, const auto& b) {

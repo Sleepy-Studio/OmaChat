@@ -4,8 +4,8 @@
 
 #include "Harness.hpp"
 
-#include <QFile>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -69,8 +69,8 @@ TEST_F(DaemonFixture, AppearanceSettingsValidateAndPersist)
     EXPECT_DOUBLE_EQ(saved.result.value("scale").toDouble(), 1.5);
     EXPECT_TRUE(saved.result.value("reduced_motion").toBool());
     const auto before = alice->call(QStringLiteral("config.get")).result;
-    for (const auto& invalid : {QJsonObject{{"scale", 4.0}}, QJsonObject{{"scale", "1.5"}},
-             QJsonObject{{"scale", 0.0}}, QJsonObject{{"scale", 1.0}, {"reduced_motion", "yes"}}}) {
+    for (const auto& invalid : {QJsonObject{{"scale", 4.0}}, QJsonObject{{"scale", "1.5"}}, QJsonObject{{"scale", 0.0}},
+             QJsonObject{{"scale", 1.0}, {"reduced_motion", "yes"}}}) {
         const auto reply = alice->call(QStringLiteral("config.set_ui"), invalid);
         EXPECT_FALSE(reply.ok);
         EXPECT_EQ(reply.errorCode, QStringLiteral("BadRequest"));
@@ -166,12 +166,11 @@ TEST_F(DaemonFixture, CreateServerFromDiscordExport)
     ASSERT_EQ(asset.write("archived attachment"), 19);
     asset.close();
     const QString exportPath = dir.filePath(QStringLiteral("channel.json"));
-    QJsonObject message{{"id", "100"}, {"timestamp", "2020-01-01T00:00:00.000Z"},
-        {"content", "old message"}, {"author", QJsonObject{{"id", "111"}, {"name", "Former member"}}},
+    QJsonObject message{{"id", "100"}, {"timestamp", "2020-01-01T00:00:00.000Z"}, {"content", "old message"},
+        {"author", QJsonObject{{"id", "111"}, {"name", "Former member"}}},
         {"attachments", QJsonArray{QJsonObject{{"url", "photo.txt"}, {"fileName", "photo.txt"}}}}};
     QJsonObject data{{"guild", QJsonObject{{"id", "999"}}},
-        {"channel", QJsonObject{{"id", "888"}, {"name", "old-chat"}}},
-        {"messages", QJsonArray{message}}};
+        {"channel", QJsonObject{{"id", "888"}, {"name", "old-chat"}}}, {"messages", QJsonArray{message}}};
     QFile exportFile(exportPath);
     ASSERT_TRUE(exportFile.open(QIODevice::WriteOnly));
     QJsonObject missingMessage = message;
@@ -179,8 +178,8 @@ TEST_F(DaemonFixture, CreateServerFromDiscordExport)
     data["messages"] = QJsonArray{missingMessage};
     exportFile.write(QJsonDocument(data).toJson());
     exportFile.close();
-    const QJsonObject params{{"name", "Imported place"},
-        {"files", QJsonArray{QUrl::fromLocalFile(exportPath).toString()}}};
+    const QJsonObject params{
+        {"name", "Imported place"}, {"files", QJsonArray{QUrl::fromLocalFile(exportPath).toString()}}};
     const auto refused = alice->call(QStringLiteral("server.create_from_discord"), params);
     EXPECT_FALSE(refused.ok);
     EXPECT_TRUE(alice->call(QStringLiteral("server.list")).result.value("servers").toArray().isEmpty());
@@ -214,19 +213,21 @@ TEST_F(DaemonFixture, ProfileUpdateFlowsThroughIpcAndRefreshesSelf)
 {
     setupPair();
     auto result = alice->call(QStringLiteral("profile.update"),
-        {{"display_name", "Alice New"}, {"avatar_url", "https://example.org/alice.png"},
-            {"bio", "Building OmaChat"}});
+        {{"display_name", "Alice New"}, {"avatar_url", "https://example.org/alice.png"}, {"bio", "Building OmaChat"}});
     ASSERT_TRUE(result.ok) << result.errorMessage.toStdString();
     auto event = bob->waitEvent(QStringLiteral("user.updated"), [](const QJsonObject& user) {
-        return user.value("username").toString() == u"alice"
-            && user.value("display_name").toString() == u"Alice New";
+        return user.value("username").toString() == u"alice" && user.value("display_name").toString() == u"Alice New";
     });
     ASSERT_TRUE(event.has_value());
     EXPECT_EQ(event->value("avatar_url").toString(), QStringLiteral("https://example.org/alice.png"));
     EXPECT_EQ(event->value("bio").toString(), QStringLiteral("Building OmaChat"));
     ASSERT_TRUE(waitFor([&] {
         return alice->call(QStringLiteral("daemon.status"))
-                   .result.value("user").toObject().value("display_name").toString() == u"Alice New";
+                   .result.value("user")
+                   .toObject()
+                   .value("display_name")
+                   .toString()
+            == u"Alice New";
     }));
 }
 

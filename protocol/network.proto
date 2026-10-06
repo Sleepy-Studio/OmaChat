@@ -479,6 +479,8 @@ message UpdateChannelRequest {
   bool set_parent = 12;
   uint32 position = 13;
   bool set_position = 14;
+  uint64 before_id = 15;     // channel.placement.v1: stable sibling ID; 0 appends
+  bool set_before = 16;      // mutually exclusive with set_position
 }
 message DeleteChannelRequest { uint64 channel_id = 1; }
 message OpenDmRequest { uint64 user_id = 1; }

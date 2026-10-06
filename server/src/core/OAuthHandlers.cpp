@@ -98,8 +98,8 @@ void ChatServer::handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OA
             sp->authInFlight = false;
             if (!profile) {
                 OMA_INFO("oauth", "login failed", {"provider", providerName}, {"error", error});
-                replyError(*sp, rid, proto::ERROR_AUTHENTICATION,
-                    error.isEmpty() ? QStringLiteral("sign-in failed") : error);
+                replyError(
+                    *sp, rid, proto::ERROR_AUTHENTICATION, error.isEmpty() ? QStringLiteral("sign-in failed") : error);
                 return;
             }
 
@@ -130,8 +130,8 @@ void ChatServer::handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OA
             // guarantee OmaChat's stricter charset or uniqueness.
             const QString displayName = profile->displayName.isEmpty() ? providerName : profile->displayName;
             const QString username = uniqueUsernameFrom(profile->username);
-            UserRecord user{m_ids.next(), username, displayName, profile->avatarUrl.value_or(QString()),
-                QString(), now(), profile->bio.value_or(QString())};
+            UserRecord user{m_ids.next(), username, displayName, profile->avatarUrl.value_or(QString()), QString(),
+                now(), profile->bio.value_or(QString())};
             if (!m_store.insertUser(user)) {
                 replyError(*sp, rid, proto::ERROR_CONFLICT, QStringLiteral("could not create an account"));
                 return;
@@ -178,7 +178,8 @@ void ChatServer::handleOAuthLink(Session& s, std::uint64_t rid, const proto::OAu
                 return;
             if (!profile) {
                 OMA_INFO("oauth", "link failed", {"provider", providerName}, {"user", userId}, {"error", error});
-                replyError(*sp, rid, proto::ERROR_BAD_REQUEST, error.isEmpty() ? QStringLiteral("linking failed") : error);
+                replyError(
+                    *sp, rid, proto::ERROR_BAD_REQUEST, error.isEmpty() ? QStringLiteral("linking failed") : error);
                 return;
             }
             if (const auto existing = m_store.oauthIdentity(providerName, profile->id)) {
@@ -228,8 +229,8 @@ void ChatServer::handleOAuthUnlink(Session& s, std::uint64_t rid, const proto::O
         return;
     }
     const auto identities = m_store.oauthIdentitiesForUser(s.userId);
-    const bool linked = std::any_of(
-        identities.begin(), identities.end(), [&](const auto& i) { return i.provider == meta->name; });
+    const bool linked
+        = std::any_of(identities.begin(), identities.end(), [&](const auto& i) { return i.provider == meta->name; });
     if (!linked) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("that provider is not linked to your account"));
         return;

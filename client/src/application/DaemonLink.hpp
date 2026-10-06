@@ -28,8 +28,8 @@ public:
     QString error() const { return m_error; }
     ipc::IpcClient& client() { return m_client; }
 
-    void request(const QString& method, const QJsonObject& params = {}, ipc::IpcClient::Callback cb = {},
-        int timeoutMs = 20000);
+    void request(
+        const QString& method, const QJsonObject& params = {}, ipc::IpcClient::Callback cb = {}, int timeoutMs = 20000);
 
 signals:
     void stateChanged();

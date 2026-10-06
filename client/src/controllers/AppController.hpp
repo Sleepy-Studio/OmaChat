@@ -3,8 +3,8 @@
 #include "application/DaemonLink.hpp"
 #include "models/MessageListModel.hpp"
 #include "models/RowListModel.hpp"
-#include "platform/ArtworkCache.hpp"
 #include "omachat/config/ClientConfig.hpp"
+#include "platform/ArtworkCache.hpp"
 #include "text/MarkdownRenderer.hpp"
 
 #include <QHash>
@@ -131,6 +131,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList uploads READ uploads NOTIFY attachmentsChanged)
     Q_PROPERTY(QVariantList sendOperations READ sendOperations NOTIFY sendOperationsChanged)
     Q_PROPERTY(int failedSendCount READ failedSendCount NOTIFY sendOperationsChanged)
+    Q_PROPERTY(quint64 artworkGeneration READ artworkGeneration NOTIFY artworkGenerationChanged)
     Q_PROPERTY(QVariantMap previews READ previews NOTIFY previewsChanged)
     Q_PROPERTY(QVariantMap previewErrors READ previewErrors NOTIFY previewsChanged)
     Q_PROPERTY(QVariantMap videoThumbnails READ videoThumbnails NOTIFY videoThumbnailsChanged)
@@ -267,6 +268,7 @@ public:
     QVariantList uploads() const;
     QVariantList sendOperations() const;
     int failedSendCount() const;
+    quint64 artworkGeneration() const { return m_artworkCache.generation(); }
     QVariantMap previews() const { return m_previews; }
     QVariantMap previewErrors() const { return m_previewErrors; }
     QVariantMap videoThumbnails() const { return m_videoThumbnails; }
@@ -405,10 +407,15 @@ public:
     Q_INVOKABLE void updateChannelDetails(
         const QString& id, const QString& name, const QString& topic, const QString& description);
     Q_INVOKABLE void setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl);
+    Q_INVOKABLE void prepareArtworkCrop(int requestId, const QUrl& fileUrl, const QString& kind);
+    Q_INVOKABLE void setChannelArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
+        double focalY, double zoom, const QString& fingerprint);
     Q_INVOKABLE QVariantMap channelDetails(const QString& id) const { return channel(id).toVariantMap(); }
     Q_INVOKABLE QVariantList channelCategories() const;
     Q_INVOKABLE void moveChannelToCategory(const QString& id, const QString& parentId);
     Q_INVOKABLE void moveChannelRelative(const QString& id, int delta);
+    Q_INVOKABLE QVariantList channelPlacementSiblings(const QString& id, const QString& parentId) const;
+    Q_INVOKABLE void placeChannel(const QString& id, const QString& parentId, const QString& beforeId);
     Q_INVOKABLE QString renderChannelDescription(const QString& content) const { return renderMarkdown(content); }
     Q_INVOKABLE void setChannelMuted(const QString& id, bool muted);
     Q_INVOKABLE bool channelMuted(const QString& id) const { return m_mutedChannels.contains(id); }
@@ -476,6 +483,7 @@ public:
     Q_INVOKABLE void deleteRole(const QString& roleId);
     Q_INVOKABLE void setMemberRole(const QString& userId, const QString& roleId, bool add);
     Q_INVOKABLE void loadOverrides(const QString& channelId);
+    Q_INVOKABLE QVariantMap channelPermissionReview(const QString& channelId) const;
     // targetType is "role" or "user"; empty allow and deny remove the override.
     Q_INVOKABLE void setOverride(const QString& channelId, const QString& targetType, const QString& targetId,
         const QStringList& allow, const QStringList& deny);
@@ -485,6 +493,8 @@ public:
     Q_INVOKABLE QString userStatus(const QString& userId) const;
 
 signals:
+    void artworkCropPrepared(int requestId, const QString& previewUrl, const QString& error, const QString& fingerprint,
+        int sourceWidth, int sourceHeight);
     void daemonChanged();
     void statusChanged();
     void instanceStatusChanged();
@@ -495,8 +505,8 @@ signals:
     void requestScreenAudioConsent();
     void selectionChanged();
     void channelDataChanged(const QString& channelId);
-    void administrationFinished(const QString& operation, const QString& id, const QString& error,
-        const QVariantMap& saved = {});
+    void administrationFinished(
+        const QString& operation, const QString& id, const QString& error, const QVariantMap& saved = {});
     void channelDetailsSaved(const QString& channelId);
     void serverDataChanged(const QString& serverId);
     void serverDetailsSaved(const QString& serverId);
@@ -509,6 +519,7 @@ signals:
     void configChanged();
     void audioChanged();
     void attachmentsChanged();
+    void artworkGenerationChanged();
     void previewsChanged();
     void videoThumbnailsChanged();
     void rolesChanged();
@@ -624,6 +635,8 @@ private:
     void refreshTransfers();
     void refreshArtworkCache(bool modelReady = false);
     ArtworkCache m_artworkCache;
+    quint64 m_placementOperation = 0;
+    quint64 m_cropOperation = 0;
     QString m_artworkModelIdentity;
     QVariantMap m_previews; // attachment id -> local file URL
     QVariantMap m_previewErrors; // attachment id -> failed eager download

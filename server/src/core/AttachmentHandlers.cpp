@@ -2,8 +2,8 @@
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
 
-#include <QDir>
 #include <QBuffer>
+#include <QDir>
 #include <QImageReader>
 #include <QImageWriter>
 
@@ -193,11 +193,12 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
         reader.setDecideFormatFromContent(true);
         const QByteArray sourceFormat = reader.format().toLower();
         const QSize dimensions = reader.size();
-        if ((sourceFormat != "png" && sourceFormat != "jpeg" && sourceFormat != "webp")
-            || !dimensions.isValid() || dimensions.width() > 6000 || dimensions.height() > 6000
+        if ((sourceFormat != "png" && sourceFormat != "jpeg" && sourceFormat != "webp") || !dimensions.isValid()
+            || dimensions.width() > 6000 || dimensions.height() > 6000
             || qint64(dimensions.width()) * dimensions.height() > 12000000 || reader.imageCount() > 1) {
             abortUpload(id);
-            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel artwork must be a static PNG, JPEG, or WebP image"));
+            replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                QStringLiteral("channel artwork must be a static PNG, JPEG, or WebP image"));
             return;
         }
         QImage image = reader.read();
@@ -215,7 +216,8 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
         writer.setQuality(85);
         if (!writer.write(image) || normalized.isEmpty() || normalized.size() > 2 * 1024 * 1024) {
             abortUpload(id);
-            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel artwork could not fit the 2 MB image limit"));
+            replyError(
+                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel artwork could not fit the 2 MB image limit"));
             return;
         }
         QFile clean(u->file->fileName());
@@ -239,8 +241,8 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
         a.size = static_cast<std::uint64_t>(normalized.size());
         a.sha256 = QCryptographicHash::hash(normalized, QCryptographicHash::Sha256);
         a.mimeType = imageFormat == "PNG" ? QStringLiteral("image/png") : QStringLiteral("image/jpeg");
-        a.filename = imageFormat == "PNG" ? QStringLiteral("channel-artwork.png")
-                                            : QStringLiteral("channel-artwork.jpg");
+        a.filename
+            = imageFormat == "PNG" ? QStringLiteral("channel-artwork.png") : QStringLiteral("channel-artwork.jpg");
     }
     a.createdAt = now();
     a.artwork = u->channelArtwork;
@@ -297,10 +299,10 @@ void ChatServer::handleDownload(Session& s, std::uint64_t rid, const proto::Down
     const bool serverVisible
         = artworkServer && m_state.server(artworkServer) && m_state.server(artworkServer)->members.contains(s.userId);
     const bool visible = a
-        && (artworkChannel ? m_state.can(artworkChannel, s.userId, ViewChannel)
-                : artworkServer ? serverVisible
-                                : a->messageId == 0 ? a->uploaderId == s.userId
-                                                    : m_state.can(a->channelId, s.userId, ViewChannel | ReadHistory));
+        && (artworkChannel          ? m_state.can(artworkChannel, s.userId, ViewChannel)
+                : artworkServer     ? serverVisible
+                : a->messageId == 0 ? a->uploaderId == s.userId
+                                    : m_state.can(a->channelId, s.userId, ViewChannel | ReadHistory));
     if (!visible) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("attachment not found"));
         return;

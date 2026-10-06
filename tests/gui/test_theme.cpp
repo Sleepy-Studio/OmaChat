@@ -6,8 +6,8 @@
 #include <QQmlEngine>
 #include <QTemporaryDir>
 
-#include <gtest/gtest.h>
 #include <cmath>
+#include <gtest/gtest.h>
 #include <memory>
 #include <type_traits>
 
@@ -31,7 +31,8 @@ QtObject {
     property int animationMs: Theme.animationMs
     property real controlHeight: Metrics.px(32)
 }
-)", QUrl());
+)",
+            QUrl());
         std::unique_ptr<QObject> object(component.create());
         ASSERT_TRUE(object) << component.errorString().toStdString();
         EXPECT_EQ(ThemeProvider::instance(), &theme);
@@ -69,7 +70,7 @@ void expectReadable(const ThemeProvider& theme)
     for (const auto& background : {theme.background(), theme.surface(), theme.surfaceAlt(), theme.raised()})
         EXPECT_GE(contrast(theme.textMuted(), background), 4.5) << background.name().toStdString();
 }
-}
+} // namespace
 
 TEST(Theme, HelperTextIsReadableOnDarkAndLightSurfaces)
 {
