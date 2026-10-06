@@ -7,14 +7,18 @@ Updated: 2026-10-06. Resume desktop development from this file.
 Desktop work is the active priority. **The October 6 continuation adds bounded
 pointer channel placement, server artwork cropping and atomic conflict checks
 for channel detail saves.** It builds on the installed October 5 foundation.
-The latest source verification is recorded in the October 6 section below;
-older sections retain their dated history.
+Reviewed source `891e4c2` is installed locally and pushed to both desktop and
+`main` branches; the post-publication server rollout is healthy and the connected
+client reports `channel.details.cas.v1`. The October 6 section records verification; older sections
+retain their dated history.
 
 Standing workflow authorized by the user on October 5: always install client-side
 changes locally for testing. When changes affect the server, also commit and push
 to the deployment branch so the server redeploys. This supersedes earlier
 session-specific installation and no-push limits. Review and package validation
 still apply; public versioned releases and AUR publication remain separate.
+
+### Previous installed foundation
 
 Implementation `97f3b43` is independently reviewed, committed, pushed to
 `feature/desktop-accessibility` and `main`, and installed locally as fresh
@@ -82,6 +86,32 @@ recorded at the final checkpoint. Evidence is retained in
 `build/desktop-next-validation/evidence/`. Dedicated tests cover target resolution,
 context invalidation, canonical server crops, permission-first conflict handling,
 explicit reload/retry, stale replies and actual production pointer delegates.
+
+Local installation checkpoint: fresh main/debug **0.2.2-1** packages built from
+an exact `891e4c2` git archive pass **265 package checks plus 11 remaining GUI
+checks**. All **126 installed regular files/symlinks** match extracted artifacts;
+`pacman -Qkk` reports zero alterations for both packages. The updated native
+Wayland client is mapped and visible; the user daemon is active and connected.
+The pre-upgrade check found voice/streaming idle and zero active transfers.
+Package logs/hashes are retained in `build/desktop-next-install/`; installation
+proof is `build/desktop-next-validation/evidence/installation-checkpoint.json`.
+
+Server rollout checkpoint: the Docker image for `891e4c2` published successfully,
+then forced post-publication Coolify deployment `qqlnq2t2hjubhvwjmwxywiwe` finished
+with the application **running:healthy**. Logs confirm image pulling and new
+container creation. The connected local client reports `channel.details.cas.v1`.
+Published digest:
+`sha256:a0e9af3347c76f51bd8fb3f8f3f6064a6146968b7b72a0c29e13ecd0da02e16f`.
+Coolify's API does not expose the running image digest; published metadata,
+post-publication pulling, health and the live capability are the available proof.
+Evidence: `build/desktop-next-validation/evidence/deployment-checkpoint.json`.
+
+Final exact-source CI at `891e4c2` passes on both desktop and `main` branches.
+Main results: [native CI](https://github.com/Sleepy-Studio/OmaChat/actions/runs/37517626807),
+[Android](https://github.com/Sleepy-Studio/OmaChat/actions/runs/37517626841),
+and [Docker publication](https://github.com/Sleepy-Studio/OmaChat/actions/runs/37517626858).
+A subsequent documentation-only commit on the desktop branch records this
+checkpoint; installed application source and deployment branch remain `891e4c2`.
 
 Remaining desktop scopes: initial-creation crop/access review, persistent focal
 metadata/variants, permission-source/other-member previews, atomic restricted
@@ -240,7 +270,7 @@ forward secrecy, end-to-end voice encryption, stereo, or per-app capture.
 
 - Repository: `/home/howie/Documents/Github/HowieDuhzit/OmaChat`.
 - Current branch: `feature/desktop-accessibility`.
-- Installed implementation/source checkpoint: `97f3b43`, pushed to both desktop
+- Installed implementation/source checkpoint: `891e4c2`, pushed to both desktop
   branch and `main` on October 6. Subsequent documentation-only commits preserve
   this installed implementation.
 - Android checkpoint: `536b857`, with CI repairs through `0206785`, pushed on
@@ -251,9 +281,11 @@ forward secrecy, end-to-end voice encryption, stereo, or per-app capture.
   a missing WebP plugin. Dependency fixes through `1aebabf` are pushed and final
   native, Android and Docker CI pass on `aee3e7e`.
 - Local desktop package last verified installed: refreshed `omachat`/`omachat-debug`
-  `0.2.2-1` checkpoint `97f3b43`, installed October 6 under standing authorization.
+  `0.2.2-1` checkpoint `891e4c2`, installed October 6 under standing authorization.
   Installed files match the checkpoint packages; both host package integrity
-  checks report zero altered files. Hosted server `1aebabf` is verified running/healthy with placement capability.
+  checks report zero altered files. The `891e4c2` image publication and post-publication
+  server pull are verified; the application is running/healthy and the connected
+  client reports both placement and checked-detail capabilities.
 - Preserve the ignored local `session-ses_f0f5.md` transcript; do not publish it.
 - Android remains incomplete. Its continuation details live in
   `docs/android-session-handoff.md`; do not infer mobile completion from desktop
