@@ -11,7 +11,7 @@ formatting and native pending-invalidation regressions pass. Packaging fix
 packages are installed, byte-identical binaries verified, and 126 artifacts
 match with zero altered paths. Server image correction `1aebabf` is published
 and deployed healthy; the connected client sees `channel.placement.v1`.
-Final remote native/Android CI remains pending. This supersedes historical
+Final native, Android and Docker CI pass on `aee3e7e`. This supersedes historical
 source-only/uninstalled status below. Evidence and remaining work are in the
 [desktop handoff](desktop-session-handoff.md).
 

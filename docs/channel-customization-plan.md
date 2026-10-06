@@ -5,7 +5,7 @@ Status: staged roadmap, reviewed 2026-10-06. The channel identity increment, bou
 The implemented desktop foundation is installed as reviewed `97f3b43`, with
 packaging dependency fix `647fc1e`; server image `1aebabf` is pushed and deployed
 healthy with exact-placement capability. Local 257/257 verification and artifact
-integrity pass. Final remote CI is pending. See
+integrity pass. Final native, Android and Docker CI pass on `aee3e7e`. See
 [desktop-session-handoff.md](desktop-session-handoff.md) for provenance and the
 standing local-install/server-push workflow. The roadmap below remains scoped;
 these outcomes do not complete the later phases.

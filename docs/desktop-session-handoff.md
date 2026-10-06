@@ -43,8 +43,7 @@ that Return activates ordinary Qt buttons under every platform theme. Blank-them
 runs reproduce both failures; the fixtures now use portable Space activation,
 with enabled/focus preconditions and all original saved-result checks retained.
 Application code is unchanged. Both repaired fixtures pass blank-theme and native Wayland checks; the full
-257/257 suite also passes with the default Qt theme. Final remote CI is being
-completed. The test correction has independent review approval. Prior native GTK Return
+257/257 suite also passes with the default Qt theme. Final native, Android and Docker CI pass on `aee3e7e`. The test correction has independent review approval. Prior native GTK Return
 acceptance remains recorded in the original Wayland evidence.
 
 ## Channel foundation continuation — 2026-10-05
@@ -207,7 +206,7 @@ forward secrecy, end-to-end voice encryption, stereo, or per-app capture.
 - October 4 feedback/administration/artwork and October 5 placement/review/crop
   are included in `97f3b43`; implementation is independently reviewed; the first clean-runner CI exposed
   a missing WebP plugin. Dependency fixes through `1aebabf` are pushed and final
-  remote CI is pending.
+  native, Android and Docker CI pass on `aee3e7e`.
 - Local desktop package last verified installed: refreshed `omachat`/`omachat-debug`
   `0.2.2-1` checkpoint `97f3b43`, installed October 6 under standing authorization.
   Installed files match the checkpoint packages; both host package integrity
