@@ -113,7 +113,7 @@ For development, or to build for a distribution the install script doesn't
 cover yet. On Arch Linux:
 
 ```bash
-sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia \
+sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia qt6-imageformats \
     qtkeychain-qt6 protobuf libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
