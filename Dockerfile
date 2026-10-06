@@ -6,7 +6,7 @@
 FROM archlinux:base-devel AS build
 
 RUN pacman -Syu --noconfirm --needed \
-        cmake ninja qt6-base protobuf abseil-cpp libsodium tomlplusplus openssl \
+        cmake ninja qt6-base qt6-imageformats protobuf abseil-cpp libsodium tomlplusplus openssl \
     && pacman -Scc --noconfirm
 
 WORKDIR /src
@@ -21,7 +21,7 @@ RUN cmake -S . -B build -G Ninja \
 
 FROM archlinux:base AS runtime
 
-RUN pacman -Syu --noconfirm --needed qt6-base protobuf abseil-cpp libsodium tomlplusplus openssl \
+RUN pacman -Syu --noconfirm --needed qt6-base qt6-imageformats protobuf abseil-cpp libsodium tomlplusplus openssl \
     && pacman -Scc --noconfirm \
     && useradd --system --uid 954 --home-dir /var/lib/omachat --shell /usr/bin/nologin omachat \
     && install -d -o omachat -g omachat -m 700 /var/lib/omachat /etc/omachat
