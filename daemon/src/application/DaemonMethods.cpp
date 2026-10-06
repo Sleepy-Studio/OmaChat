@@ -1342,6 +1342,49 @@ void Daemon::registerMethods()
             return model->channelJson(reply.channel());
         });
     };
+    m[QStringLiteral("channel.details.reload")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id cid = channelParam(p, r);
+        if (!cid || !requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("channel.details.cas.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support checked channel details"));
+            return;
+        }
+        ServerConnection* const originConnection = m_conn;
+        const auto originAccount = m_active;
+        const auto originGeneration = originConnection->linkGeneration();
+        proto::Envelope env;
+        env.mutable_sync();
+        m_conn->request(std::move(env),
+            [this, model, cid, r, originConnection, originAccount, originGeneration](const proto::Envelope& reply) {
+                if (m_conn != originConnection || m_active != originAccount
+                    || originConnection->linkGeneration() != originGeneration) {
+                    r.error(e::NotConnected, QStringLiteral("account changed while reloading channel details"));
+                    return;
+                }
+                if (reply.has_error()) {
+                    r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+                    return;
+                }
+                if (!reply.has_sync_state()) {
+                    r.error(e::Internal, QStringLiteral("could not reload channel details"));
+                    return;
+                }
+                for (const auto& channel : reply.sync_state().channels()) {
+                    if (channel.id() != cid)
+                        continue;
+                    if (!(channel.effective_permissions() & permissions::ViewChannel)
+                        || !(channel.effective_permissions() & permissions::ManageChannel)) {
+                        r.error(e::PermissionDenied, QStringLiteral("you cannot manage this channel"));
+                        return;
+                    }
+                    m_conn->model().upsertChannel(channel);
+                    r.ok(model->channelJson(channel));
+                    return;
+                }
+                r.error(e::NotFound, QStringLiteral("channel no longer available"));
+            });
+    };
     m[QStringLiteral("channel.update")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
         if (!cid)
@@ -1371,9 +1414,36 @@ void Daemon::registerMethods()
                 return;
             }
         }
+        if (p.contains(QStringLiteral("original"))) {
+            if (!m_conn->capabilities().contains(QStringLiteral("channel.details.cas.v1"))) {
+                r.error(e::BadRequest, QStringLiteral("this server does not support checked channel details"));
+                return;
+            }
+            const auto original = p.value(QStringLiteral("original")).toObject();
+            for (const auto* field : {"name", "topic", "description"}) {
+                if (!original.value(QLatin1String(field)).isString()) {
+                    r.error(
+                        e::BadRequest, QStringLiteral("original details require name, topic and description strings"));
+                    return;
+                }
+            }
+            for (const auto* field : {"icon_attachment_id", "banner_attachment_id", "parent", "position", "before"}) {
+                if (p.contains(QLatin1String(field))) {
+                    r.error(e::BadRequest, QStringLiteral("checked details cannot include artwork or placement"));
+                    return;
+                }
+            }
+        }
         proto::Envelope env;
         auto* u = env.mutable_update_channel();
         u->set_channel_id(cid);
+        if (p.contains(QStringLiteral("original"))) {
+            const auto original = p.value(QStringLiteral("original")).toObject();
+            u->set_check_details(true);
+            u->set_expected_name(original.value(QStringLiteral("name")).toString().toStdString());
+            u->set_expected_topic(original.value(QStringLiteral("topic")).toString().toStdString());
+            u->set_expected_description(original.value(QStringLiteral("description")).toString().toStdString());
+        }
         u->set_name(p.value(QStringLiteral("name")).toString().toStdString());
         if (p.contains(QStringLiteral("topic"))) {
             u->set_set_topic(true);

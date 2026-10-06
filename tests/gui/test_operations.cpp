@@ -352,11 +352,11 @@ TEST_F(Operations, ChannelSettingsGuardEscapeOutsideAndRejectedSave)
     EXPECT_TRUE(editor->property("saveFailed").toBool());
     EXPECT_TRUE(editor->property("dirty").toBool());
     EXPECT_TRUE(editor->property("visible").toBool());
+    ASSERT_TRUE(waitFor([&] { return editor->property("activeFocus").toBool(); }));
     QTest::keyClick(window, Qt::Key_Escape);
-    QTest::qWait(160);
     auto* confirm = editor->findChild<QObject*>("discardChannel");
     ASSERT_TRUE(confirm);
-    EXPECT_TRUE(confirm->property("visible").toBool());
+    ASSERT_TRUE(waitFor([&] { return confirm->property("opened").toBool(); }));
     clickText(window, "Cancel");
     QTest::qWait(160);
     EXPECT_TRUE(editor->property("visible").toBool());
@@ -369,6 +369,15 @@ TEST_F(Operations, ChannelSettingsGuardEscapeOutsideAndRejectedSave)
     ASSERT_TRUE(waitFor([&] { return app->channelDetails(id).value("name").toString() == "remote-name"; }));
     EXPECT_EQ(name->property("text").toString(), QString("bad") + QChar(1));
     name->setProperty("text", " Saved Channel ");
+    clickText(window, "Save");
+    ASSERT_TRUE(waitFor([&] { return !editor->property("saving").toBool(); }));
+    EXPECT_TRUE(editor->property("saveFailed").toBool());
+    EXPECT_TRUE(editor->property("dirty").toBool());
+    EXPECT_EQ(app->channelDetails(id).value("name").toString(), "remote-name");
+    EXPECT_EQ(name->property("text").toString(), " Saved Channel ");
+    clickText(window, "Reload latest");
+    ASSERT_TRUE(waitFor([&] { return !editor->property("reloading").toBool(); }));
+    EXPECT_EQ(name->property("text").toString(), " Saved Channel ");
     clickText(window, "Save");
     ASSERT_TRUE(waitFor([&] { return !editor->property("saving").toBool(); }));
     EXPECT_FALSE(editor->property("dirty").toBool());
@@ -1525,6 +1534,263 @@ TEST_F(Operations, ArtworkCropRejectsChangedSourceAndPreparedAccountContext)
     ASSERT_TRUE(waitFor([&] { return finished == 2; }));
     EXPECT_FALSE(failure.isEmpty());
     EXPECT_EQ(app->channelDetails(id).value("icon_attachment_id").toString(), "0");
+}
+
+TEST_F(Operations, SidebarPointerPlacementMovesIntoAndOutOfCategoryAcrossThemes)
+{
+    const QString source = app->selectedChannelId();
+    const auto category = daemon->call(
+        "channel.create", {{"server", app->selectedServerId()}, {"name", "Pointer destination"}, {"type", "category"}});
+    ASSERT_TRUE(category.ok);
+    const QString categoryId = category.result.value("id").toString();
+    const auto anchor = daemon->call(
+        "channel.create", {{"server", app->selectedServerId()}, {"name", "pointer-anchor"}, {"type", "text"}});
+    ASSERT_TRUE(anchor.ok);
+    const QString anchorId = anchor.result.value("id").toString();
+    ASSERT_TRUE(waitFor([&] { return app->channels()->indexOf("itemId", anchorId) >= 0; }));
+    for (bool light : {false, true}) {
+        if (light) {
+            QFile colors(files.filePath("drag-light.toml"));
+            ASSERT_TRUE(colors.open(QIODevice::WriteOnly));
+            colors.write("background = '#fafafa'\nforeground = '#262626'\naccent = '#2563eb'\n");
+            colors.close();
+            ASSERT_TRUE(theme.loadFile(colors.fileName()));
+        }
+        for (bool compact : {true, false}) {
+            theme.setScale(compact ? 1.5 : 1.0);
+            QQmlEngine engine;
+            QQmlComponent component(&engine);
+            component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+import OmaChat
+ApplicationWindow {
+    width: 720; height: 460; visible: true
+    ChannelSidebar { objectName: "sidebar"; width: 340; anchors.top: parent.top; anchors.bottom: parent.bottom }
+})",
+                QUrl());
+            std::unique_ptr<QObject> object(component.create());
+            ASSERT_TRUE(object) << component.errorString().toStdString();
+            auto* window = qobject_cast<QQuickWindow*>(object.get());
+            auto* sidebar = object->findChild<QObject*>("sidebar");
+            ASSERT_TRUE(window);
+            ASSERT_TRUE(sidebar);
+            if (!compact)
+                window->resize(1440, 900);
+            QTest::qWait(150);
+            if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+                const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+                ASSERT_EQ(
+                    QProcess::execute("hyprctl",
+                        {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+                    0);
+                ASSERT_EQ(QProcess::execute("hyprctl",
+                              {"eval",
+                                  QString("hl.dispatch(hl.dsp.window.resize({x=%1,y=%2,relative=false,window='%3'}))")
+                                      .arg(compact ? 720 : 1440)
+                                      .arg(compact ? 460 : 900)
+                                      .arg(match)}),
+                    0);
+            }
+            QTest::qWait(150);
+            auto pointFor = [&](const QString& id, double fraction) -> QPoint {
+                auto* row = namedControl(window->contentItem(), "channelPlacementRow_" + id);
+                if (!row)
+                    return {-1, -1};
+                return row->mapToScene(QPointF(row->width() / 2, row->height() * fraction)).toPoint();
+            };
+            const QPoint start = pointFor(source, 0.5);
+            const QPoint destination = pointFor(categoryId, 0.5);
+            ASSERT_GT(start.x(), 0);
+            ASSERT_GT(destination.x(), 0);
+            ASSERT_LT(destination.y(), window->height());
+            QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start);
+            QTest::mouseMove(window, destination, 50);
+            ASSERT_TRUE(waitFor([&] { return sidebar->property("dragging").toBool(); }));
+            EXPECT_TRUE(window->grabWindow().save(
+                QString("/tmp/omachat-drag-%1-%2.png").arg(light ? "light" : "dark", compact ? "compact" : "wide")));
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, destination);
+            ASSERT_TRUE(
+                waitFor([&] { return app->channelDetails(source).value("parent_id").toString() == categoryId; }));
+            ASSERT_TRUE(waitFor([&] { return sidebar->property("pendingPlacementId").toString().isEmpty(); }));
+            EXPECT_FALSE(sidebar->property("placementFailed").toBool());
+            QTest::qWait(100);
+            const QPoint moved = pointFor(source, 0.5);
+            const QPoint outside = pointFor(anchorId, 0.2);
+            ASSERT_GT(moved.x(), 0);
+            ASSERT_GT(outside.x(), 0);
+            QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, moved);
+            QTest::mouseMove(window, outside, 50);
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, outside);
+            EXPECT_EQ(app->channelDetails(source).value("parent_id").toString(), categoryId);
+            QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, moved);
+            QTest::mouseMove(window, outside, 50);
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, outside);
+            ASSERT_TRUE(waitFor([&] { return app->channelDetails(source).value("parent_id").toString() == "0"; }));
+            ASSERT_TRUE(waitFor([&] { return sidebar->property("pendingPlacementId").toString().isEmpty(); }));
+            EXPECT_LT(app->channelDetails(source).value("position").toInt(),
+                app->channelDetails(anchorId).value("position").toInt());
+            EXPECT_EQ(app->selectedChannelId(), source);
+            window->close();
+            QTest::qWait(80);
+        }
+    }
+}
+
+TEST_F(Operations, ChannelDetailPendingGenerationChangeCancelsEditorWithoutReplacingReopenedDraft)
+{
+    QQmlEngine engine;
+    auto object = editorWindow(engine, "ChannelSettingsDialog");
+    ASSERT_TRUE(object);
+    auto* window = qobject_cast<QQuickWindow*>(object.get());
+    auto* editor = object->findChild<QObject*>("editor");
+    const QString id = app->selectedChannelId();
+    ASSERT_TRUE(QMetaObject::invokeMethod(editor, "openFor", Q_ARG(QVariant, id)));
+    QTest::qWait(180);
+    auto* name = editor->findChild<QObject*>("channelName");
+    ASSERT_TRUE(name);
+    name->setProperty("text", "pending-detail-name");
+    auto* save = textControl(window->contentItem(), "Save");
+    ASSERT_TRUE(save);
+    ASSERT_TRUE(save->isEnabled());
+    // Direct signal invocation starts the genuine controller request without
+    // pumping its response before the dialog-context invalidation.
+    ASSERT_TRUE(QMetaObject::invokeMethod(save, "clicked"));
+    ASSERT_TRUE(editor->property("saving").toBool());
+    ASSERT_TRUE(QMetaObject::invokeMethod(app.get(), "artworkGenerationChanged"));
+    EXPECT_FALSE(editor->property("saving").toBool());
+    ASSERT_TRUE(waitFor([&] { return !editor->property("visible").toBool(); }));
+    ASSERT_TRUE(QMetaObject::invokeMethod(editor, "openFor", Q_ARG(QVariant, id)));
+    name->setProperty("text", "newer-reopened-draft");
+    ASSERT_TRUE(waitFor([&] { return app->channelDetails(id).value("name").toString() == "pending-detail-name"; }));
+    EXPECT_EQ(name->property("text").toString(), "newer-reopened-draft");
+    EXPECT_TRUE(editor->property("dirty").toBool());
+    EXPECT_TRUE(editor->property("saveStatus").toString().isEmpty());
+}
+
+TEST_F(Operations, ChannelDetailReloadReplyCannotPopulateAnotherServerEditor)
+{
+    const QString oldServer = app->selectedServerId();
+    const QString oldChannel = app->selectedChannelId();
+    const auto created = daemon->call("server.create", {{"name", "Reload context destination"}});
+    ASSERT_TRUE(created.ok);
+    const QString newServer = created.result.value("id").toString();
+    ASSERT_TRUE(waitFor([&] { return app->servers()->indexOf("itemId", newServer) >= 0; }));
+    app->selectServer(oldServer);
+    app->selectChannel(oldChannel);
+    QQmlEngine engine;
+    auto object = editorWindow(engine, "ChannelSettingsDialog");
+    ASSERT_TRUE(object);
+    auto* editor = object->findChild<QObject*>("editor");
+    ASSERT_TRUE(QMetaObject::invokeMethod(editor, "openFor", Q_ARG(QVariant, oldChannel)));
+    QTest::qWait(150);
+    auto* name = editor->findChild<QObject*>("channelName");
+    ASSERT_TRUE(name);
+    name->setProperty("text", "old-retained-draft");
+    editor->setProperty("needsReload", true);
+    auto* reload = textControl(qobject_cast<QQuickWindow*>(object.get())->contentItem(), "Reload latest");
+    ASSERT_TRUE(reload);
+    int reloadCompletions = 0;
+    QObject::connect(app.get(), &client::AppController::administrationFinished, app.get(),
+        [&](const QString& method, const QString&, const QString&, const QVariantMap&) {
+            if (method == "channel.details.reload")
+                ++reloadCompletions;
+        });
+    // No event loop runs between request submission and switching context;
+    // the real daemon response must therefore arrive after the switch.
+    ASSERT_TRUE(QMetaObject::invokeMethod(reload, "clicked"));
+    ASSERT_TRUE(editor->property("reloading").toBool());
+    app->selectServer(newServer);
+    EXPECT_FALSE(editor->property("reloading").toBool());
+    ASSERT_TRUE(waitFor([&] { return !editor->property("visible").toBool(); }));
+    const QString newChannel = app->selectedChannelId();
+    ASSERT_NE(newChannel, oldChannel);
+    ASSERT_TRUE(QMetaObject::invokeMethod(editor, "openFor", Q_ARG(QVariant, newChannel)));
+    name->setProperty("text", "new-server-local-draft");
+    // A synchronous fixture IPC call drains prior requests/replies, including
+    // the older reload. Its completion must be suppressed by the controller.
+    ASSERT_TRUE(daemon->call("state.snapshot").ok);
+    QTest::qWait(150);
+    EXPECT_EQ(reloadCompletions, 0);
+    EXPECT_EQ(name->property("text").toString(), "new-server-local-draft");
+    EXPECT_TRUE(editor->property("dirty").toBool());
+    EXPECT_TRUE(editor->property("saveStatus").toString().isEmpty());
+    EXPECT_EQ(editor->property("original").toMap().value("id").toString(), newChannel);
+}
+
+TEST_F(Operations, ReloadedLongChannelDetailsKeepCompactSaveActionsInsideWindow)
+{
+    const QString id = app->selectedChannelId();
+    const QString topic = QString(500, 't');
+    QString description;
+    for (int i = 0; i < 90; ++i)
+        description += "<b>plain latest</b>\n";
+    ASSERT_LT(description.size(), 2000);
+    for (bool light : {false, true}) {
+        if (light) {
+            QFile colors(files.filePath("detail-light.toml"));
+            ASSERT_TRUE(colors.open(QIODevice::WriteOnly));
+            colors.write("background = '#fafafa'\nforeground = '#262626'\naccent = '#2563eb'\n");
+            colors.close();
+            ASSERT_TRUE(theme.loadFile(colors.fileName()));
+        }
+        for (bool compact : {true, false}) {
+            theme.setScale(compact ? 1.5 : 1.0);
+            QQmlEngine engine;
+            auto object = editorWindow(engine, "ChannelSettingsDialog");
+            ASSERT_TRUE(object);
+            auto* window = qobject_cast<QQuickWindow*>(object.get());
+            auto* editor = object->findChild<QObject*>("editor");
+            if (!compact)
+                window->resize(1440, 900);
+            QTest::qWait(150);
+            if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+                const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+                ASSERT_EQ(
+                    QProcess::execute("hyprctl",
+                        {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+                    0);
+                ASSERT_EQ(QProcess::execute("hyprctl",
+                              {"eval",
+                                  QString("hl.dispatch(hl.dsp.window.resize({x=%1,y=%2,relative=false,window='%3'}))")
+                                      .arg(compact ? 720 : 1440)
+                                      .arg(compact ? 460 : 900)
+                                      .arg(match)}),
+                    0);
+            }
+            ASSERT_TRUE(QMetaObject::invokeMethod(editor, "openFor", Q_ARG(QVariant, id)));
+            QTest::qWait(150);
+            editor->findChild<QObject*>("channelName")->setProperty("text", "retained-detail-draft");
+            ASSERT_TRUE(
+                daemon->call("channel.update", {{"channel", id}, {"topic", topic}, {"description", description}}).ok);
+            clickText(window, "Reload latest");
+            ASSERT_TRUE(waitFor([&] { return !editor->property("reloading").toBool(); }));
+            ASSERT_TRUE(editor->property("latestLoaded").toBool());
+            QTest::qWait(150);
+            auto* latest = editor->findChild<QQuickItem*>("latestChannelDetails");
+            ASSERT_TRUE(latest);
+            EXPECT_EQ(latest->property("textFormat").toInt(), 0); // Text.PlainText.
+            EXPECT_EQ(editor->property("details").toMap().value("description").toString(), description.trimmed());
+            EXPECT_TRUE(latest->property("text").toString().contains(description.trimmed()));
+            auto* save = textControl(window->contentItem(), "Save");
+            auto* close = textControl(window->contentItem(), "Close");
+            ASSERT_TRUE(save);
+            ASSERT_TRUE(close);
+            for (auto* action : {save, close}) {
+                const QPointF point = action->mapToScene(QPointF(action->width() / 2, action->height() / 2));
+                EXPECT_GE(point.y(), 0);
+                EXPECT_LT(point.y(), window->height());
+                EXPECT_GE(point.x(), 0);
+                EXPECT_LT(point.x(), window->width());
+            }
+            EXPECT_TRUE(save->isEnabled());
+            EXPECT_TRUE(window->grabWindow().save(QString("/tmp/omachat-detail-reload-%1-%2.png")
+                    .arg(light ? "light" : "dark", compact ? "compact" : "wide")));
+            EXPECT_EQ(editor->findChild<QObject*>("channelName")->property("text").toString(), "retained-detail-draft");
+            window->close();
+        }
+    }
 }
 
 int main(int argc, char** argv)

@@ -726,6 +726,23 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage this channel"));
         return;
     }
+    if (m.check_details()) {
+        if (m.set_icon() || m.set_banner() || m.set_parent() || m.set_position() || m.set_before()) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                QStringLiteral("checked details cannot be combined with artwork or placement"));
+            return;
+        }
+        // This handler runs synchronously on the server thread: comparison and
+        // persistence cannot interleave with another channel update.
+        if (c->name != QString::fromStdString(m.expected_name())
+            || c->topic != QString::fromStdString(m.expected_topic())
+            || c->description != QString::fromStdString(m.expected_description())) {
+            replyError(s, rid, proto::ERROR_CONFLICT,
+                QStringLiteral(
+                    "Channel details changed elsewhere. Reload latest, review your retained edits, then save again."));
+            return;
+        }
+    }
     ChannelRecord updated = *c;
     if (!m.name().empty()) {
         QString raw = QString::fromStdString(m.name());

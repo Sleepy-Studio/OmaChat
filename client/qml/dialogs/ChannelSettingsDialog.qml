@@ -9,14 +9,20 @@ Dialog {
     property var original: ({})
     property var submitted: ({})
     property bool saving: false
+    property bool reloading: false
+    property bool needsReload: false
+    property bool latestLoaded: false
+    readonly property bool checkedDetailsSupported: App.capabilities.indexOf("channel.details.cas.v1") >= 0
     property string saveStatus: ""
     property bool saveFailed: false
     readonly property bool dirty: nameField.text !== (original.name || "")
         || topicField.text !== (original.topic || "")
         || descriptionField.text !== (original.description || "")
-    protectClose: dirty || saving
-    onCloseRequested: { if (!saving) discardConfirm.open() }
+    protectClose: dirty || saving || reloading
+    onCloseRequested: { if (!saving && !reloading) discardConfirm.open() }
     height: Math.min(Metrics.px(740), (parent ? parent.height : 800) - Metrics.px(40))
+    property string accountId
+    property string serverId
     property string channelId
     property var details: ({})
     title: qsTr("Channel settings")
@@ -25,8 +31,13 @@ Dialog {
     function openFor(id) {
         if (visible) return
         saving = false
+        reloading = false
+        needsReload = false
+        latestLoaded = false
         saveStatus = ""
         saveFailed = false
+        accountId = App.accountId
+        serverId = App.selectedServerId
         channelId = id
         details = App.channelDetails(id)
         original = details
@@ -46,12 +57,28 @@ Dialog {
         open()
     }
 
+    function cancelForContextChange() {
+        saving = false
+        reloading = false
+        discardConfirm.close()
+        close()
+    }
+
     Connections {
         target: App
+        function onArtworkGenerationChanged() {
+            if (dialog.visible) dialog.cancelForContextChange()
+        }
+        function onStatusChanged() {
+            if (dialog.visible && App.accountId !== dialog.accountId) dialog.cancelForContextChange()
+        }
+        function onSelectionChanged() {
+            if (dialog.visible && App.selectedServerId !== dialog.serverId) dialog.cancelForContextChange()
+        }
         function onChannelDataChanged(id) {
             if (id !== dialog.channelId)
                 return
-            const keepInput = dialog.dirty || dialog.saving
+            const keepInput = dialog.dirty || dialog.saving || dialog.reloading || dialog.needsReload
             dialog.details = App.channelDetails(id)
             if (!keepInput) {
                 dialog.original = dialog.details
@@ -65,9 +92,26 @@ Dialog {
                 App.requestPreview(dialog.details.banner_attachment_id, "channel-banner.png", 0)
         }
         function onAdministrationFinished(operation, id, error, saved) {
+            if (!dialog.visible) return
+            if (operation === "channel.details.reload" && id === dialog.channelId && dialog.reloading) {
+                dialog.reloading = false
+                dialog.saveFailed = error.length > 0
+                if (error) {
+                    dialog.saveStatus = error
+                } else {
+                    dialog.details = saved
+                    dialog.original = saved
+                    dialog.needsReload = false
+                    dialog.latestLoaded = true
+                    dialog.saveStatus = qsTr("Latest details loaded. Your edits are retained. Review them against the latest values in the form, then save deliberately.")
+                }
+                reloadDetails.forceActiveFocus()
+                return
+            }
             if (operation !== "channel.update" || id !== dialog.channelId || !dialog.saving) return
             dialog.saving = false
             dialog.saveFailed = error.length > 0
+            if (error && saved && saved.conflict) dialog.needsReload = true
             dialog.saveStatus = error || qsTr("Channel details saved.")
             if (!error) {
                 if (nameField.text === dialog.submitted.name) nameField.text = saved.name || ""
@@ -75,6 +119,10 @@ Dialog {
                 if (descriptionField.text === dialog.submitted.description) descriptionField.text = saved.description || ""
                 dialog.original = saved
             }
+            if (error) {
+                if (dialog.needsReload) reloadDetails.forceActiveFocus()
+                else nameField.input.forceActiveFocus()
+            } else closeDetails.forceActiveFocus()
         }
     }
 
@@ -116,7 +164,7 @@ Dialog {
             Layout.fillHeight: true
             Layout.minimumHeight: 0
             clip: true
-            enabled: !dialog.saving
+            enabled: !dialog.saving && !dialog.reloading
             ColumnLayout {
                 width: formScroll.availableWidth
                 spacing: Metrics.px(12)
@@ -151,8 +199,10 @@ Dialog {
                     font.bold: true
                 }
                 ScrollView {
+                    objectName: "channelDescriptionScroll"
                     Layout.fillWidth: true
                     Layout.preferredHeight: Metrics.px(150)
+                    clip: true
                     TextArea {
                         id: descriptionField
                         wrapMode: TextEdit.Wrap
@@ -216,6 +266,17 @@ Dialog {
                     }
                 }
                 Text {
+                    objectName: "latestChannelDetails"
+                    Layout.fillWidth: true
+                    visible: dialog.latestLoaded
+                    text: qsTr("Latest name: %1\nLatest topic: %2\nLatest description: %3")
+                        .arg(dialog.details.name || "").arg(dialog.details.topic || "").arg(dialog.details.description || "")
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    color: Theme.textMuted
+                    font.pixelSize: Metrics.px(12)
+                }
+                Text {
                     Layout.fillWidth: true
                     text: qsTr("Category and artwork changes apply immediately. Save applies to name, topic and description.")
                     wrapMode: Text.Wrap
@@ -232,20 +293,38 @@ Dialog {
             color: dialog.saveFailed ? Theme.danger : Theme.textMuted
             font.pixelSize: Metrics.px(13)
         }
+        Text {
+            Layout.fillWidth: true
+            visible: !dialog.checkedDetailsSupported
+            text: qsTr("This server needs an update before checked channel details can be saved.")
+            wrapMode: Text.Wrap
+            color: Theme.danger
+        }
         RowLayout {
             Layout.alignment: Qt.AlignRight
-            FlatButton { text: qsTr("Close"); enabled: !dialog.saving; onClicked: dialog.requestClose() }
+            FlatButton {
+                id: reloadDetails
+                text: dialog.reloading ? qsTr("Reloading…") : qsTr("Reload latest")
+                visible: dialog.checkedDetailsSupported
+                enabled: !dialog.saving && !dialog.reloading
+                onClicked: {
+                    dialog.reloading = true
+                    dialog.saveStatus = qsTr("Reloading latest details; retaining your edits…")
+                    App.reloadChannelDetails(dialog.channelId)
+                }
+            }
+            FlatButton { id: closeDetails; text: qsTr("Close"); enabled: !dialog.saving && !dialog.reloading; onClicked: dialog.requestClose() }
             FlatButton {
                 text: dialog.saving ? qsTr("Saving…") : qsTr("Save")
                 primary: true
-                enabled: dialog.dirty && !dialog.saving && nameField.text.trim().length > 0 && descriptionField.length <= 2000
+                enabled: dialog.checkedDetailsSupported && !dialog.needsReload && !dialog.reloading && dialog.dirty && !dialog.saving && nameField.text.trim().length > 0 && descriptionField.length <= 2000
                 onClicked: {
                     dialog.submitted = {name: nameField.text, topic: topicField.text, description: descriptionField.text}
                     dialog.saving = true
                     dialog.saveFailed = false
                     dialog.saveStatus = qsTr("Saving channel details…")
                     App.updateChannelDetails(dialog.channelId, nameField.text, topicField.text,
-                                             descriptionField.text)
+                                             descriptionField.text, dialog.original)
                 }
             }
         }

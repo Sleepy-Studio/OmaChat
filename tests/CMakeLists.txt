@@ -75,6 +75,7 @@ add_executable(omachat_integration_tests
     integration/test_protocol.cpp
     integration/test_daemon.cpp
     integration/test_voice.cpp
+    integration/test_channel_details.cpp
     integration/test_channel_placement.cpp
     integration/test_category_delete.cpp
 )
@@ -103,9 +104,16 @@ if(OMACHAT_ENABLE_FUZZERS)
 endif()
 
 if(OMACHAT_BUILD_CLIENT)
+    qt_add_executable(omachat_channel_drag_tests gui/test_channel_drag.cpp)
+    target_compile_definitions(omachat_channel_drag_tests PRIVATE OMACHAT_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(omachat_channel_drag_tests PRIVATE GTest::gtest Qt6::Quick Qt6::Test)
+    omachat_set_warnings(omachat_channel_drag_tests)
+    gtest_discover_tests(omachat_channel_drag_tests DISCOVERY_TIMEOUT 30
+        PROPERTIES LABELS gui TIMEOUT 120)
     qt_add_executable(omachat_operation_tests gui/test_operations.cpp integration/Harness.cpp)
     qt_add_executable(omachat_permission_review_tests gui/test_permission_review.cpp integration/Harness.cpp)
-    foreach(operation_target omachat_operation_tests omachat_permission_review_tests)
+    qt_add_executable(omachat_server_crop_tests gui/test_server_crop.cpp integration/Harness.cpp)
+    foreach(operation_target omachat_operation_tests omachat_permission_review_tests omachat_server_crop_tests)
         target_sources(${operation_target} PRIVATE ../client/src/platform/ArtworkCache.cpp)
         target_sources(${operation_target} PRIVATE ../client/src/platform/ArtworkCrop.cpp)
         file(GLOB operation_icons "${CMAKE_SOURCE_DIR}/client/icons/*.svg")

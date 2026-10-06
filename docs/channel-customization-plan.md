@@ -24,11 +24,28 @@ these outcomes do not complete the later phases.
 - Current-user effective-permission review from authoritative server masks, category path explanation, read-only member access and keyboard scrolling. Other-member/source previews remain open.
 - Bounded pre-upload channel-settings crop with pointer/keyboard position, zoom and canonical icon/banner sizes; source/account fingerprint guards and pending/error feedback. This is a flattened asset, not persisted focal-point metadata or multiple server variants.
 
+### Desktop continuation — 2026-10-06
+
+- Pointer placement now uses a thresholded sidebar gesture, visible destination
+  cue and server-resolved before/end operation. It supports channel moves into
+  and out of categories and category ordering. Pending/rejected drops retain
+  authoritative order; Escape, invalid targets and context changes cancel.
+  The gesture stays within the visible list; edge scrolling is not implemented.
+- Server settings icon/banner pickers use the shared bounded asynchronous crop
+  review and canonical image sizes. Preview fingerprints also bind the selected
+  server; stale jobs, changed sources and lost server authority cannot submit.
+- Channel name/topic/description saves use capability-gated atomic comparison of
+  all three original values. Conflicts retain the draft. Explicit Reload latest
+  retains local edits and shows authoritative values inside the scrolling form;
+  only a deliberate subsequent Save can overwrite those values. Old protocol
+  clients keep their existing behavior. Checked desktop saves require an updated
+  server. These comparisons cover detail fields, not artwork or placement.
+
 ### Still open in Phase 1
 
-- Persisted focal-point metadata, crop in creation/server artwork, image variants, and appearance controls in the quick switcher and voice room. Async cache validation remains a performance follow-on.
-- Pointer drag and drop, unified settings navigation, and permission-source/other-member previews. Exact keyboard placement and current-user review are implemented. Category move-to-top-level/Cancel is implemented; preserving inherited overrides automatically during deletion remains open.
-- Secure channel duplication and undo safe editing with conflict handling.
+- Persisted focal-point metadata, crop in initial creation, image variants, and appearance controls in the quick switcher and voice room. Async cache validation remains a performance follow-on.
+- Unified settings navigation and permission-source/other-member previews. Exact keyboard placement and current-user review are implemented. Category move-to-top-level/Cancel is implemented; preserving inherited overrides automatically during deletion remains open.
+- Secure channel duplication and conflict handling for artwork/placement beyond checked detail edits.
 - A full permission review before channel creation.
 
 The later phases remain proposals. They have not been implemented by this increment.

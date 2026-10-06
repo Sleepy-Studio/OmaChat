@@ -404,11 +404,14 @@ public:
         const QString& topic, const QString& description, const QUrl& iconFile, const QUrl& bannerFile);
     Q_INVOKABLE void deleteChannel(const QString& id);
     Q_INVOKABLE void setTopic(const QString& topic);
-    Q_INVOKABLE void updateChannelDetails(
-        const QString& id, const QString& name, const QString& topic, const QString& description);
+    Q_INVOKABLE void updateChannelDetails(const QString& id, const QString& name, const QString& topic,
+        const QString& description, const QVariantMap& original = {});
+    Q_INVOKABLE void reloadChannelDetails(const QString& id);
     Q_INVOKABLE void setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl);
     Q_INVOKABLE void prepareArtworkCrop(int requestId, const QUrl& fileUrl, const QString& kind);
     Q_INVOKABLE void setChannelArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
+        double focalY, double zoom, const QString& fingerprint);
+    Q_INVOKABLE void setServerArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
         double focalY, double zoom, const QString& fingerprint);
     Q_INVOKABLE QVariantMap channelDetails(const QString& id) const { return channel(id).toVariantMap(); }
     Q_INVOKABLE QVariantList channelCategories() const;
@@ -563,6 +566,8 @@ private:
     static void prunePastedImages();
     int selfRank() const; // highest role position held in the selected server
     void persistSelection();
+    void setArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX, double focalY,
+        double zoom, const QString& fingerprint, bool serverArtwork);
 
     config::ClientConfig m_config;
     bool m_uiSaving = false;
@@ -637,6 +642,7 @@ private:
     ArtworkCache m_artworkCache;
     quint64 m_placementOperation = 0;
     quint64 m_cropOperation = 0;
+    quint64 m_channelDetailsGeneration = 0;
     QString m_artworkModelIdentity;
     QVariantMap m_previews; // attachment id -> local file URL
     QVariantMap m_previewErrors; // attachment id -> failed eager download

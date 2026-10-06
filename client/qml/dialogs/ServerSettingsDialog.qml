@@ -24,8 +24,8 @@ Dialog {
     property var submittedServer: ({})
     property var submittedRole: ({})
     property var nextRole: null
-    protectClose: serverDirty || dirty || serverSaving || roleSaving
-    onCloseRequested: { if (!serverSaving && !roleSaving) { nextRole = null; discardConfirm.open() } }
+    protectClose: serverDirty || dirty || serverSaving || roleSaving || serverArtworkCrop.uploading
+    onCloseRequested: { if (!serverSaving && !roleSaving && !serverArtworkCrop.uploading) { nextRole = null; discardConfirm.open() } }
 
     function revealRoleControl(item) {
         const flick = roleScroll.contentItem
@@ -172,7 +172,16 @@ Dialog {
         property string kind
         title: kind === "icon" ? qsTr("Choose server icon") : qsTr("Choose server banner")
         nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.webp)")]
-        onAccepted: App.setServerArtwork(dialog.serverId, kind, selectedFile)
+        onAccepted: {
+            if (dialog.visible && dialog.serverId === App.selectedServerId && App.canManageServer)
+                serverArtworkCrop.openFor(dialog.serverId, kind, selectedFile)
+        }
+    }
+
+    ArtworkCropDialog {
+        id: serverArtworkCrop
+        objectName: "serverArtworkCropDialog"
+        target: "server"
     }
 
     component Tab: TabButton {

@@ -15,6 +15,9 @@ assistants, bots or LLM features.
 - Servers with categories, text channels and voice channels; direct
   messages and group conversations (3–10 people), end-to-end encrypted
   with safety numbers (text and files; see [security](docs/security.md))
+- Channel icons, banners and descriptions, bounded channel/server artwork cropping,
+  keyboard or pointer placement, current-user access review, and checked channel
+  detail saves that retain edits when another administrator changes the channel
 - Persistent history (paged, 50 at a time), edits, deletes, replies,
   @mentions, reactions, typing indicators, full-text search of a channel
   or a whole server

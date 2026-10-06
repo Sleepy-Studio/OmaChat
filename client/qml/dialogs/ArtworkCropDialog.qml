@@ -6,6 +6,7 @@ import OmaChat
 Dialog {
     id: dialog
     objectName: "artworkCropDialog"
+    property string target: "channel"
     property string channelId
     property string kind: "icon"
     property url fileUrl
@@ -22,7 +23,9 @@ Dialog {
     property real focalX: 0.5
     property real focalY: 0.5
     property real zoom: 1
-    title: kind === "icon" ? qsTr("Crop channel icon") : qsTr("Crop channel banner")
+    title: target === "server"
+        ? (kind === "icon" ? qsTr("Crop server icon") : qsTr("Crop server banner"))
+        : (kind === "icon" ? qsTr("Crop channel icon") : qsTr("Crop channel banner"))
     width: Math.min(Metrics.px(560), (parent ? parent.width : 800) - Metrics.px(40))
     height: Math.min(Metrics.px(540), (parent ? parent.height : 600) - Metrics.px(40))
     onClosed: { requestId++; preview = "" }
@@ -62,7 +65,7 @@ Dialog {
             if (dialog.visible && App.selectedServerId !== dialog.serverId) { dialog.uploading = false; dialog.close() }
         }
         function onAdministrationFinished(operation, id, message, saved) {
-            if (operation !== "channel.artwork.crop" || id !== dialog.channelId || !dialog.uploading) return
+            if (operation !== dialog.target + ".artwork.crop" || id !== dialog.channelId || !dialog.uploading) return
             dialog.uploading = false
             dialog.error = message
             if (!message) dialog.close()
@@ -188,11 +191,16 @@ Dialog {
                 text: dialog.uploading ? qsTr("Uploading…") : qsTr("Upload crop")
                 primary: true
                 enabled: !dialog.uploading && dialog.preview.length > 0 && dialog.fingerprint.length > 0 && App.ready
+                    && (dialog.target !== "server" || App.canManageServer)
                 onClicked: {
                     dialog.uploading = true
                     dialog.error = ""
-                    App.setChannelArtworkCrop(dialog.channelId, dialog.kind, dialog.fileUrl,
-                                              dialog.focalX, dialog.focalY, dialog.zoom, dialog.fingerprint)
+                    if (dialog.target === "server")
+                        App.setServerArtworkCrop(dialog.channelId, dialog.kind, dialog.fileUrl,
+                                                 dialog.focalX, dialog.focalY, dialog.zoom, dialog.fingerprint)
+                    else
+                        App.setChannelArtworkCrop(dialog.channelId, dialog.kind, dialog.fileUrl,
+                                                  dialog.focalX, dialog.focalY, dialog.zoom, dialog.fingerprint)
                 }
             }
         }

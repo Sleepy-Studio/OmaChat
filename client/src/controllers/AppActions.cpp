@@ -961,18 +961,67 @@ void AppController::setTopic(const QString& topic)
         tr("Cannot set topic"));
 }
 
-void AppController::updateChannelDetails(
-    const QString& id, const QString& name, const QString& topic, const QString& description)
+void AppController::updateChannelDetails(const QString& id, const QString& name, const QString& topic,
+    const QString& description, const QVariantMap& original)
 {
-    call(
-        QStringLiteral("channel.update"),
-        {{"channel", id}, {"name", name.trimmed()}, {"topic", topic}, {"description", description}},
-        [this, id](const QJsonObject& saved) {
+    if (!capabilities().contains(QStringLiteral("channel.details.cas.v1"))) {
+        emit administrationFinished(QStringLiteral("channel.update"), id,
+            tr("This server needs an update before checked channel details can be saved."));
+        return;
+    }
+    const QString originAccount = accountId();
+    const QString originServer = m_selectedServer;
+    const quint64 originArtwork = artworkGeneration();
+    const quint64 operationGeneration = ++m_channelDetailsGeneration;
+    const QJsonObject baseline = original.isEmpty() ? channel(id) : QJsonObject::fromVariantMap(original);
+    const QJsonObject expected{{"name", baseline.value(QStringLiteral("name")).toString()},
+        {"topic", baseline.value(QStringLiteral("topic")).toString()},
+        {"description", baseline.value(QStringLiteral("description")).toString()}};
+    m_link.request(QStringLiteral("channel.update"),
+        {{"channel", id}, {"name", name.trimmed()}, {"topic", topic}, {"description", description},
+            {"original", expected}},
+        [this, id, originAccount, originServer, originArtwork, operationGeneration](const ipc::Reply& reply) {
+            if (accountId() != originAccount || m_selectedServer != originServer || artworkGeneration() != originArtwork
+                || m_channelDetailsGeneration != operationGeneration)
+                return;
+            if (!reply.ok) {
+                const QString error = reply.errorMessage.isEmpty() ? reply.errorCode : reply.errorMessage;
+                showNotice(tr("Cannot update channel: %1").arg(error), true);
+                emit administrationFinished(QStringLiteral("channel.update"), id, error,
+                    {{QStringLiteral("conflict"), reply.errorCode == u"Conflict"}});
+                return;
+            }
             emit channelDetailsSaved(id);
-            emit administrationFinished(QStringLiteral("channel.update"), id, {}, saved.toVariantMap());
-        },
-        tr("Cannot update channel"),
-        [this, id](const QString& error) { emit administrationFinished(QStringLiteral("channel.update"), id, error); });
+            emit administrationFinished(QStringLiteral("channel.update"), id, {}, reply.result.toVariantMap());
+        });
+}
+
+void AppController::reloadChannelDetails(const QString& id)
+{
+    const QString originAccount = accountId();
+    const QString originServer = m_selectedServer;
+    const quint64 originArtwork = artworkGeneration();
+    const quint64 operationGeneration = ++m_channelDetailsGeneration;
+    const auto current = [this, originAccount, originServer, originArtwork, operationGeneration] {
+        return accountId() == originAccount && m_selectedServer == originServer && artworkGeneration() == originArtwork
+            && m_channelDetailsGeneration == operationGeneration;
+    };
+    m_link.request(
+        QStringLiteral("channel.details.reload"), {{"channel", id}}, [this, id, current](const ipc::Reply& reply) {
+            if (!current())
+                return;
+            if (!reply.ok) {
+                const QString error = reply.errorMessage.isEmpty() ? reply.errorCode : reply.errorMessage;
+                showNotice(tr("Cannot reload channel details: %1").arg(error), true);
+                emit administrationFinished(QStringLiteral("channel.details.reload"), id, error);
+                return;
+            }
+            const auto saved = reply.result;
+            m_channelsById.insert(id, saved);
+            rebuildChannels();
+            emit channelDataChanged(id);
+            emit administrationFinished(QStringLiteral("channel.details.reload"), id, {}, saved.toVariantMap());
+        });
 }
 
 void AppController::setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl)

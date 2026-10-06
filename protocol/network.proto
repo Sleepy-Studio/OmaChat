@@ -481,6 +481,12 @@ message UpdateChannelRequest {
   bool set_position = 14;
   uint64 before_id = 15;     // channel.placement.v1: stable sibling ID; 0 appends
   bool set_before = 16;      // mutually exclusive with set_position
+  // channel.details.cas.v1: compare all three originals atomically before updating.
+  // Restricted to name/topic/description; placement and artwork cannot be combined.
+  bool check_details = 17;
+  string expected_name = 18;
+  string expected_topic = 19;
+  string expected_description = 20;
 }
 message DeleteChannelRequest { uint64 channel_id = 1; }
 message OpenDmRequest { uint64 user_id = 1; }

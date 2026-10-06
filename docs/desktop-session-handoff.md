@@ -4,11 +4,11 @@ Updated: 2026-10-06. Resume desktop development from this file.
 
 ## Current direction
 
-Desktop work is the active priority. **The October 5 source continuation adds
-server-resolved exact channel placement, current-user effective-permission review,
-and bounded pre-upload artwork cropping.** The three lanes were assigned to
-subagents with separate ownership; the parent completed integration and review
-when the worker runs stopped due to workspace credits.
+Desktop work is the active priority. **The October 6 continuation adds bounded
+pointer channel placement, server artwork cropping and atomic conflict checks
+for channel detail saves.** It builds on the installed October 5 foundation.
+The latest source verification is recorded in the October 6 section below;
+older sections retain their dated history.
 
 Standing workflow authorized by the user on October 5: always install client-side
 changes locally for testing. When changes affect the server, also commit and push
@@ -45,6 +45,49 @@ with enabled/focus preconditions and all original saved-result checks retained.
 Application code is unchanged. Both repaired fixtures pass blank-theme and native Wayland checks; the full
 257/257 suite also passes with the default Qt theme. Final native, Android and Docker CI pass on `aee3e7e`. The test correction has independent review approval. Prior native GTK Return
 acceptance remains recorded in the original Wayland evidence.
+
+## Desktop continuation — 2026-10-06
+
+Three bounded parallel lanes add pointer channel placement, server artwork
+cropping and checked channel detail saves. Parent owns controller declarations,
+test wiring, real-daemon GUI coverage, compact long-content clipping and release
+coordination. All previous work and the ignored session transcript are preserved.
+
+- Sidebar drag uses an eight-scaled-pixel threshold, visible before/after/end
+  cues and the existing atomic placement request. Channels move into/out of
+  categories; categories reorder among categories. Invalid/offline/unauthorized
+  gestures and Escape cancel. Pending/rejected requests keep server order.
+  Gestures stay within the visible list; no edge scrolling is implemented.
+- Server icon/banner selection opens the existing crop review. It preserves
+  bounded async decode, canonical metadata-free PNG output, private temporary
+  ownership and pending/error feedback. Fingerprints now bind selected server
+  as well as source/account/generation. Authority is checked again before upload.
+- `channel.details.cas.v1` compares original name/topic/description atomically
+  after permission checks and before mutation. Conflicts retain local input.
+  Reload latest fetches authoritative values and retains the draft for deliberate
+  review/save. Dirty remote events never rebase originals. Callback generation,
+  account and server guards protect reopened/different-context editors. Legacy
+  wire updates remain compatible; checked desktop saves require this capability.
+- The latest-value comparison scrolls inside the form, and the nested description
+  viewport clips long text. Save/Close stay fixed in compact layouts.
+
+Source verification: warnings-as-errors Release build, **276/276 CTest**, both
+QML lint targets (existing warnings), tracked/new C++ formatting and independent
+review pass. Production Wayland operation checks pass **5/5**; server crop checks
+pass **6/6**, including canonical uploads and context rejection. Inspected drag,
+detail and server crop captures
+are 720×460/150% and 1440×900/100% in dark/light palettes. These are automated
+checks, distinct from human acceptance. Installation/deployment outcomes are
+recorded at the final checkpoint. Evidence is retained in
+`build/desktop-next-validation/evidence/`. Dedicated tests cover target resolution,
+context invalidation, canonical server crops, permission-first conflict handling,
+explicit reload/retry, stale replies and actual production pointer delegates.
+
+Remaining desktop scopes: initial-creation crop/access review, persistent focal
+metadata/variants, permission-source/other-member previews, atomic restricted
+channel duplication, artwork/placement conflict contracts and encrypted
+restart-persistent send recovery. Android physical audio and MLS/SFrame remain
+independent gates; desktop voice/streaming acceptance remains user-confirmed.
 
 ## Channel foundation continuation — 2026-10-05
 
@@ -95,9 +138,9 @@ Pre-commit review additionally requires pending placement/crop dialogs to cancel
 on artwork generation changes, superseded completion guards, and selected-server
 checks before deferred crop submission; focused regressions cover both dialogs.
 
-Remaining ready slices: pointer drag-and-drop, permission-source/other-member and
-creation previews, atomic restricted-channel duplication/conflict-aware detail
-edits, persisted focal/variant metadata, and the scoped encrypted send recovery.
+Remaining ready slices after the October 6 continuation: permission-source/other-member
+and creation previews, atomic restricted-channel duplication, artwork/placement
+conflict handling, persisted focal/variant metadata, and encrypted send recovery.
 Android physical audio and MLS/SFrame remain independent gates. Desktop voice and
 streaming retain user-confirmed acceptance; automated UI checks remain distinct
 from independent human acceptance.
