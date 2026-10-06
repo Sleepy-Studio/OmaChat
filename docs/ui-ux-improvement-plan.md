@@ -1,6 +1,22 @@
 # OmaChat UI/UX improvement plan
 
-Last reviewed: 2026-10-05. Conversation-flow improvements shipped in v0.2.2. Desktop appearance, persistent operation feedback and administration safeguards are implemented; minimum-size dark/light conversation acceptance and artwork loading stability pass; compact administration and drawer/focus acceptance also pass.
+Last reviewed: 2026-10-06. Conversation-flow improvements shipped in v0.2.2. Desktop appearance, persistent operation feedback and administration safeguards are implemented; minimum-size dark/light conversation acceptance and artwork loading stability pass; compact administration and drawer/focus acceptance also pass.
+
+## Installed and deployed checkpoint — 2026-10-06
+
+Reviewed implementation `97f3b43` is installed locally and pushed to `main` and
+`feature/desktop-accessibility`; 257/257 CTest, warnings-as-errors, QML lint,
+formatting and native pending-invalidation regressions pass. Packaging fix
+`647fc1e` declares WebP's Qt image-format dependency; refreshed main/debug
+packages are installed, byte-identical binaries verified, and 126 artifacts
+match with zero altered paths. Server image correction `1aebabf` is published
+and deployed healthy; the connected client sees `channel.placement.v1`.
+Final remote native/Android CI remains pending. This supersedes historical
+source-only/uninstalled status below. Evidence and remaining work are in the
+[desktop handoff](desktop-session-handoff.md).
+
+Standing user workflow: always install client changes locally for testing;
+server changes also commit/push to the deployment branch and verify rollout.
 
 ## Resume and user acceptance
 

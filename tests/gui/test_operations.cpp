@@ -1255,8 +1255,11 @@ TEST_F(Operations, PlacementDialogKeyboardAndPointerFitCompactAndWideThemes)
             EXPECT_GE(point.x(), 0);
             EXPECT_LT(point.x(), window->width());
             if (compact) {
+                ASSERT_TRUE(save->isEnabled());
                 save->forceActiveFocus();
-                QTest::keyClick(window, Qt::Key_Return);
+                ASSERT_TRUE(save->hasActiveFocus());
+                // Space activates Qt buttons across platform themes; Return is theme-dependent.
+                QTest::keyClick(window, Qt::Key_Space);
             } else
                 QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point.toPoint());
             ASSERT_TRUE(waitFor([&] { return !editor->property("saving").toBool(); }));
@@ -1353,8 +1356,11 @@ TEST_F(Operations, ArtworkCropDialogKeyboardPointerAndCanonicalUploadAcrossTheme
             EXPECT_TRUE(window->grabWindow().save(
                 QString("/tmp/omachat-crop-%1-%2.png").arg(light ? "light" : "dark", compact ? "compact" : "wide")));
             if (compact) {
+                ASSERT_TRUE(apply->isEnabled());
                 apply->forceActiveFocus();
-                QTest::keyClick(window, Qt::Key_Return);
+                ASSERT_TRUE(apply->hasActiveFocus());
+                // Space activates Qt buttons across platform themes; Return is theme-dependent.
+                QTest::keyClick(window, Qt::Key_Space);
             } else
                 QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point.toPoint());
             ASSERT_TRUE(waitFor([&] { return !editor->property("uploading").toBool(); }));

@@ -1,6 +1,14 @@
 # Channel customization plan
 
-Status: staged roadmap, reviewed 2026-10-05. The channel identity increment, bounded artwork cache and conservative safe category deletion are implemented in this working tree; the tables below include work still open.
+Status: staged roadmap, reviewed 2026-10-06. The channel identity increment, bounded artwork cache and conservative safe category deletion are implemented in this working tree; the tables below include work still open.
+
+The implemented desktop foundation is installed as reviewed `97f3b43`, with
+packaging dependency fix `647fc1e`; server image `1aebabf` is pushed and deployed
+healthy with exact-placement capability. Local 257/257 verification and artifact
+integrity pass. Final remote CI is pending. See
+[desktop-session-handoff.md](desktop-session-handoff.md) for provenance and the
+standing local-install/server-push workflow. The roadmap below remains scoped;
+these outcomes do not complete the later phases.
 
 ### Implemented in the first increment
 

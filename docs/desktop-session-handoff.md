@@ -1,6 +1,6 @@
 # OmaChat desktop session handoff
 
-Updated: 2026-10-05. Resume desktop development from this file.
+Updated: 2026-10-06. Resume desktop development from this file.
 
 ## Current direction
 
@@ -16,10 +16,36 @@ to the deployment branch so the server redeploys. This supersedes earlier
 session-specific installation and no-push limits. Review and package validation
 still apply; public versioned releases and AUR publication remain separate.
 
-At this source checkpoint, the continuation awaits the authorized local install
-and server push. The previous installed implementation is `f285540`. Exact
-placement requires the new server's `channel.placement.v1` capability; old-server
-menu actions remain. Docker publication is triggered by pushes to `main`.
+Implementation `97f3b43` is independently reviewed, committed, pushed to
+`feature/desktop-accessibility` and `main`, and installed locally as fresh
+main/debug 0.2.2-1 packages from its git archive. The native client is running;
+126 installed files/symlinks match artifacts and package integrity reports zero
+altered paths. Final warnings-as-errors build and 257/257 CTest pass; both QML
+lint targets and all tracked C++ formatting pass. Both new pending-invalidation
+regressions also pass under native Wayland. Package/source evidence is retained
+in `build/desktop-install-97f3b43/` and
+`build/desktop-phase1-validation/evidence/precommit-source-checkpoint.json`.
+
+Packaging correction `647fc1e` declares `qt6-imageformats` for WebP and is
+installed locally; its binaries are byte-identical to reviewed `97f3b43`.
+The refreshed package metadata/artifacts are verified without recompilation or
+another broad test run; the focused format check passes. Evidence:
+`build/desktop-install-647fc1e/`.
+
+Server dependency correction `1aebabf` includes the WebP decoder in Docker.
+It is pushed to both branches. Its image publication succeeded, and the final
+post-publication Coolify deployment `ae8sut7cl2vq0tuaymom96ei` finished healthy.
+The client is connected and the live server reports `channel.placement.v1`.
+Initial webhooks preceded publication, so explicit post-publication pulls were
+required. Android CI passes at `1aebabf`, and clean-runner native unit/fuzz checks pass
+with the WebP dependency. Native integration identified two fixture assumptions
+that Return activates ordinary Qt buttons under every platform theme. Blank-theme
+runs reproduce both failures; the fixtures now use portable Space activation,
+with enabled/focus preconditions and all original saved-result checks retained.
+Application code is unchanged. Both repaired fixtures pass blank-theme and native Wayland checks; the full
+257/257 suite also passes with the default Qt theme. Final remote CI is being
+completed. The test correction has independent review approval. Prior native GTK Return
+acceptance remains recorded in the original Wayland evidence.
 
 ## Channel foundation continuation — 2026-10-05
 
@@ -172,18 +198,20 @@ forward secrecy, end-to-end voice encryption, stereo, or per-app capture.
 
 - Repository: `/home/howie/Documents/Github/HowieDuhzit/OmaChat`.
 - Current branch: `feature/desktop-accessibility`.
-- Source base HEAD: `3b26f84` (documentation); installed implementation `f285540`.
-  Last pushed implementation checkpoint: `92ec294`; not merged to main.
+- Installed implementation/source checkpoint: `97f3b43`, pushed to both desktop
+  branch and `main` on October 6. Subsequent documentation-only commits preserve
+  this installed implementation.
 - Android checkpoint: `536b857`, with CI repairs through `0206785`, pushed on
   `feature/android-client`. Desktop branch includes equivalent CI repair commits
   `596ee86` and `03b229c`.
-- October 4 feedback/administration/artwork work is committed in `f285540`.
-  October 5 placement/review/crop changes and tests/docs are uncommitted. Existing
-  remote CI covers `92ec294`, not this continuation.
+- October 4 feedback/administration/artwork and October 5 placement/review/crop
+  are included in `97f3b43`; implementation is independently reviewed; the first clean-runner CI exposed
+  a missing WebP plugin. Dependency fixes through `1aebabf` are pushed and final
+  remote CI is pending.
 - Local desktop package last verified installed: refreshed `omachat`/`omachat-debug`
-  `0.2.2-1` checkpoint installed October 4 with explicit user authorization.
+  `0.2.2-1` checkpoint `97f3b43`, installed October 6 under standing authorization.
   Installed files match the checkpoint packages; both host package integrity
-  checks report zero altered files. Hosted server is unchanged.
+  checks report zero altered files. Hosted server `1aebabf` is verified running/healthy with placement capability.
 - Preserve the ignored local `session-ses_f0f5.md` transcript; do not publish it.
 - Android remains incomplete. Its continuation details live in
   `docs/android-session-handoff.md`; do not infer mobile completion from desktop
@@ -406,8 +434,8 @@ where they do not delay integration or require unavailable hardware.
 1. Read this handoff, the current UI plan, channel customization plan, security
    roadmap and latest Android handoff sections. Recheck git status/branches,
    existing uncommitted work, installed state and available tools/hardware.
-   Older dated sections record history; the October 4 installed state supersedes
-   earlier pending-installation language. Do not repeat accepted desktop voice/
+   Older dated sections record history; the October 6 installed state and standing
+   installation/publication workflow supersede earlier session-specific limits. Do not repeat accepted desktop voice/
    streaming baseline tests without a change that makes them relevant.
 2. Use the available agent capacity: currently four total slots, so the parent
    coordinator plus three workers. Recheck next session; avoid nested spawning
@@ -481,14 +509,16 @@ independent task instead of keeping it idle.
 - Keep working through ready tasks while other agents run. Integrate often and
   replace stale plan status with actual results. Record failures and limits
   honestly; do not count source inspection as behavioral or physical acceptance.
-- Preserve session-ses_f0f5.md and all prior edits. No automatic commit/push, merge,
-  release, AUR update or hosted deployment. Packaging and reviewable release
-  preparation can proceed locally. Recheck live voice/transfers before any later
-  install; the October 4 permission to disconnect was for that installation.
+- Preserve session-ses_f0f5.md and all prior edits. Standing October 5 direction:
+  always install client-side changes locally for testing; server changes also
+  commit/push to the deployment branch and verify the deployed image. Recheck
+  live voice/transfers before installation and report any restart interruption.
+  Versioned releases and AUR publication require separate authorization.
 - Finish with changed scopes, passed checks, installed versus source-only state,
   remaining dependency/hardware gates, and a refreshed handoff plus shared vault.
 
 The full desktop UI plan is `docs/ui-ux-improvement-plan.md`; additional queues
 are `docs/channel-customization-plan.md`, `docs/security-roadmap.md` and
 `docs/android-session-handoff.md`. The latest local installation/checkpoint is
-recorded in build/desktop-checkpoint/checkpoint.json.
+recorded in build/desktop-install-647fc1e/checkpoint.json (implementation97f3b43,
+packaging647fc1e).
