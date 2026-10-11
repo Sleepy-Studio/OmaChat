@@ -343,6 +343,20 @@ Bits State::channelPermissions(Id channelId, Id userId) const
     if (auto it = m_permCache.find(key); it != m_permCache.end())
         return it->second;
 
+    const Bits result = evaluateChannelPermissions(channelId, userId, nullptr);
+    m_permCache.emplace(key, result);
+    return result;
+}
+
+Explanation State::channelPermissionExplanation(Id channelId, Id userId) const
+{
+    Explanation explanation;
+    evaluateChannelPermissions(channelId, userId, &explanation);
+    return explanation;
+}
+
+Bits State::evaluateChannelPermissions(Id channelId, Id userId, Explanation* explanation) const
+{
     Bits result = 0;
     const ChannelRecord* c = channel(channelId);
     if (c && c->serverId == 0) {
@@ -379,8 +393,10 @@ Bits State::channelPermissions(Id channelId, Id userId) const
                 return layer;
             };
             std::vector<ResolveInput::Layer> layers;
-            if (c->parentId)
+            if (c->parentId) {
                 layers.push_back(buildLayer(c->parentId));
+                layers.back().category = true;
+            }
             layers.push_back(buildLayer(c->id));
 
             ResolveInput in;
@@ -389,10 +405,14 @@ Bits State::channelPermissions(Id channelId, Id userId) const
             in.memberRoles = roles;
             in.layers = layers;
             in.channelScope = true;
-            result = resolve(in);
+            if (explanation) {
+                *explanation = explain(in);
+                result = explanation->effective;
+            } else {
+                result = resolve(in);
+            }
         }
     }
-    m_permCache.emplace(key, result);
     return result;
 }
 

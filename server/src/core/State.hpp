@@ -60,6 +60,7 @@ public:
     // ---- permissions (resolved server-side, cached until the next change)
     permissions::Bits serverPermissions(Id serverId, Id userId) const;
     permissions::Bits channelPermissions(Id channelId, Id userId) const;
+    permissions::Explanation channelPermissionExplanation(Id channelId, Id userId) const;
     bool can(Id channelId, Id userId, permissions::Bits required) const;
     bool canInServer(Id serverId, Id userId, permissions::Bits required) const;
 
@@ -72,6 +73,7 @@ public:
     void invalidatePermissions() const { m_permCache.clear(); }
 
 private:
+    permissions::Bits evaluateChannelPermissions(Id channelId, Id userId, permissions::Explanation* explanation) const;
     std::map<Id, UserRecord> m_users;
     std::map<QString, Id> m_usernames;
     std::map<Id, ServerRecord> m_servers;

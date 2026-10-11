@@ -100,6 +100,7 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("channel.identity.v1");
     r->add_capabilities("channel.placement.v1");
     r->add_capabilities("channel.details.cas.v1");
+    r->add_capabilities("permission_preview");
     r->add_capabilities("server.identity.v1");
     r->add_capabilities("instance.operator.v1");
     r->set_instance_name(m_config.instanceName.toStdString());

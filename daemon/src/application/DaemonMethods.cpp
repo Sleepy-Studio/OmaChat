@@ -2257,6 +2257,44 @@ void Daemon::registerMethods()
         s->set_remove(p.value(QStringLiteral("remove")).toBool(false));
         forward(std::move(env), r);
     };
+    m[QStringLiteral("permission.preview")] = [this](const QJsonObject& p, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("permission_preview"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support permission previews"));
+            return;
+        }
+        const Id cid = channelParam(p, r);
+        if (!cid)
+            return;
+        proto::Envelope env;
+        auto* request = env.mutable_permission_preview_request();
+        request->set_channel_id(cid);
+        if (p.contains(QStringLiteral("user"))) {
+            // Self is stored separately from the cached peer directory. Numeric
+            // IDs are validated by the authoritative server, including absent peers.
+            const Id numericId = idFromJson(p.value(QStringLiteral("user")));
+            const Id uid = numericId ? numericId : userParam(p, r);
+            if (!uid)
+                return;
+            request->set_user_id(uid);
+        }
+        forward(std::move(env), r, [](const proto::Envelope& reply) {
+            const auto& preview = reply.permission_preview();
+            QJsonArray effective, entries;
+            for (auto name : permissions::names(preview.effective_permissions()))
+                effective.append(QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size())));
+            for (const auto& entry : preview.permissions()) {
+                const auto name = permissions::name(entry.permission());
+                entries.append(
+                    QJsonObject{{"name", QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size()))},
+                        {"allowed", entry.allowed()}, {"source", QString::fromStdString(entry.source())}});
+            }
+            return QJsonObject{{"channel_id", idString(preview.channel_id())}, {"user_id", idString(preview.user_id())},
+                {"effective_permissions", effective}, {"permissions", entries},
+                {"can_preview_members", preview.can_preview_members()}};
+        });
+    };
     m[QStringLiteral("override.list")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
         if (!cid)

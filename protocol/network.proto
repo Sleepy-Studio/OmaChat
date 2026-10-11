@@ -714,6 +714,16 @@ message AssignRoleRequest {
 message SetOverrideRequest { PermissionOverride override = 1; bool remove = 2; }
 message ListOverridesRequest { uint64 channel_id = 1; }
 message OverrideList { repeated PermissionOverride overrides = 1; }
+// Read-only, server-authoritative explanation. No role identity metadata is exposed.
+message PermissionPreviewRequest { uint64 channel_id = 1; uint64 user_id = 2; }
+message PermissionSource { uint64 permission = 1; bool allowed = 2; string source = 3; }
+message PermissionPreview {
+  uint64 channel_id = 1;
+  uint64 user_id = 2;
+  uint64 effective_permissions = 3;
+  repeated PermissionSource permissions = 4;
+  bool can_preview_members = 5;
+}
 
 // ------------------------------------------------------------------ events
 
@@ -869,6 +879,8 @@ message Envelope {
     ServerMuteRequest server_mute = 89;
     ListOverridesRequest list_overrides = 90;
     OverrideList override_list = 91;
+    PermissionPreviewRequest permission_preview_request = 92;
+    PermissionPreview permission_preview = 93;
 
     // server push
     Event event = 100;

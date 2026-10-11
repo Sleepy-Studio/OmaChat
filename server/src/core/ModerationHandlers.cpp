@@ -283,6 +283,32 @@ void ChatServer::handleSetOverride(Session& s, std::uint64_t rid, const proto::S
     replyOk(s, rid);
 }
 
+void ChatServer::handlePermissionPreview(Session& s, std::uint64_t rid, const proto::PermissionPreviewRequest& m)
+{
+    const auto* c = m_state.channel(m.channel_id());
+    const Id target = m.user_id() ? m.user_id() : s.userId;
+    const bool manager = c && m_state.canInServer(c->serverId, s.userId, ManageRoles);
+    if (!c || !c->serverId || !m_state.member(c->serverId, s.userId) || !m_state.can(c->id, s.userId, ViewChannel)
+        || (target != s.userId && !manager) || !m_state.member(c->serverId, target)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot preview these permissions"));
+        return;
+    }
+    const auto explanation = m_state.channelPermissionExplanation(c->id, target);
+    proto::Envelope env;
+    auto* preview = env.mutable_permission_preview();
+    preview->set_channel_id(c->id);
+    preview->set_user_id(target);
+    preview->set_effective_permissions(explanation.effective);
+    preview->set_can_preview_members(manager);
+    for (const auto& entry : explanation.permissions) {
+        auto* source = preview->add_permissions();
+        source->set_permission(entry.permission);
+        source->set_allowed(entry.allowed);
+        source->set_source(std::string(entry.source));
+    }
+    reply(s, rid, std::move(env));
+}
+
 void ChatServer::handleListOverrides(Session& s, std::uint64_t rid, const proto::ListOverridesRequest& m)
 {
     const ChannelRecord* c = m_state.channel(m.channel_id());

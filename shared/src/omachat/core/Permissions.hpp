@@ -60,6 +60,7 @@ struct ResolveInput {
     // Channel scope. Leave empty to compute server-level permissions.
     // Each layer is applied in order: category first, then the channel.
     struct Layer {
+        bool category = false; // labels inherited layers in explanations
         Override defaultRole; // override targeting the default role
         std::vector<Override> memberRoles; // overrides targeting the member's roles
         Override user; // override targeting this user
@@ -77,7 +78,17 @@ struct ResolveInput {
 //       base = (base & ~OR(role.deny)) | OR(role.allow)   (role allow beats role deny)
 //       base = (base & ~user.deny) | user.allow           (user override wins last)
 //  5. In channel scope, lacking ViewChannel yields no permissions at all.
+struct PermissionSource {
+    Bits permission = 0;
+    bool allowed = false;
+    std::string_view source;
+};
+struct Explanation {
+    Bits effective = 0;
+    std::vector<PermissionSource> permissions;
+};
 Bits resolve(const ResolveInput& input);
+Explanation explain(const ResolveInput& input);
 
 inline constexpr bool has(Bits set, Bits required)
 {

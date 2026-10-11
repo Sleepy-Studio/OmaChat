@@ -448,6 +448,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kSetOverride:
         handleSetOverride(s, rid, env.set_override());
         break;
+    case P::kPermissionPreviewRequest:
+        handlePermissionPreview(s, rid, env.permission_preview_request());
+        break;
     case P::kListOverrides:
         handleListOverrides(s, rid, env.list_overrides());
         break;

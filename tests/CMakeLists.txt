@@ -78,6 +78,7 @@ add_executable(omachat_integration_tests
     integration/test_channel_details.cpp
     integration/test_channel_placement.cpp
     integration/test_category_delete.cpp
+    integration/test_permission_preview.cpp
 )
 omachat_set_warnings(omachat_integration_tests)
 target_include_directories(omachat_integration_tests PRIVATE integration)

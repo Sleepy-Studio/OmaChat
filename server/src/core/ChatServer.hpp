@@ -237,6 +237,7 @@ private:
     void handleDeleteRole(Session& s, std::uint64_t rid, const proto::DeleteRoleRequest& m);
     void handleAssignRole(Session& s, std::uint64_t rid, const proto::AssignRoleRequest& m);
     void handleSetOverride(Session& s, std::uint64_t rid, const proto::SetOverrideRequest& m);
+    void handlePermissionPreview(Session& s, std::uint64_t rid, const proto::PermissionPreviewRequest& m);
     void handleListOverrides(Session& s, std::uint64_t rid, const proto::ListOverridesRequest& m);
     void removeMemberFromServer(Id serverId, Id userId, const QString& reason);
     void publishPermissionsChanged(Id serverId);
