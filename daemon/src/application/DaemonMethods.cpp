@@ -33,6 +33,21 @@ struct ActiveModel {
     const ClientState* operator->() const { return &(*conn)->model(); }
 };
 
+bool decimalId(const QJsonValue& value, Id* result)
+{
+    if (!value.isString())
+        return false;
+    const QString digits = value.toString();
+    if (digits.isEmpty())
+        return false;
+    for (const QChar digit : digits)
+        if (digit < u'0' || digit > u'9')
+            return false;
+    bool ok = false;
+    *result = digits.toULongLong(&ok);
+    return ok;
+}
+
 QJsonObject accountJson(const Account& a)
 {
     return {{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port}, {"username", a.username},
@@ -308,21 +323,132 @@ Id Daemon::userParam(const QJsonObject& params, const Responder& r, const char* 
     return id;
 }
 
-void Daemon::sendMessage(
-    Id cid, const QString& content, Id replyTo, bool action, const QStringList& files, const Responder& r)
+std::optional<SendRecoveryStore::Binding> Daemon::recoveryBinding() const
 {
+    if (!m_conn || m_conn->state() != ServerConnection::State::Connected || !m_conn->hasAccount()
+        || m_conn->account().id != m_active || m_conn->model().self().id() == 0)
+        return std::nullopt;
+    const auto& account = m_conn->account();
+    const auto peer = m_conn->verifiedPeerFingerprint();
+    if (peer.isEmpty() || (!account.trustedFingerprint.isEmpty() && account.trustedFingerprint != peer))
+        return std::nullopt;
+    // A successful TLS handshake also authenticates CA-valid certificates
+    // without a manual pin. An existing explicit pin must still match exactly.
+    return SendRecoveryStore::Binding{QString::number(account.id),
+        QStringLiteral("tls://%1:%2").arg(account.host.toLower()).arg(account.port), peer,
+        idString(m_conn->model().self().id())};
+}
+
+void Daemon::purgeRecovery(std::int64_t accountId, SendRecoveryStore::Completion callback)
+{
+    if (m_credentials->backendName() != QStringLiteral("keyring")) {
+        // Memory mode cannot create durable recovery state; existing test/CLI
+        // account lifecycle remains usable without a secret service.
+        if (m_sendRecovery->hasDurableState(QString::number(accountId)))
+            callback(false, QStringLiteral("A secure keyring is required to purge existing send recovery"));
+        else
+            callback(true, {});
+        return;
+    }
+    m_sendRecovery->purge(QString::number(accountId), std::move(callback));
+}
+
+void Daemon::sendMessage(Id cid, const QString& content, Id replyTo, bool action, const QStringList& files,
+    const Responder& response, const QString& recoveryId)
+{
+    const auto binding = recoveryId.isEmpty() ? std::optional<SendRecoveryStore::Binding>() : recoveryBinding();
+    if (!recoveryId.isEmpty() && !binding) {
+        response.error(e::RecoveryError, QStringLiteral("send recovery account context changed"));
+        return;
+    }
+    const quint64 recoveryGeneration = binding ? m_sendRecovery->generation(binding->accountId) : 0;
+    const Responder r = binding
+        ? response.intercept(
+              [this, binding, recoveryId, recoveryGeneration, response](const QJsonObject& result) {
+                  m_sendRecovery->acknowledge(
+                      *binding, recoveryId,
+                      [this, binding, response, result](bool ok, const QString& error) {
+                          if (ok) {
+                              m_ipc.broadcast(QStringLiteral("recovery.changed"), {{"account", binding->accountId}});
+                              response.ok(result);
+                          } else
+                              response.error(e::RecoveryError,
+                                  QStringLiteral("Message acknowledged, but recovery cleanup failed: %1").arg(error));
+                      },
+                      recoveryGeneration);
+              },
+              [this, binding, recoveryId, recoveryGeneration, response](const QString& code, const QString& message) {
+                  m_sendRecovery->uncertain(
+                      *binding, recoveryId,
+                      [this, binding, response, code, message](bool ok, const QString& error) {
+                          if (ok)
+                              m_ipc.broadcast(QStringLiteral("recovery.changed"), {{"account", binding->accountId}});
+                          response.error(e::RecoveryError,
+                              ok ? message : message + QStringLiteral("; recovery update failed: ") + error);
+                      },
+                      recoveryGeneration);
+              })
+        : response;
     if (files.size() > 10) {
         r.error(e::BadRequest, QStringLiteral("at most 10 files per message"));
         return;
     }
     const ActiveModel model{&m_conn};
-    auto send = [this, model, cid, replyTo, action, r](proto::Envelope env) {
+    QPointer<ServerConnection> sendingConnection(m_conn);
+    QPointer<E2EManager> sendingE2e(m_e2e);
+    const auto sendingIdentityGeneration = m_conn->identityGeneration();
+    auto send = [this, model, sendingConnection, sendingIdentityGeneration, binding, recoveryId, recoveryGeneration,
+                    cid, replyTo, action, r, response](proto::Envelope env) {
+        if (!sendingConnection || m_conn != sendingConnection
+            || sendingConnection->identityGeneration() != sendingIdentityGeneration
+            || (binding
+                && (recoveryBinding() != binding
+                    || m_sendRecovery->generation(binding->accountId) != recoveryGeneration))) {
+            r.error(e::NotConnected, QStringLiteral("send account context changed"));
+            return;
+        }
         auto* s = env.mutable_send_message();
         s->set_channel_id(cid);
         s->set_reply_to(replyTo);
         s->set_is_action(action);
-        forward(std::move(env), r,
-            [model](const proto::Envelope& reply) { return model->messageJson(reply.chat_message()); });
+        if (!binding) {
+            forward(std::move(env), r,
+                [model](const proto::Envelope& reply) { return model->messageJson(reply.chat_message()); });
+            return;
+        }
+        if (!requireConnected(r))
+            return;
+        sendingConnection->request(std::move(env),
+            [this, sendingConnection, binding, recoveryId, recoveryGeneration, r, response](
+                const proto::Envelope& reply) {
+                if (reply.has_error()) {
+                    const auto code = ipcErrorCode(reply.error().code());
+                    const auto message = QString::fromStdString(reply.error().message());
+                    // Locally synthesized disconnect/timeout errors have no request
+                    // ID. Only a correlated server error authorizes manual retry.
+                    if (reply.request_id() != 0) {
+                        m_sendRecovery->reject(
+                            *binding, recoveryId,
+                            [this, binding, r, response, code, message](bool ok, const QString& error) {
+                                if (ok) {
+                                    m_ipc.broadcast(
+                                        QStringLiteral("recovery.changed"), {{"account", binding->accountId}});
+                                    response.error(code, message);
+                                } else
+                                    r.error(e::RecoveryError,
+                                        message + QStringLiteral("; recovery rejection failed: ") + error);
+                            },
+                            recoveryGeneration);
+                    } else
+                        r.error(code, message);
+                    return;
+                }
+                if (!reply.has_chat_message() || !sendingConnection) {
+                    r.error(e::NotConnected, QStringLiteral("send acknowledgement could not be verified"));
+                    return;
+                }
+                r.ok(sendingConnection->model().messageJson(reply.chat_message()));
+            });
     };
 
     if (!m_e2e->appliesTo(cid)) {
@@ -386,26 +512,31 @@ void Daemon::sendMessage(
         s.file.set_key(key.toStdString());
         sealed.push_back(std::move(s));
     }
-    auto sealAndSend
-        = [this, cid, content, send, r](std::vector<Sealed> done, const std::vector<proto::Attachment>& attachments) {
-              proto::E2EBody body;
-              body.set_content(content.toStdString());
-              proto::Envelope env;
-              for (std::size_t i = 0; i < done.size() && i < attachments.size(); ++i) {
-                  done[i].file.set_attachment_id(attachments[i].id());
-                  *body.add_files() = done[i].file;
-                  env.mutable_send_message()->add_attachment_ids(attachments[i].id());
-              }
-              m_e2e->seal(cid, std::move(body),
-                  [send, env, r](std::optional<std::string> payload, const QString& error) mutable {
-                      if (!payload) {
-                          r.error(e::BadRequest, error);
-                          return;
-                      }
-                      env.mutable_send_message()->set_encrypted(*payload);
-                      send(std::move(env));
-                  });
-          };
+    auto sealAndSend = [this, sendingConnection, sendingIdentityGeneration, sendingE2e, cid, content, send, r](
+                           std::vector<Sealed> done, const std::vector<proto::Attachment>& attachments) {
+        if (!sendingConnection || !sendingE2e || m_conn != sendingConnection || m_e2e != sendingE2e
+            || sendingConnection->identityGeneration() != sendingIdentityGeneration) {
+            r.error(e::NotConnected, QStringLiteral("send account context changed"));
+            return;
+        }
+        proto::E2EBody body;
+        body.set_content(content.toStdString());
+        proto::Envelope env;
+        for (std::size_t i = 0; i < done.size() && i < attachments.size(); ++i) {
+            done[i].file.set_attachment_id(attachments[i].id());
+            *body.add_files() = done[i].file;
+            env.mutable_send_message()->add_attachment_ids(attachments[i].id());
+        }
+        sendingE2e->seal(
+            cid, std::move(body), [send, env, r](std::optional<std::string> payload, const QString& error) mutable {
+                if (!payload) {
+                    r.error(e::BadRequest, error);
+                    return;
+                }
+                env.mutable_send_message()->set_encrypted(*payload);
+                send(std::move(env));
+            });
+    };
     if (sealed.empty()) {
         sealAndSend({}, {});
         return;
@@ -429,27 +560,44 @@ void Daemon::sendMessage(
 }
 
 void Daemon::uploadAll(Id channelId, QStringList files, std::vector<proto::Attachment> done,
-    std::function<void(bool, const QString&, const QString&, const std::vector<proto::Attachment>&)> finish)
+    std::function<void(bool, const QString&, const QString&, const std::vector<proto::Attachment>&)> finish,
+    QPointer<ServerConnection> connection, QPointer<FileTransfers> transfers, bool bound,
+    std::optional<quint64> identityGeneration)
 {
+    if (!bound) {
+        connection = m_conn;
+        transfers = m_transfers;
+        if (connection)
+            identityGeneration = connection->identityGeneration();
+    }
+    if (!connection || !transfers || m_conn != connection || m_transfers != transfers
+        || connection->state() != ServerConnection::State::Connected || !identityGeneration
+        || connection->identityGeneration() != *identityGeneration) {
+        finish(false, e::NotConnected, QStringLiteral("upload account context changed"), {});
+        return;
+    }
     if (files.isEmpty()) {
         finish(true, {}, {}, done);
         return;
     }
     const QString next = files.takeFirst();
-    m_transfers->upload(channelId, next,
-        [this, channelId, files, done, finish = std::move(finish)](const FileTransfers::Result& res) mutable {
+    transfers->upload(channelId, next,
+        [this, connection, transfers, identityGeneration, channelId, files, done, finish = std::move(finish)](
+            const FileTransfers::Result& res) mutable {
             if (!res.ok) {
                 // Withdraw what already went up so it does not linger as pending.
                 for (const auto& a : done) {
                     proto::Envelope env;
                     env.mutable_cancel_upload()->set_attachment_id(a.id());
-                    m_conn->request(std::move(env), [](const proto::Envelope&) { });
+                    if (connection && connection->identityGeneration() == identityGeneration)
+                        connection->request(std::move(env), [](const proto::Envelope&) { });
                 }
                 finish(false, res.code, res.message, {});
                 return;
             }
             done.push_back(res.attachment);
-            uploadAll(channelId, files, std::move(done), std::move(finish));
+            uploadAll(
+                channelId, files, std::move(done), std::move(finish), connection, transfers, true, identityGeneration);
         });
 }
 
@@ -627,30 +775,37 @@ void Daemon::registerMethods()
                 r.error(ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
                 return;
             }
-            auto removedLink = m_links.find(id);
-            if (removedLink == m_links.end()) {
-                r.error(e::NotConnected, QStringLiteral("account connection was lost"));
-                return;
-            }
-            if (id == m_active) {
-                leaveVoice(nullptr);
-                const auto others = m_store.accounts();
-                const auto next = std::ranges::find_if(others, [id](const Account& a) { return a.id != id; });
-                activate(next != others.end() ? next->id : 0);
-            }
-            removedLink->second.conn->stop();
-            removedLink->second.e2e->forget();
-            m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
-            if (!m_store.removeAccount(id)) {
-                r.error(e::StorageError, QStringLiteral("server account deleted, but local cleanup failed"));
-                return;
-            }
-            QTimer::singleShot(0, this, [this, id] {
-                m_links.erase(id);
+            purgeRecovery(id, [this, id, r](bool purged, const QString& error) {
+                if (!purged) {
+                    r.error(e::StorageError,
+                        QStringLiteral("Server account deleted, but recovery purge failed: %1").arg(error));
+                    return;
+                }
+                auto removedLink = m_links.find(id);
+                if (removedLink == m_links.end()) {
+                    r.error(e::NotConnected, QStringLiteral("account connection was lost"));
+                    return;
+                }
+                if (id == m_active) {
+                    leaveVoice(nullptr);
+                    const auto others = m_store.accounts();
+                    const auto next = std::ranges::find_if(others, [id](const Account& a) { return a.id != id; });
+                    activate(next != others.end() ? next->id : 0);
+                }
+                removedLink->second.conn->stop();
+                removedLink->second.e2e->forget();
+                m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
+                if (!m_store.removeAccount(id)) {
+                    r.error(e::StorageError, QStringLiteral("server account deleted, but local cleanup failed"));
+                    return;
+                }
+                QTimer::singleShot(0, this, [this, id] {
+                    m_links.erase(id);
+                    scheduleStatus();
+                });
                 scheduleStatus();
+                r.ok();
             });
-            scheduleStatus();
-            r.ok();
         });
     };
     // Retire an old OAuth placeholder only when the active saved account is
@@ -669,19 +824,30 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("not a verified duplicate of the active account"));
             return;
         }
-        if (!m_store.removeAccount(id)) {
-            r.error(e::StorageError, QStringLiteral("could not remove the local duplicate"));
-            return;
-        }
-        it->second.e2e->forget();
-        it->second.conn->stop();
-        m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
-        QTimer::singleShot(0, this, [this, id] {
-            m_links.erase(id);
+        purgeRecovery(id, [this, id, r](bool purged, const QString& error) {
+            if (!purged) {
+                r.error(e::StorageError, error);
+                return;
+            }
+            if (!m_store.removeAccount(id)) {
+                r.error(e::StorageError, QStringLiteral("could not remove the local duplicate"));
+                return;
+            }
+            auto current = m_links.find(id);
+            if (current == m_links.end()) {
+                r.error(e::NotConnected, QStringLiteral("duplicate account context changed"));
+                return;
+            }
+            current->second.e2e->forget();
+            current->second.conn->stop();
+            m_credentials->remove(QStringLiteral("refresh/%1").arg(id), {});
+            QTimer::singleShot(0, this, [this, id] {
+                m_links.erase(id);
+                scheduleStatus();
+            });
             scheduleStatus();
+            r.ok();
         });
-        scheduleStatus();
-        r.ok();
     };
     auto authMethod = [this, ensureAccount](bool registering) {
         return [this, ensureAccount, registering](const QJsonObject& p, const Responder& r) {
@@ -771,34 +937,51 @@ void Daemon::registerMethods()
                     return;
                 }
                 ServerConnection* oauthConn = linkIt->second.conn.get();
-                const auto discardPlaceholder = [this, accountId, previousAccountId](std::int64_t preferredAccountId) {
-                    if (m_active == accountId)
-                        activate(preferredAccountId && m_store.account(preferredAccountId) ? preferredAccountId
-                                : previousAccountId != accountId && m_store.account(previousAccountId)
-                                ? previousAccountId
-                                : 0);
-                    if (auto placeholderLink = m_links.find(accountId); placeholderLink != m_links.end()) {
-                        placeholderLink->second.e2e->forget();
-                        placeholderLink->second.conn->stop();
-                    }
-                    m_credentials->remove(QStringLiteral("refresh/%1").arg(accountId), {});
-                    m_store.removeAccount(accountId);
-                    QTimer::singleShot(0, this, [this, accountId] {
-                        m_links.erase(accountId);
-                        scheduleStatus();
-                    });
-                    scheduleStatus();
+                const auto discardPlaceholder = [this, accountId, previousAccountId](std::int64_t preferredAccountId,
+                                                    SendRecoveryStore::Completion done) {
+                    purgeRecovery(accountId,
+                        [this, accountId, previousAccountId, preferredAccountId, done](
+                            bool purged, const QString& error) {
+                            if (!purged) {
+                                done(false,
+                                    QStringLiteral("Cannot retire sign-in placeholder: recovery purge failed: %1")
+                                        .arg(error));
+                                return;
+                            }
+                            if (m_active == accountId)
+                                activate(preferredAccountId && m_store.account(preferredAccountId) ? preferredAccountId
+                                        : previousAccountId != accountId && m_store.account(previousAccountId)
+                                        ? previousAccountId
+                                        : 0);
+                            if (auto placeholderLink = m_links.find(accountId); placeholderLink != m_links.end()) {
+                                placeholderLink->second.e2e->forget();
+                                placeholderLink->second.conn->stop();
+                            }
+                            m_credentials->remove(QStringLiteral("refresh/%1").arg(accountId), {});
+                            if (!m_store.removeAccount(accountId)) {
+                                done(false, QStringLiteral("Cannot remove the local sign-in placeholder"));
+                                return;
+                            }
+                            QTimer::singleShot(0, this, [this, accountId] {
+                                m_links.erase(accountId);
+                                scheduleStatus();
+                            });
+                            scheduleStatus();
+                            done(true, {});
+                        });
                 };
                 if (!ok) {
                     // Keep a certificate-error placeholder so the trust dialog
                     // can resume it. All other failed attempts must retire the
                     // temporary account without touching the server account.
                     if (code != e::CertificateError) {
-                        discardPlaceholder(0);
-                    } else if (code == e::CertificateError) {
+                        discardPlaceholder(0, [r, code, message](bool cleaned, const QString& error) {
+                            r.error(cleaned ? code : e::RecoveryError, cleaned ? message : error);
+                        });
+                    } else {
                         activate(accountId);
+                        r.error(code, message);
                     }
-                    r.error(code, message);
                     return;
                 }
                 const QString realUsername = oauthConn->lastAuthUsername();
@@ -815,24 +998,34 @@ void Daemon::registerMethods()
                             [this, existing = *existing, discardPlaceholder, newKey, r](
                                 bool readOk, const QString& token, const QString&) {
                                 if (!readOk || token.isEmpty()) {
-                                    discardPlaceholder(existing.id);
-                                    r.error(e::StorageError, QStringLiteral("could not preserve the sign-in session"));
+                                    discardPlaceholder(existing.id, [r](bool cleaned, const QString& error) {
+                                        r.error(cleaned ? e::StorageError : e::RecoveryError,
+                                            cleaned ? QStringLiteral("could not preserve the sign-in session") : error);
+                                    });
                                     return;
                                 }
                                 m_credentials->write(newKey, token,
                                     [this, existing, discardPlaceholder, r](bool writeOk, const QString&) {
                                         if (!writeOk) {
-                                            discardPlaceholder(existing.id);
-                                            r.error(
-                                                e::StorageError, QStringLiteral("could not save the sign-in session"));
+                                            discardPlaceholder(existing.id, [r](bool cleaned, const QString& error) {
+                                                r.error(cleaned ? e::StorageError : e::RecoveryError,
+                                                    cleaned ? QStringLiteral("could not save the sign-in session")
+                                                            : error);
+                                            });
                                             return;
                                         }
-                                        discardPlaceholder(existing.id);
-                                        auto& link = linkFor(existing.id);
-                                        if (link.conn->state() != ServerConnection::State::Connected)
-                                            startLink(link, existing);
-                                        activate(existing.id);
-                                        r.ok({{"account", accountJson(existing)}});
+                                        discardPlaceholder(
+                                            existing.id, [this, existing, r](bool cleaned, const QString& error) {
+                                                if (!cleaned) {
+                                                    r.error(e::RecoveryError, error);
+                                                    return;
+                                                }
+                                                auto& link = linkFor(existing.id);
+                                                if (link.conn->state() != ServerConnection::State::Connected)
+                                                    startLink(link, existing);
+                                                activate(existing.id);
+                                                r.ok({{"account", accountJson(existing)}});
+                                            });
                                     });
                             });
                         return;
@@ -896,8 +1089,25 @@ void Daemon::registerMethods()
         });
     };
     m[QStringLiteral("account.logout")] = [this](const QJsonObject&, const Responder& r) {
-        leaveVoice(nullptr);
-        m_conn->logout([r](bool, const QString&, const QString&) { r.ok(); });
+        const auto accountId = m_active;
+        QPointer<ServerConnection> connection(m_conn);
+        purgeRecovery(accountId, [this, accountId, connection, r](bool purged, const QString& error) {
+            if (!purged) {
+                r.error(e::StorageError, error);
+                return;
+            }
+            if (!connection || m_active != accountId || m_conn != connection) {
+                r.error(e::NotConnected, QStringLiteral("logout account context changed"));
+                return;
+            }
+            leaveVoice(nullptr);
+            connection->logout([r](bool ok, const QString& code, const QString& message) {
+                if (ok)
+                    r.ok();
+                else
+                    r.error(code, message);
+            });
+        });
     };
     m[QStringLiteral("connect")] = [this](const QJsonObject& p, const Responder& r) {
         std::optional<Account> a;
@@ -1342,6 +1552,39 @@ void Daemon::registerMethods()
             return model->channelJson(reply.channel());
         });
     };
+    m[QStringLiteral("channel.duplicate")] = [this, model](const QJsonObject& p, const Responder& r) {
+        const Id cid = channelParam(p, r);
+        if (!cid || !requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("channel.duplicate.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support atomic channel duplication"));
+            return;
+        }
+        if (!p.value(QStringLiteral("name")).isString()) {
+            r.error(e::BadRequest, QStringLiteral("name must be a string"));
+            return;
+        }
+        proto::Envelope env;
+        auto* request = env.mutable_duplicate_channel();
+        request->set_channel_id(cid);
+        request->set_name(p.value(QStringLiteral("name")).toString().toStdString());
+        if (p.contains(QStringLiteral("parent"))) {
+            bool valid = false;
+            const auto value = p.value(QStringLiteral("parent"));
+            const Id parent = value.isString() ? value.toString().toULongLong(&valid) : 0;
+            if (!valid) {
+                r.error(
+                    e::BadRequest, QStringLiteral("parent must be a decimal category ID string, or \"0\" for root"));
+                return;
+            }
+            request->set_parent_id(parent);
+            request->set_set_parent(true);
+        }
+        forward(std::move(env), r, [this, model](const proto::Envelope& reply) {
+            m_conn->model().upsertChannel(reply.channel());
+            return model->channelJson(reply.channel());
+        });
+    };
     m[QStringLiteral("channel.details.reload")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
         if (!cid || !requireConnected(r))
@@ -1444,6 +1687,42 @@ void Daemon::registerMethods()
             u->set_expected_topic(original.value(QStringLiteral("topic")).toString().toStdString());
             u->set_expected_description(original.value(QStringLiteral("description")).toString().toStdString());
         }
+        if (p.contains(QStringLiteral("placement_original"))) {
+            if (!m_conn->capabilities().contains(QStringLiteral("channel.placement.cas.v1"))) {
+                r.error(e::BadRequest, QStringLiteral("this server does not support checked channel placement"));
+                return;
+            }
+            const auto original = p.value(QStringLiteral("placement_original")).toObject();
+            Id parent = 0;
+            const auto positionValue = original.value(QStringLiteral("position"));
+            const double position = positionValue.toDouble(-1);
+            if (!decimalId(original.value(QStringLiteral("parent_id")), &parent) || !positionValue.isDouble()
+                || !(position >= 0 && position <= 4294967295.0) || position != static_cast<std::uint32_t>(position)) {
+                r.error(e::BadRequest,
+                    QStringLiteral("placement_original requires a parent_id string and an unsigned integer position"));
+                return;
+            }
+            u->set_check_placement(true);
+            u->set_expected_parent_id(parent);
+            u->set_expected_position(static_cast<std::uint32_t>(position));
+        }
+        if (p.contains(QStringLiteral("artwork_original"))) {
+            if (!m_conn->capabilities().contains(QStringLiteral("channel.artwork.cas.v1"))) {
+                r.error(e::BadRequest, QStringLiteral("this server does not support checked channel artwork"));
+                return;
+            }
+            const auto original = p.value(QStringLiteral("artwork_original")).toObject();
+            Id icon = 0, banner = 0;
+            if (!decimalId(original.value(QStringLiteral("icon_attachment_id")), &icon)
+                || !decimalId(original.value(QStringLiteral("banner_attachment_id")), &banner)) {
+                r.error(e::BadRequest,
+                    QStringLiteral("artwork_original requires icon_attachment_id and banner_attachment_id strings"));
+                return;
+            }
+            u->set_check_artwork(true);
+            u->set_expected_icon_attachment_id(icon);
+            u->set_expected_banner_attachment_id(banner);
+        }
         u->set_name(p.value(QStringLiteral("name")).toString().toStdString());
         if (p.contains(QStringLiteral("topic"))) {
             u->set_set_topic(true);
@@ -1484,6 +1763,26 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("this server does not support channel artwork"));
             return;
         }
+        const bool checked = p.contains(QStringLiteral("artwork_original"));
+        Id originalIcon = 0, originalBanner = 0;
+        if (checked) {
+            if (!m_conn->capabilities().contains(QStringLiteral("channel.artwork.cas.v1"))) {
+                r.error(e::BadRequest, QStringLiteral("this server does not support checked channel artwork"));
+                return;
+            }
+            const auto original = p.value(QStringLiteral("artwork_original")).toObject();
+            if (!decimalId(original.value(QStringLiteral("icon_attachment_id")), &originalIcon)
+                || !decimalId(original.value(QStringLiteral("banner_attachment_id")), &originalBanner)) {
+                r.error(e::BadRequest,
+                    QStringLiteral("artwork_original requires icon_attachment_id and banner_attachment_id strings"));
+                return;
+            }
+        }
+        const auto applyOriginal = [checked, originalIcon, originalBanner](proto::UpdateChannelRequest* update) {
+            update->set_check_artwork(checked);
+            update->set_expected_icon_attachment_id(originalIcon);
+            update->set_expected_banner_attachment_id(originalBanner);
+        };
         const QString kind = p.value(QStringLiteral("kind")).toString();
         if (kind != u"icon" && kind != u"banner") {
             r.error(e::BadRequest, QStringLiteral("kind must be icon or banner"));
@@ -1494,6 +1793,7 @@ void Daemon::registerMethods()
             proto::Envelope env;
             auto* update = env.mutable_update_channel();
             update->set_channel_id(cid);
+            applyOriginal(update);
             if (kind == u"icon")
                 update->set_set_icon(true);
             else
@@ -1504,7 +1804,7 @@ void Daemon::registerMethods()
         }
         m_transfers->upload(
             cid, path,
-            [this, model, cid, kind, r](const FileTransfers::Result& result) {
+            [this, model, cid, kind, r, applyOriginal](const FileTransfers::Result& result) {
                 if (!result.ok) {
                     r.error(result.code, result.message);
                     return;
@@ -1512,6 +1812,7 @@ void Daemon::registerMethods()
                 proto::Envelope env;
                 auto* update = env.mutable_update_channel();
                 update->set_channel_id(cid);
+                applyOriginal(update);
                 if (kind == u"icon") {
                     update->set_set_icon(true);
                     update->set_icon_attachment_id(result.attachment.id());
@@ -1632,8 +1933,95 @@ void Daemon::registerMethods()
         QStringList files;
         for (const auto& f : p.value(QStringLiteral("files")).toArray())
             files << f.toString();
-        sendMessage(cid, p.value(QStringLiteral("content")).toString(), idFromJson(p.value(QStringLiteral("reply_to"))),
-            p.value(QStringLiteral("action")).toBool(false), files, r);
+        const auto recoveryId = p.value(QStringLiteral("recovery_id")).toString();
+        const auto content = p.value(QStringLiteral("content")).toString();
+        const auto replyTo = idFromJson(p.value(QStringLiteral("reply_to")));
+        const bool action = p.value(QStringLiteral("action")).toBool(false);
+        if (recoveryId.isEmpty()) {
+            sendMessage(cid, content, replyTo, action, files, r);
+            return;
+        }
+        if (!requireConnected(r))
+            return;
+        const auto binding = recoveryBinding();
+        if (!binding || recoveryId.size() > 128 || !p.value(QStringLiteral("original")).isString()) {
+            r.error(e::BadRequest, QStringLiteral("invalid send recovery context or original composer text"));
+            return;
+        }
+        SendRecoveryStore::Record record;
+        record.id = recoveryId;
+        record.channelId = idString(cid);
+        record.content = content;
+        record.original = p.value(QStringLiteral("original")).toString();
+        record.replyTo = replyTo ? idString(replyTo) : QString();
+        record.action = action;
+        record.attachmentPaths = files;
+        record.createdAt = QDateTime::currentDateTimeUtc();
+        m_sendRecovery->stage(
+            *binding, record, [this, binding, record, cid, replyTo, r](bool ok, const QString& error) {
+                if (!ok) {
+                    r.error(e::RecoveryError, error);
+                    return;
+                }
+                if (recoveryBinding() != binding) {
+                    m_sendRecovery->uncertain(*binding, record.id, {});
+                    r.error(e::RecoveryError, QStringLiteral("send recovery account context changed"));
+                    return;
+                }
+                m_ipc.broadcast(QStringLiteral("recovery.changed"), {{"account", binding->accountId}});
+                sendMessage(cid, record.content, replyTo, record.action, record.attachmentPaths, r, record.id);
+            });
+    };
+    m[QStringLiteral("recovery.list")] = [this](const QJsonObject&, const Responder& r) {
+        const auto binding = recoveryBinding();
+        if (!binding) {
+            r.error(e::NotConnected, QStringLiteral("connect a trusted account before loading send recovery"));
+            return;
+        }
+        m_sendRecovery->load(
+            *binding, [this, binding, r](bool ok, QVector<SendRecoveryStore::Record> records, const QString& error) {
+                if (!ok) {
+                    r.error(e::RecoveryError, error);
+                    return;
+                }
+                if (recoveryBinding() != binding) {
+                    r.error(e::NotConnected, QStringLiteral("recovery account context changed"));
+                    return;
+                }
+                QJsonArray items;
+                for (const auto& record : records) {
+                    QJsonArray files;
+                    for (const auto& path : record.attachmentPaths)
+                        files.append(path);
+                    const auto state = record.state == SendRecoveryStore::State::Rejected ? QStringLiteral("rejected")
+                        : record.state == SendRecoveryStore::State::Pending               ? QStringLiteral("pending")
+                                                                                          : QStringLiteral("uncertain");
+                    items.append(QJsonObject{{"id", record.id}, {"channel_id", record.channelId},
+                        {"content", record.content}, {"original", record.original}, {"files", files},
+                        {"reply_to", record.replyTo}, {"action", record.action},
+                        {"created_at", record.createdAt.toUTC().toString(Qt::ISODateWithMs)}, {"state", state}});
+                }
+                r.ok({{"records", items}});
+            });
+    };
+    m[QStringLiteral("recovery.dismiss")] = [this](const QJsonObject& p, const Responder& r) {
+        const auto binding = recoveryBinding();
+        const auto id = p.value(QStringLiteral("id")).toString();
+        if (!binding) {
+            r.error(e::NotConnected, QStringLiteral("connect a trusted account before dismissing recovery"));
+            return;
+        }
+        if (id.isEmpty()) {
+            r.error(e::BadRequest, QStringLiteral("missing recovery id"));
+            return;
+        }
+        m_sendRecovery->erase(*binding, id, [this, binding, r](bool ok, const QString& error) {
+            if (ok) {
+                m_ipc.broadcast(QStringLiteral("recovery.changed"), {{"account", binding->accountId}});
+                r.ok();
+            } else
+                r.error(e::RecoveryError, error);
+        });
     };
     // One step for scripts: opens the conversation and sends into it.
     m[QStringLiteral("dm.send")] = [this, model](const QJsonObject& p, const Responder& r) {

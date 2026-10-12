@@ -58,10 +58,14 @@ bool Daemon::start(QString* error)
         return false;
     pruneAttachmentCache();
 
-    if (m_options.memoryCredentials)
+    if (m_options.credentialStoreFactory)
+        m_credentials = m_options.credentialStoreFactory(this);
+    else if (m_options.memoryCredentials)
         m_credentials = std::make_unique<MemoryCredentialStore>();
     else
         m_credentials = makeKeychainStore(this);
+    m_sendRecovery = std::make_unique<SendRecoveryStore>(
+        QFileInfo(m_options.databasePath).absolutePath() + QStringLiteral("/send-recovery"), *m_credentials);
 
     if (m_options.nullAudio) {
         m_audio = std::make_unique<audio::NullAudioBackend>();
@@ -467,6 +471,13 @@ QJsonObject Daemon::statusJson() const
             {"output", m_config.audio.output}, {"error", m_audioError}});
     status.insert(QStringLiteral("clients"), m_ipc.clientCount());
     status.insert(QStringLiteral("accounts"), accountsJson());
+    const auto recovery = recoveryBinding();
+    status.insert(QStringLiteral("send_recovery"),
+        QJsonObject{
+            {"supported",
+                m_credentials && m_credentials->backendName() == QStringLiteral("keyring") && recovery.has_value()},
+            {"certificate_fingerprint", recovery ? recovery->certificatePin : QString()},
+            {"max_records", SendRecoveryStore::kMaxRecords}});
     status.insert(QStringLiteral("e2e"), m_e2e ? m_e2e->statusJson() : QJsonObject());
     return status;
 }

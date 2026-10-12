@@ -57,6 +57,7 @@ signals:
 private:
     struct Transfer {
         quint64 id = 0;
+        quint64 identityGeneration = 0;
         bool upload = true;
         bool channelArtwork = false;
         quint64 channelId = 0;

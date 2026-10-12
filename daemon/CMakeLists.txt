@@ -9,6 +9,7 @@ add_library(omachat_daemon_core STATIC
     src/application/Daemon.cpp
     src/application/DaemonMethods.cpp
     src/storage/LocalStore.cpp
+    src/storage/SendRecoveryStore.cpp
     src/platform/CredentialStore.cpp
     src/networking/ClientState.cpp
     src/networking/ServerConnection.cpp

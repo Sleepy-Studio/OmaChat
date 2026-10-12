@@ -7,6 +7,8 @@
 #include <QImageReader>
 #include <QImageWriter>
 
+#include <algorithm>
+
 namespace omachat::server {
 
 using namespace omachat::permissions;
@@ -294,15 +296,22 @@ void ChatServer::handleDownload(Session& s, std::uint64_t rid, const proto::Down
     if (!limit(s, rid, s.transfer))
         return;
     const auto a = m_store.attachment(m.attachment_id());
-    const Id artworkChannel = a ? m_store.artworkChannel(a->id) : 0;
-    const Id artworkServer = artworkChannel ? 0 : (a ? m_store.artworkServer(a->id) : 0);
+    const auto references = a ? m_store.artworkChannels(a->id) : std::nullopt;
+    if (!references) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("attachment not found"));
+        return;
+    }
+    const auto& artworkChannels = *references;
+    const Id artworkServer = artworkChannels.empty() && a ? m_store.artworkServer(a->id) : 0;
+    const bool channelArtworkVisible
+        = std::ranges::any_of(artworkChannels, [&](Id channel) { return m_state.can(channel, s.userId, ViewChannel); });
     const bool serverVisible
         = artworkServer && m_state.server(artworkServer) && m_state.server(artworkServer)->members.contains(s.userId);
     const bool visible = a
-        && (artworkChannel          ? m_state.can(artworkChannel, s.userId, ViewChannel)
-                : artworkServer     ? serverVisible
-                : a->messageId == 0 ? a->uploaderId == s.userId
-                                    : m_state.can(a->channelId, s.userId, ViewChannel | ReadHistory));
+        && (!artworkChannels.empty() ? channelArtworkVisible
+                : artworkServer      ? serverVisible
+                : a->messageId == 0  ? a->uploaderId == s.userId
+                                     : m_state.can(a->channelId, s.userId, ViewChannel | ReadHistory));
     if (!visible) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("attachment not found"));
         return;

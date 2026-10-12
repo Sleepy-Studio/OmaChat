@@ -21,6 +21,9 @@ class IpcServer;
 class Responder {
 public:
     Responder(IpcServer* server, QLocalSocket* socket, qint64 id);
+    using Success = std::function<void(const QJsonObject&)>;
+    using Failure = std::function<void(const QString&, const QString&)>;
+    Responder intercept(Success success, Failure failure) const;
     void ok(const QJsonObject& result = {}) const;
     void error(const QString& code, const QString& message) const;
     QLocalSocket* socket() const { return m_socket.data(); }
@@ -29,6 +32,8 @@ private:
     QPointer<IpcServer> m_server;
     QPointer<QLocalSocket> m_socket;
     qint64 m_id;
+    Success m_success;
+    Failure m_failure;
 };
 
 class IpcServer : public QObject {

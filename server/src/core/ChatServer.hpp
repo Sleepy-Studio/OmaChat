@@ -172,6 +172,7 @@ private:
     void handleCreateInvite(Session& s, std::uint64_t rid, const proto::CreateInviteRequest& m);
     void handleListInvites(Session& s, std::uint64_t rid, const proto::ListInvitesRequest& m);
     void handleJoinInvite(Session& s, std::uint64_t rid, const proto::JoinInviteRequest& m);
+    void handleDuplicateChannel(Session& s, std::uint64_t rid, const proto::DuplicateChannelRequest& m);
     void handleCreateChannel(Session& s, std::uint64_t rid, const proto::CreateChannelRequest& m);
     void handleUpdateChannel(Session& s, std::uint64_t rid, const proto::UpdateChannelRequest& m);
     void handleDeleteChannel(Session& s, std::uint64_t rid, const proto::DeleteChannelRequest& m);

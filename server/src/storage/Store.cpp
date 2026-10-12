@@ -933,7 +933,30 @@ bool Store::setRecipient(Id channelId, Id userId, bool present)
 
 bool Store::deleteChannel(Id id)
 {
-    return exec(QStringLiteral("DELETE FROM channels WHERE id = ?"), {sid(id)});
+    // Artwork can be shared by duplicated channels. Rehome its owning FK before
+    // deleting the original channel, so CASCADE cannot destroy a surviving reference.
+    // A savepoint composes with the category-deletion transaction as well.
+    if (!exec(QStringLiteral("SAVEPOINT delete_channel")))
+        return false;
+    const bool ok
+        = exec(QStringLiteral(
+                   "UPDATE attachments SET channel_id = (SELECT c.id FROM channels c WHERE c.id <> ? AND "
+                   "(c.icon_attachment_id = attachments.id OR c.banner_attachment_id = attachments.id) LIMIT 1) "
+                   "WHERE channel_id = ? AND artwork = 1 AND message_id IS NULL AND EXISTS "
+                   "(SELECT 1 FROM channels c WHERE c.id <> ? AND "
+                   "(c.icon_attachment_id = attachments.id OR c.banner_attachment_id = attachments.id))"),
+              {sid(id), sid(id), sid(id)})
+        && exec(QStringLiteral("DELETE FROM channels WHERE id = ?"), {sid(id)});
+    if (!ok) {
+        exec(QStringLiteral("ROLLBACK TO delete_channel"));
+        exec(QStringLiteral("RELEASE delete_channel"));
+        return false;
+    }
+    if (exec(QStringLiteral("RELEASE delete_channel")))
+        return true;
+    exec(QStringLiteral("ROLLBACK TO delete_channel"));
+    exec(QStringLiteral("RELEASE delete_channel"));
+    return false;
 }
 
 bool Store::upsertOverride(const OverrideRecord& o)
@@ -1325,6 +1348,20 @@ Id Store::artworkChannel(Id attachmentId)
     q.addBindValue(sid(attachmentId));
     q.addBindValue(sid(attachmentId));
     return q.exec() && q.next() ? uid(q.value(0)) : 0;
+}
+
+std::optional<std::vector<Id>> Store::artworkChannels(Id attachmentId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id FROM channels WHERE icon_attachment_id = ? OR banner_attachment_id = ?"));
+    q.addBindValue(sid(attachmentId));
+    q.addBindValue(sid(attachmentId));
+    if (!q.exec())
+        return std::nullopt;
+    std::vector<Id> channels;
+    while (q.next())
+        channels.push_back(uid(q.value(0)));
+    return channels;
 }
 
 Id Store::artworkServer(Id attachmentId)

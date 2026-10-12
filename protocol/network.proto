@@ -487,6 +487,21 @@ message UpdateChannelRequest {
   string expected_name = 18;
   string expected_topic = 19;
   string expected_description = 20;
+  // Atomic artwork and placement comparisons, each restricted to its own scope.
+  bool check_artwork = 21;
+  uint64 expected_icon_attachment_id = 22;
+  uint64 expected_banner_attachment_id = 23;
+  bool check_placement = 24;
+  uint64 expected_parent_id = 25;
+  uint32 expected_position = 26;
+}
+// channel.duplicate.v1: configuration and explicit overrides only; no history,
+// recipients, voice occupants or category children. Omitted parent inherits source.
+message DuplicateChannelRequest {
+  uint64 channel_id = 1;
+  string name = 2;
+  uint64 parent_id = 3;
+  bool set_parent = 4;
 }
 message DeleteChannelRequest { uint64 channel_id = 1; }
 message OpenDmRequest { uint64 user_id = 1; }
@@ -826,6 +841,7 @@ message Envelope {
     UpdateChannelRequest update_channel = 38;
     DeleteChannelRequest delete_channel = 39;
     Channel channel = 40;
+    DuplicateChannelRequest duplicate_channel = 162;
     OpenDmRequest open_dm = 41;
     ListInvitesRequest list_invites = 42;
     InviteList invite_list = 43;

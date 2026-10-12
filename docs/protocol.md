@@ -245,6 +245,39 @@ snapshot and returns the permitted channel's latest details. The desktop's
 explicit Reload latest action retains local input and rebases its comparison
 values for a deliberate subsequent save. Remote events never rebase dirty input.
 
+The additive `channel.duplicate.v1` capability enables
+`channel.duplicate {channel, name, parent?}`. Omitted parent retains the source
+category; explicit decimal string `"0"` selects top level. Sources must be visible
+and manageable community text/voice/category channels. Destination categories
+must be visible and manageable in the same server. Configuration, artwork
+references and explicit permission overrides are committed atomically before
+publication. Messages, recipients, active voice state and category children are
+excluded. Shared artwork downloads authorize any visible referencing channel;
+deleting its original channel preserves surviving references.
+
+`channel.artwork.cas.v1` accepts `artwork_original:
+{icon_attachment_id, banner_attachment_id}` on `channel.artwork.set` and
+artwork-only `channel.update`. `channel.placement.cas.v1` accepts
+`placement_original: {parent_id, position}` on placement-only `channel.update`.
+IDs are decimal strings; position is a nonnegative JSON integer. Comparison is
+permission-first and atomic with the update; stale values return `Conflict`.
+These checks do not compare every sibling or a whole-list revision.
+
+Daemon status `send_recovery` reports bound secure-keyring support and the actual
+verified certificate fingerprint. `message.send` optionally accepts
+`recovery_id` plus `original` composer text. The daemon persists an encrypted
+record before network dispatch. `recovery.list` returns records bound to the
+active account/endpoint/verified certificate/user; `recovery.dismiss {id}` deletes
+one durably. `recovery.changed {account}` announces changed outcomes without
+including their content. States are pending, rejected and uncertain. After a
+daemon restart, pending becomes uncertain. Only a correlated server rejection
+permits manual retry of the immutable record context. `RecoveryError` covers
+storage failure and ambiguous delivery, including acknowledged delivery whose
+recovery deletion failed; it never authorizes retry. Limits are 20 records,
+128 KiB serialized bytes and 30 days per account. Logout and both explicit and
+automatic duplicate retirement purge recovery state; failure remains visible.
+See [desktop-send-recovery-design.md](desktop-send-recovery-design.md) for boundaries.
+
 `account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
 
 `account.forgetDuplicate {account}` removes only a legacy local `oauth-*` placeholder and its local credentials. It requires the active account and placeholder to be connected to the same server and authenticated as the same remote user. It never deletes the server account.

@@ -59,11 +59,19 @@ QJsonObject FileTransfers::json(const Transfer& t) const
 
 void FileTransfers::send(quint64 id, proto::Envelope env, Reply onReply)
 {
+    if (auto* transfer = find(id); transfer && transfer->identityGeneration != m_conn.identityGeneration()) {
+        fail(id, e::NotConnected, QStringLiteral("transfer account identity changed"));
+        return;
+    }
     const quint64 generation = m_conn.linkGeneration();
     m_conn.request(std::move(env), [this, id, generation, onReply = std::move(onReply)](const proto::Envelope& reply) {
         Transfer* t = find(id);
         if (!t || t->waitingSinceMs != 0)
             return;
+        if (t->identityGeneration != m_conn.identityGeneration()) {
+            fail(id, e::NotConnected, QStringLiteral("transfer account identity changed"));
+            return;
+        }
         if (reply.has_error() && generation != m_conn.linkGeneration()) {
             // The connection went away underneath this request: wait for it.
             t->waitingSinceMs = QDateTime::currentMSecsSinceEpoch();
@@ -88,6 +96,10 @@ void FileTransfers::onReconnected()
         Transfer* t = find(id);
         if (!t)
             continue;
+        if (t->identityGeneration != m_conn.identityGeneration()) {
+            fail(id, e::NotConnected, QStringLiteral("transfer account identity changed"));
+            continue;
+        }
         t->waitingSinceMs = 0;
         OMA_INFO("transfer", "continuing after reconnect", {"name", t->name});
         if (!t->upload) {
@@ -202,7 +214,8 @@ void FileTransfers::fail(quint64 id, const QString& code, const QString& message
         return;
     Transfer t = std::move(it->second);
     m_transfers.erase(it);
-    if (t.upload && t.attachmentId && m_conn.state() == ServerConnection::State::Connected) {
+    if (t.upload && t.attachmentId && m_conn.state() == ServerConnection::State::Connected
+        && t.identityGeneration == m_conn.identityGeneration()) {
         // Best effort: the server usually dropped it already.
         proto::Envelope env;
         env.mutable_cancel_upload()->set_attachment_id(t.attachmentId);
@@ -268,6 +281,7 @@ quint64 FileTransfers::upload(quint64 channelId, const QString& path, Done done,
 
     Transfer t;
     t.id = id;
+    t.identityGeneration = m_conn.identityGeneration();
     t.upload = true;
     t.channelArtwork = channelArtwork;
     t.channelId = channelId;
@@ -389,6 +403,7 @@ quint64 FileTransfers::download(quint64 attachmentId, const QString& destination
     const quint64 id = m_nextId++;
     Transfer t;
     t.id = id;
+    t.identityGeneration = m_conn.identityGeneration();
     t.upload = false;
     t.attachmentId = attachmentId;
     t.path = destination;

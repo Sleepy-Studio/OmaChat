@@ -150,6 +150,7 @@ public:
     bool deleteAttachment(Id id);
     // Returns the channel that currently uses an attachment as artwork.
     Id artworkChannel(Id attachmentId);
+    std::optional<std::vector<Id>> artworkChannels(Id attachmentId);
     // Returns the server that currently uses an attachment as icon/banner.
     Id artworkServer(Id attachmentId);
     std::vector<Id> allAttachmentIds();

@@ -50,9 +50,8 @@ void ChatServer::handleSync(Session& s, std::uint64_t rid)
             const ChannelRecord* c = m_state.channel(cid);
             if (!c)
                 continue;
-            // Categories are visible if any child is; keep it simple and
-            // always ship categories, filtering leaf channels by permission.
-            if (c->kind != ChannelKind::Category && !m_state.can(cid, s.userId, ViewChannel))
+            // Restricted category metadata follows the same visibility rule as leaves.
+            if (!m_state.can(cid, s.userId, ViewChannel))
                 continue;
             *st->add_channels() = toProto(*c, s.userId);
             if (c->kind == ChannelKind::Voice)
@@ -699,17 +698,92 @@ void ChatServer::handleCreateChannel(Session& s, std::uint64_t rid, const proto:
     m_state.putChannel(c);
     proto::Event e;
     *e.mutable_channel_create() = toProto(c, 0);
-    std::vector<Id> audience;
-    if (c.kind == ChannelKind::Category) {
-        for (const auto& [uid, mem] : m_state.server(c.serverId)->members)
-            audience.push_back(uid);
-    } else {
-        audience = m_state.channelAudience(c.id);
-    }
-    publish(e, audience);
+    publish(e, m_state.channelAudience(c.id));
 
     proto::Envelope env;
     *env.mutable_channel() = toProto(c, s.userId);
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::handleDuplicateChannel(Session& s, std::uint64_t rid, const proto::DuplicateChannelRequest& m)
+{
+    const ChannelRecord* source = m_state.channel(m.channel_id());
+    if (!source || !m_state.can(source->id, s.userId, ViewChannel)) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("channel not found"));
+        return;
+    }
+    if (!source->serverId
+        || (source->kind != ChannelKind::Text && source->kind != ChannelKind::Voice
+            && source->kind != ChannelKind::Category)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("only server channels can be duplicated"));
+        return;
+    }
+    const ServerRecord* srv = m_state.server(source->serverId);
+    if (!srv || !m_state.can(source->id, s.userId, ManageChannel)
+        || (!m_state.canInServer(srv->id, s.userId, CreateChannel)
+            && !m_state.canInServer(srv->id, s.userId, ManageChannel))) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot duplicate this channel"));
+        return;
+    }
+    QString raw = QString::fromStdString(m.name());
+    if (source->kind == ChannelKind::Text)
+        raw = normalizeTextChannelName(raw);
+    const auto name = validation::channelName(raw);
+    if (!name || srv->channels.size() >= 500) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel name or channel limit reached"));
+        return;
+    }
+    const Id parent = m.set_parent() ? m.parent_id() : source->parentId;
+    if (parent) {
+        const ChannelRecord* destination = m_state.channel(parent);
+        if (source->kind == ChannelKind::Category || !destination || destination->serverId != srv->id
+            || destination->kind != ChannelKind::Category) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid parent category"));
+            return;
+        }
+        if (!m_state.can(parent, s.userId, ViewChannel | ManageChannel)) {
+            replyError(
+                s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage the destination category"));
+            return;
+        }
+    }
+    ChannelRecord copy = *source;
+    copy.id = m_ids.next();
+    copy.name = *name;
+    copy.parentId = parent;
+    copy.recipients.clear();
+    copy.position = 0;
+    for (Id id : srv->channels) {
+        const auto* sibling = m_state.channel(id);
+        if (sibling && sibling->parentId == parent)
+            copy.position = std::max(copy.position, sibling->position + 1);
+    }
+    auto overrides = m_state.overridesFor(source->id);
+    for (auto& override : overrides)
+        override.channelId = copy.id;
+    if (!m_store.begin()) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not start channel duplication"));
+        return;
+    }
+    bool stored = m_store.insertChannel(copy, now());
+    for (const auto& override : overrides)
+        if (stored)
+            stored = m_store.upsertOverride(override);
+    if (!stored || !m_store.commit()) {
+        m_store.rollback();
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not duplicate channel"));
+        return;
+    }
+    // No event, snapshot, or permission check can observe the intermediate state:
+    // this synchronous handler installs all restrictions before publishing.
+    m_state.putChannel(copy);
+    for (const auto& override : overrides)
+        m_state.putOverride(override);
+    proto::Event event;
+    *event.mutable_channel_create() = toProto(copy, 0);
+    publish(event, m_state.channelAudience(copy.id));
+    proto::Envelope env;
+    *env.mutable_channel() = toProto(copy, s.userId);
     reply(s, rid, std::move(env));
 }
 
@@ -725,6 +799,37 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
     if (groupDm ? m.set_topic() : (c->serverId == 0 || !m_state.can(c->id, s.userId, ManageChannel))) {
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage this channel"));
         return;
+    }
+    if (m.check_artwork()) {
+        if (groupDm || m.check_details() || m.check_placement() || !m.name().empty() || m.set_topic()
+            || m.set_description() || m.set_parent() || m.set_position() || m.set_before()
+            || (!m.set_icon() && !m.set_banner())) {
+            replyError(
+                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked artwork requires an artwork-only update"));
+            return;
+        }
+        if (c->iconAttachmentId != m.expected_icon_attachment_id()
+            || c->bannerAttachmentId != m.expected_banner_attachment_id()) {
+            replyError(s, rid, proto::ERROR_CONFLICT,
+                QStringLiteral("Channel artwork changed elsewhere. Reload latest and review your retained image before "
+                               "applying."));
+            return;
+        }
+    }
+    if (m.check_placement()) {
+        if (groupDm || m.check_details() || m.check_artwork() || !m.name().empty() || m.set_topic()
+            || m.set_description() || m.set_icon() || m.set_banner()
+            || (!m.set_parent() && !m.set_position() && !m.set_before())) {
+            replyError(
+                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked placement requires a placement-only update"));
+            return;
+        }
+        if (c->parentId != m.expected_parent_id() || c->position != m.expected_position()) {
+            replyError(s, rid, proto::ERROR_CONFLICT,
+                QStringLiteral("Channel placement changed elsewhere. Reload latest and review your retained "
+                               "destination before moving."));
+            return;
+        }
     }
     if (m.check_details()) {
         if (m.set_icon() || m.set_banner() || m.set_parent() || m.set_position() || m.set_before()) {

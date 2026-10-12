@@ -325,6 +325,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kJoinInvite:
         handleJoinInvite(s, rid, env.join_invite());
         break;
+    case P::kDuplicateChannel:
+        handleDuplicateChannel(s, rid, env.duplicate_channel());
+        break;
     case P::kCreateChannel:
         handleCreateChannel(s, rid, env.create_channel());
         break;

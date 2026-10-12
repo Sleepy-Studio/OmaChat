@@ -24,6 +24,7 @@ add_executable(omachat_unit_tests
     unit/test_server_state.cpp
     unit/test_server_config_env.cpp
     unit/test_store.cpp
+    unit/test_send_recovery.cpp
     unit/test_video.cpp
     unit/test_e2e.cpp
 )
@@ -79,6 +80,9 @@ add_executable(omachat_integration_tests
     integration/test_channel_placement.cpp
     integration/test_category_delete.cpp
     integration/test_permission_preview.cpp
+    integration/test_channel_duplicate.cpp
+    integration/test_channel_conflicts.cpp
+    integration/test_send_recovery_daemon.cpp
 )
 omachat_set_warnings(omachat_integration_tests)
 target_include_directories(omachat_integration_tests PRIVATE integration)

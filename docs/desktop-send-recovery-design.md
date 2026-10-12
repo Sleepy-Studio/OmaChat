@@ -1,8 +1,49 @@
 # Desktop send recovery across restart
 
-Status: scoped design, 2026-10-04. **Not implemented.** Current failed sends remain
-in GUI memory; active daemon transfers are rediscovered. This design records the
-next bounded persistence slice from the desktop continuation.
+Status: implemented in the working tree, 2026-10-12; integrated validation,
+package installation and rollout evidence are recorded in the desktop handoff.
+The original October 4 requirements below remain the design baseline.
+
+`SendRecoveryStore` uses libsodium's XChaCha20-Poly1305 secretstream FINAL format
+and an independent per-account key in QtKeychain. Insecure fallback is explicitly
+disabled. Only encrypted, atomically replaced files enter the private recovery
+directory; message content, composer originals and attachment paths never enter
+LocalStore. The keyring memory double is available only through an in-process
+test factory, not through production configuration.
+
+The daemon's optional `message.send` recovery_id/original fields stage before
+network delivery. The production GUI uses this path when a bound secure keyring
+is supported. Recovery records bind account, endpoint, actual verified TLS peer
+certificate and authenticated user. Nonempty manually pinned certificates must
+match; CA-verified connections can bind the actual peer certificate without a
+manual pin. Current TLS diagnostics are not evidence of the verified peer.
+
+Limits are 20 records, 128 KiB of serialized plaintext before encryption and
+30 days **per account**, not installation-wide. Records in a live daemon remain
+pending while their operation runs. After daemon restart, pending becomes
+uncertain. Only a correlated server rejection permits explicit retry of the
+same immutable record context. Acknowledgement removes recovery; a cleanup
+failure reports uncertain delivery and cannot authorize retry. User dismissal
+waits for durable deletion. Account logout/removal, explicit duplicate retirement
+and automatic OAuth placeholder retirement purge first; purge failure is visible
+and prevents successful local retirement. Old queued writes cannot undo purge
+or dismissal. User-dismissed ID tombstones remain for the daemon's lifetime;
+acknowledged IDs use a temporary ordering guard instead.
+
+The GUI merges recovered outcomes without replacing newer composer text,
+reply state or pending files. Account/endpoint/certificate/user scope and
+request serials guard late replies. Recovery change events reconcile restored
+live pending operations after acknowledgement. Offline outcomes remain visible
+within the same identity; uncertain sends never automatically resend.
+
+Filesystem validation rejects symlinks, nonprivate/nonowned files and unexpected
+ancestor resolution; reads are bounded. Final file operations run synchronously
+in the daemon. This is a single daemon writer, not a cross-process transaction
+or an atomic defense against a hostile same-user filesystem writer. Real-keyring
+round-trip evidence and injected lock/failure tests are distinct; the user's
+actual keyring is not locked for testing.
+
+## Original scoped requirements — 2026-10-04
 
 The storage boundary belongs to the daemon. `LocalStore` is plaintext SQLite
 with a WAL and explicitly excludes secrets; do not write message text or local
