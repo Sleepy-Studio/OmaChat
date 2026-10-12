@@ -246,3 +246,191 @@ TEST_F(PermissionPreview, DaemonForwardsReadOnlyPreviewAndDenials)
     EXPECT_FALSE(denied.ok);
     EXPECT_EQ(denied.errorCode, QStringLiteral("PermissionDenied"));
 }
+
+TEST_F(PermissionPreview, NamedSourcesAreManagerOnlyAndWinningRolesExcludeLosingDenials)
+{
+    const auto child = channel();
+    const auto deny = role(permissions::ManageMessages);
+    const auto allow = role(0);
+    overrideFor(child, deny, 0, permissions::ManageMessages, true);
+    overrideFor(child, allow, permissions::ManageMessages, 0, true);
+    auto reply = preview(*member, child);
+    ASSERT_TRUE(reply.has_permission_preview());
+    for (const auto& row : reply.permission_preview().permissions())
+        EXPECT_EQ(row.roles_size(), 0);
+    reply = preview(*owner, child, memberId);
+    ASSERT_TRUE(reply.has_permission_preview());
+    const auto row = source(reply.permission_preview(), permissions::ManageMessages);
+    ASSERT_EQ(row.roles_size(), 1);
+    EXPECT_EQ(row.roles(0).id(), allow);
+    EXPECT_EQ(row.roles(0).name(), "Private role metadata");
+    overrideFor(child, memberId, 0, permissions::ManageMessages);
+    reply = preview(*owner, child, memberId);
+    ASSERT_TRUE(reply.has_permission_preview());
+    EXPECT_EQ(source(reply.permission_preview(), permissions::ManageMessages).roles_size(), 0);
+}
+
+TEST_F(PermissionPreview, RoleOnlyExcludesMemberOverridesAndRejectsUnauthorizedTargets)
+{
+    const auto parent = channel(proto::CHANNEL_TYPE_CATEGORY);
+    const auto child = channel(proto::CHANNEL_TYPE_TEXT, parent);
+    const auto selected = role(permissions::ManageMessages);
+    overrideFor(parent, selected, 0, permissions::SendMessages, true);
+    overrideFor(child, memberId, permissions::SendMessages, permissions::ManageMessages);
+    proto::Envelope request;
+    auto* p = request.mutable_permission_preview_request();
+    p->set_channel_id(child);
+    p->set_role_id(selected);
+    auto reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_permission_preview());
+    EXPECT_EQ(reply->permission_preview().user_id(), 0u);
+    EXPECT_EQ(reply->permission_preview().role_id(), selected);
+    EXPECT_TRUE(source(reply->permission_preview(), permissions::ManageMessages).allowed());
+    EXPECT_FALSE(source(reply->permission_preview(), permissions::SendMessages).allowed());
+    EXPECT_EQ(source(reply->permission_preview(), permissions::SendMessages).source(), "category_roles");
+    for (RawClient* client : {member.get(), outsider.get()}) {
+        reply = client->call(request);
+        ASSERT_TRUE(reply && reply->has_error());
+        EXPECT_EQ(reply->error().code(), proto::ERROR_PERMISSION_DENIED);
+        EXPECT_FALSE(reply->has_permission_preview());
+    }
+    p->set_role_id(1);
+    reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_error());
+    EXPECT_EQ(reply->error().code(), proto::ERROR_PERMISSION_DENIED);
+    p->set_role_id(selected);
+    p->set_user_id(memberId);
+    reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_error());
+    EXPECT_EQ(reply->error().code(), proto::ERROR_PERMISSION_DENIED);
+}
+
+TEST_F(PermissionPreview, CreationMatchesCreatedChannelIncludingCategoryMemberOverride)
+{
+    const auto parent = channel(proto::CHANNEL_TYPE_CATEGORY);
+    const auto selected = role(permissions::ManageMessages | permissions::SendMessages);
+    overrideFor(parent, selected, 0, permissions::ManageMessages, true);
+    overrideFor(parent, memberId, 0, permissions::SendMessages);
+    proto::Envelope request;
+    auto* p = request.mutable_permission_preview_request();
+    p->set_new_channel(true);
+    p->set_server_id(serverId);
+    p->set_parent_id(parent);
+    p->set_user_id(memberId);
+    auto reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_permission_preview());
+    const auto predicted = reply->permission_preview();
+    EXPECT_EQ(predicted.channel_id(), 0u);
+    EXPECT_TRUE(predicted.new_channel());
+    EXPECT_EQ(predicted.parent_id(), parent);
+    EXPECT_FALSE(source(predicted, permissions::SendMessages).allowed());
+    EXPECT_EQ(source(predicted, permissions::SendMessages).source(), "category_user");
+    const auto child = channel(proto::CHANNEL_TYPE_TEXT, parent);
+    const auto actual = preview(*owner, child, memberId);
+    ASSERT_TRUE(actual.has_permission_preview());
+    EXPECT_EQ(actual.permission_preview().effective_permissions(), predicted.effective_permissions());
+    parity(actual.permission_preview(), *member);
+    // Role-only creation applies the category role override without the member override.
+    p->set_user_id(0);
+    p->set_role_id(selected);
+    const auto roleReply = owner->call(request);
+    ASSERT_TRUE(roleReply && roleReply->has_permission_preview());
+    EXPECT_TRUE(source(roleReply->permission_preview(), permissions::SendMessages).allowed());
+    EXPECT_FALSE(source(roleReply->permission_preview(), permissions::ManageMessages).allowed());
+}
+
+TEST_F(PermissionPreview, CreationRequiresCreatorRightsAndVisibleValidContext)
+{
+    const auto parent = channel(proto::CHANNEL_TYPE_CATEGORY);
+    proto::Envelope request;
+    auto* p = request.mutable_permission_preview_request();
+    p->set_new_channel(true);
+    p->set_server_id(serverId);
+    p->set_parent_id(parent);
+    auto reply = member->call(request);
+    ASSERT_TRUE(reply && reply->has_error());
+    EXPECT_EQ(reply->error().code(), proto::ERROR_PERMISSION_DENIED);
+    // ManageChannel alone is a supported creator right, same as actual channel creation.
+    role(permissions::ManageChannel);
+    reply = member->call(request);
+    ASSERT_TRUE(reply && reply->has_permission_preview());
+    for (const auto& row : reply->permission_preview().permissions())
+        EXPECT_EQ(row.roles_size(), 0);
+    overrideFor(parent, memberId, 0, permissions::ViewChannel);
+    reply = member->call(request);
+    ASSERT_TRUE(reply && reply->has_error());
+    EXPECT_FALSE(reply->has_permission_preview());
+    p->set_parent_id(1);
+    reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_error());
+    EXPECT_EQ(reply->error().code(), proto::ERROR_PERMISSION_DENIED);
+    p->set_parent_id(parent);
+    p->set_channel_type(proto::CHANNEL_TYPE_CATEGORY);
+    reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_error());
+    p->set_parent_id(0);
+    reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_permission_preview());
+    reply = outsider->call(request);
+    ASSERT_TRUE(reply && reply->has_error());
+    EXPECT_EQ(reply->error().code(), proto::ERROR_PERMISSION_DENIED);
+}
+
+TEST_F(PermissionPreview, DaemonForwardsRoleAndCreationScopeWithNamedContributors)
+{
+    const auto parent = channel(proto::CHANNEL_TYPE_CATEGORY);
+    const auto selected = role(permissions::ManageMessages);
+    overrideFor(parent, selected, 0, permissions::ManageMessages, true);
+    TestDaemon daemon(QStringLiteral("permission-preview-extended-ipc"));
+    ASSERT_TRUE(daemon.start());
+    ASSERT_TRUE(daemon.loginOn(server, QStringLiteral("preview-owner"), QStringLiteral("preview-password")));
+    auto result = daemon.call(QStringLiteral("permission.preview"),
+        {{"server", QString::number(serverId)}, {"parent", QString::number(parent)}, {"new_channel", true},
+            {"role", QString::number(selected)}, {"type", "voice"}});
+    ASSERT_TRUE(result.ok) << result.errorMessage.toStdString();
+    EXPECT_TRUE(result.result.value("new_channel").toBool());
+    EXPECT_EQ(result.result.value("role_id").toString(), QString::number(selected));
+    EXPECT_EQ(result.result.value("parent_id").toString(), QString::number(parent));
+    bool found = false;
+    for (const auto& value : result.result.value("permissions").toArray()) {
+        const auto row = value.toObject();
+        if (row.value("name") != QStringLiteral("MANAGE_MESSAGES"))
+            continue;
+        found = true;
+        EXPECT_FALSE(row.value("allowed").toBool());
+        const auto roles = row.value("roles").toArray();
+        ASSERT_EQ(roles.size(), 1);
+        EXPECT_EQ(roles[0].toObject().value("id").toString(), QString::number(selected));
+    }
+    EXPECT_TRUE(found);
+    result = daemon.call(QStringLiteral("permission.preview"),
+        {{"server", QString::number(serverId)}, {"new_channel", true}, {"role", QString::number(selected)},
+            {"user", QString::number(memberId)}});
+    EXPECT_FALSE(result.ok);
+}
+
+TEST_F(PermissionPreview, DefaultRoleOnlyHasNoDuplicateNamedContributors)
+{
+    const auto child = channel();
+    proto::Envelope request;
+    request.mutable_sync();
+    auto reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_sync_state());
+    std::uint64_t defaultRole = 0;
+    for (const auto& role : reply->sync_state().roles())
+        if (role.server_id() == serverId && role.is_default())
+            defaultRole = role.id();
+    ASSERT_NE(defaultRole, 0u);
+    request.Clear();
+    auto* p = request.mutable_permission_preview_request();
+    p->set_channel_id(child);
+    p->set_role_id(defaultRole);
+    reply = owner->call(request);
+    ASSERT_TRUE(reply && reply->has_permission_preview());
+    for (const auto& row : reply->permission_preview().permissions()) {
+        EXPECT_LE(row.roles_size(), 1);
+        if (row.roles_size()) {
+            EXPECT_EQ(row.roles(0).id(), defaultRole);
+        }
+    }
+}

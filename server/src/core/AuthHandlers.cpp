@@ -103,7 +103,11 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("channel.duplicate.v1");
     r->add_capabilities("channel.artwork.cas.v1");
     r->add_capabilities("channel.placement.cas.v1");
+    r->add_capabilities("channel.placement.list.cas.v1");
     r->add_capabilities("permission_preview");
+    r->add_capabilities("permission_preview_roles");
+    r->add_capabilities("permission_preview_creation");
+    r->add_capabilities("permission_preview_role_sources");
     r->add_capabilities("server.identity.v1");
     r->add_capabilities("instance.operator.v1");
     r->set_instance_name(m_config.instanceName.toStdString());

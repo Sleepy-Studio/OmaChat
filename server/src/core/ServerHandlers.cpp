@@ -801,8 +801,8 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         return;
     }
     if (m.check_artwork()) {
-        if (groupDm || m.check_details() || m.check_placement() || !m.name().empty() || m.set_topic()
-            || m.set_description() || m.set_parent() || m.set_position() || m.set_before()
+        if (groupDm || m.check_details() || m.check_placement() || m.check_placement_list() || !m.name().empty()
+            || m.set_topic() || m.set_description() || m.set_parent() || m.set_position() || m.set_before()
             || (!m.set_icon() && !m.set_banner())) {
             replyError(
                 s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked artwork requires an artwork-only update"));
@@ -816,7 +816,7 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
             return;
         }
     }
-    if (m.check_placement()) {
+    if (m.check_placement() || m.check_placement_list()) {
         if (groupDm || m.check_details() || m.check_artwork() || !m.name().empty() || m.set_topic()
             || m.set_description() || m.set_icon() || m.set_banner()
             || (!m.set_parent() && !m.set_position() && !m.set_before())) {
@@ -824,7 +824,13 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
                 s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked placement requires a placement-only update"));
             return;
         }
-        if (c->parentId != m.expected_parent_id() || c->position != m.expected_position()) {
+        if (m.check_placement_list() && m.expected_placement_token().empty()) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked placement requires a list token"));
+            return;
+        }
+        if ((m.check_placement() && (c->parentId != m.expected_parent_id() || c->position != m.expected_position()))
+            || (m.check_placement_list()
+                && QString::fromStdString(m.expected_placement_token()) != m_state.placementToken(c->serverId))) {
             replyError(s, rid, proto::ERROR_CONFLICT,
                 QStringLiteral("Channel placement changed elsewhere. Reload latest and review your retained "
                                "destination before moving."));

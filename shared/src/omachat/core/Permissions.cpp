@@ -43,14 +43,27 @@ Bits evaluate(const ResolveInput& input, Explanation* result)
     if (result)
         for (const auto& [bit, n] : kNames) {
             (void)n;
-            result->permissions.push_back({bit, false, "not_granted"});
+            result->permissions.push_back({bit, false, "not_granted", {}});
         }
     auto mark = [&](Bits touched, std::string_view source) {
         if (!result)
             return;
         for (auto& entry : result->permissions)
-            if (entry.permission & touched)
+            if (entry.permission & touched) {
                 entry.source = source;
+                entry.roles.clear();
+            }
+    };
+    auto contributors = [&](Bits touched, const auto& ids, const auto& masks) {
+        if (!result)
+            return;
+        for (auto& entry : result->permissions) {
+            if (!(entry.permission & touched))
+                continue;
+            for (std::size_t i = 0; i < ids.size() && i < masks.size(); ++i)
+                if (ids[i] && (masks[i] & entry.permission))
+                    entry.roles.push_back(ids[i]);
+        }
     };
     Bits base = input.defaultRole;
     mark(base, "default_role");
@@ -58,9 +71,25 @@ Bits evaluate(const ResolveInput& input, Explanation* result)
         base |= role;
         mark(role, "member_roles");
     }
+    if (result) {
+        for (auto& entry : result->permissions) {
+            if ((input.defaultRole & entry.permission) && input.defaultRoleId)
+                entry.roles.push_back(input.defaultRoleId);
+        }
+        contributors(kAll, input.memberRoleIds, input.memberRoles);
+    }
     if (input.isOwner || (base & Administrator)) {
         base = kAll;
         mark(kAll, input.isOwner ? "owner" : "administrator");
+        if (result && !input.isOwner) {
+            for (auto& entry : result->permissions) {
+                if ((input.defaultRole & Administrator) && input.defaultRoleId)
+                    entry.roles.push_back(input.defaultRoleId);
+                for (std::size_t i = 0; i < input.memberRoleIds.size() && i < input.memberRoles.size(); ++i)
+                    if (input.memberRoles[i] & Administrator)
+                        entry.roles.push_back(input.memberRoleIds[i]);
+            }
+        }
     } else if (input.channelScope) {
         auto applyLayer = [&](Override o, std::string_view source) {
             base = apply(base, o);
@@ -68,12 +97,25 @@ Bits evaluate(const ResolveInput& input, Explanation* result)
         };
         for (const auto& layer : input.layers) {
             applyLayer(layer.defaultRole, layer.category ? "category_everyone" : "channel_everyone");
+            if (result && input.defaultRoleId)
+                for (auto& entry : result->permissions)
+                    if (entry.permission & (layer.defaultRole.allow | layer.defaultRole.deny))
+                        entry.roles.push_back(input.defaultRoleId);
             Override combined;
             for (const auto& o : layer.memberRoles) {
                 combined.allow |= o.allow;
                 combined.deny |= o.deny;
             }
             applyLayer(combined, layer.category ? "category_roles" : "channel_roles");
+            if (result)
+                for (auto& entry : result->permissions)
+                    for (std::size_t i = 0; i < layer.memberRoleIds.size() && i < layer.memberRoles.size(); ++i) {
+                        const auto& o = layer.memberRoles[i];
+                        const Bits winning = (combined.allow & entry.permission) ? o.allow : o.deny;
+                        if ((combined.allow | combined.deny) & entry.permission)
+                            if (winning & entry.permission)
+                                entry.roles.push_back(layer.memberRoleIds[i]);
+                    }
             applyLayer(layer.user, layer.category ? "category_user" : "channel_user");
         }
         if (!(base & ViewChannel)) {

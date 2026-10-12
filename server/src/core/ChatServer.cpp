@@ -585,6 +585,8 @@ proto::Channel ChatServer::toProto(const ChannelRecord& c, Id viewer) const
     proto::Channel p;
     p.set_id(c.id);
     p.set_server_id(c.serverId);
+    if (c.serverId)
+        p.set_placement_token(m_state.placementToken(c.serverId).toStdString());
     p.set_name(c.name.toStdString());
     p.set_type(static_cast<proto::ChannelType>(c.kind));
     p.set_parent_id(c.parentId);

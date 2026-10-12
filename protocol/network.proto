@@ -66,6 +66,7 @@ message Channel {
   string description = 10;             // longer channel details, empty by default
   uint64 icon_attachment_id = 11;
   uint64 banner_attachment_id = 12;
+  string placement_token = 13;
 }
 
 message Role {
@@ -494,6 +495,8 @@ message UpdateChannelRequest {
   bool check_placement = 24;
   uint64 expected_parent_id = 25;
   uint32 expected_position = 26;
+  string expected_placement_token = 27;
+  bool check_placement_list = 28;
 }
 // channel.duplicate.v1: configuration and explicit overrides only; no history,
 // recipients, voice occupants or category children. Omitted parent inherits source.
@@ -729,15 +732,31 @@ message AssignRoleRequest {
 message SetOverrideRequest { PermissionOverride override = 1; bool remove = 2; }
 message ListOverridesRequest { uint64 channel_id = 1; }
 message OverrideList { repeated PermissionOverride overrides = 1; }
-// Read-only, server-authoritative explanation. No role identity metadata is exposed.
-message PermissionPreviewRequest { uint64 channel_id = 1; uint64 user_id = 2; }
-message PermissionSource { uint64 permission = 1; bool allowed = 2; string source = 3; }
+// Read-only authoritative explanation; contributor identities require ManageRoles.
+message PermissionPreviewRequest {
+  uint64 channel_id = 1;
+  uint64 user_id = 2;
+  uint64 role_id = 3;
+  bool new_channel = 4;
+  uint64 server_id = 5;
+  uint64 parent_id = 6;
+  ChannelType channel_type = 7;
+}
+message PermissionContributor { uint64 id = 1; string name = 2; }
+message PermissionSource {
+  uint64 permission = 1; bool allowed = 2; string source = 3;
+  repeated PermissionContributor roles = 4;
+}
 message PermissionPreview {
   uint64 channel_id = 1;
   uint64 user_id = 2;
   uint64 effective_permissions = 3;
   repeated PermissionSource permissions = 4;
   bool can_preview_members = 5;
+  uint64 role_id = 6;
+  bool new_channel = 7;
+  uint64 server_id = 8;
+  uint64 parent_id = 9;
 }
 
 // ------------------------------------------------------------------ events

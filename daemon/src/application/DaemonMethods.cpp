@@ -1628,6 +1628,39 @@ void Daemon::registerMethods()
                 r.error(e::NotFound, QStringLiteral("channel no longer available"));
             });
     };
+    m[QStringLiteral("channel.placement.reload")] = [this, model](const QJsonObject& p, const Responder& r) {
+        if (!requireConnected(r))
+            return;
+        if (!m_conn->capabilities().contains(QStringLiteral("channel.placement.list.cas.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support placement list reload"));
+            return;
+        }
+        const Id cid = channelParam(p, r);
+        if (!cid)
+            return;
+        const auto originConnection = m_conn;
+        const auto originAccount = m_active;
+        const auto originGeneration = originConnection->linkGeneration();
+        m_conn->resync([this, model, cid, r, originConnection, originAccount, originGeneration](bool ok) {
+            if (m_conn != originConnection || m_active != originAccount
+                || originConnection->linkGeneration() != originGeneration) {
+                r.error(e::BadRequest, QStringLiteral("connection changed while reloading placement"));
+                return;
+            }
+            if (!ok) {
+                r.error(e::Internal, QStringLiteral("could not reload channel placement"));
+                return;
+            }
+            const auto* channel = model->channel(cid);
+            if (!channel
+                || !permissions::has(
+                    channel->effective_permissions(), permissions::ViewChannel | permissions::ManageChannel)) {
+                r.error(e::PermissionDenied, QStringLiteral("you cannot reload this channel placement"));
+                return;
+            }
+            r.ok(model->channelJson(*channel));
+        });
+    };
     m[QStringLiteral("channel.update")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
         if (!cid)
@@ -1701,6 +1734,15 @@ void Daemon::registerMethods()
                 r.error(e::BadRequest,
                     QStringLiteral("placement_original requires a parent_id string and an unsigned integer position"));
                 return;
+            }
+            if (m_conn->capabilities().contains(QStringLiteral("channel.placement.list.cas.v1"))) {
+                const auto token = original.value(QStringLiteral("placement_token"));
+                if (!token.isString() || token.toString().isEmpty() || token.toString().size() > 128) {
+                    r.error(e::BadRequest, QStringLiteral("placement_original requires the current placement_token"));
+                    return;
+                }
+                u->set_check_placement_list(true);
+                u->set_expected_placement_token(token.toString().toStdString());
             }
             u->set_check_placement(true);
             u->set_expected_parent_id(parent);
@@ -2652,12 +2694,58 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("this server does not support permission previews"));
             return;
         }
-        const Id cid = channelParam(p, r);
-        if (!cid)
+        const bool creation = p.value(QStringLiteral("new_channel")).toBool(false);
+        const bool roleOnly = p.contains(QStringLiteral("role"));
+        if ((creation && !m_conn->capabilities().contains(QStringLiteral("permission_preview_creation")))
+            || (roleOnly && !m_conn->capabilities().contains(QStringLiteral("permission_preview_roles")))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support this preview scope"));
             return;
+        }
+        if (roleOnly && p.contains(QStringLiteral("user"))) {
+            r.error(e::BadRequest, QStringLiteral("choose a member or a role"));
+            return;
+        }
         proto::Envelope env;
         auto* request = env.mutable_permission_preview_request();
-        request->set_channel_id(cid);
+        if (creation) {
+            const Id sid = serverParam(p, r);
+            if (!sid)
+                return;
+            request->set_new_channel(true);
+            request->set_server_id(sid);
+            if (p.contains(QStringLiteral("parent"))) {
+                bool ok = false;
+                const auto parent = p.value(QStringLiteral("parent"));
+                const Id pid = parent.isString() ? parent.toString().toULongLong(&ok) : 0;
+                if (!ok) {
+                    r.error(e::BadRequest, QStringLiteral("parent must be a decimal category ID string"));
+                    return;
+                }
+                request->set_parent_id(pid);
+            }
+            const auto type = p.value(QStringLiteral("type")).toString(QStringLiteral("text"));
+            if (type != QStringLiteral("text") && type != QStringLiteral("voice")
+                && type != QStringLiteral("category")) {
+                r.error(e::BadRequest, QStringLiteral("type must be text, voice or category"));
+                return;
+            }
+            request->set_channel_type(type == QStringLiteral("voice") ? proto::CHANNEL_TYPE_VOICE
+                    : type == QStringLiteral("category")              ? proto::CHANNEL_TYPE_CATEGORY
+                                                                      : proto::CHANNEL_TYPE_TEXT);
+        } else {
+            const Id cid = channelParam(p, r);
+            if (!cid)
+                return;
+            request->set_channel_id(cid);
+        }
+        if (roleOnly) {
+            const Id roleId = idFromJson(p.value(QStringLiteral("role")));
+            if (!roleId) {
+                r.error(e::BadRequest, QStringLiteral("role must be a nonzero decimal role ID"));
+                return;
+            }
+            request->set_role_id(roleId);
+        }
         if (p.contains(QStringLiteral("user"))) {
             // Self is stored separately from the cached peer directory. Numeric
             // IDs are validated by the authoritative server, including absent peers.
@@ -2674,11 +2762,17 @@ void Daemon::registerMethods()
                 effective.append(QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size())));
             for (const auto& entry : preview.permissions()) {
                 const auto name = permissions::name(entry.permission());
-                entries.append(
-                    QJsonObject{{"name", QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size()))},
-                        {"allowed", entry.allowed()}, {"source", QString::fromStdString(entry.source())}});
+                QJsonArray roles;
+                for (const auto& role : entry.roles())
+                    roles.append(
+                        QJsonObject{{"id", idString(role.id())}, {"name", QString::fromStdString(role.name())}});
+                entries.append(QJsonObject{{"roles", roles},
+                    {"name", QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size()))},
+                    {"allowed", entry.allowed()}, {"source", QString::fromStdString(entry.source())}});
             }
             return QJsonObject{{"channel_id", idString(preview.channel_id())}, {"user_id", idString(preview.user_id())},
+                {"server_id", idString(preview.server_id())}, {"parent_id", idString(preview.parent_id())},
+                {"role_id", idString(preview.role_id())}, {"new_channel", preview.new_channel()},
                 {"effective_permissions", effective}, {"permissions", entries},
                 {"can_preview_members", preview.can_preview_members()}};
         });

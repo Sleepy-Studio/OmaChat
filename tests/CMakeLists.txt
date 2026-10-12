@@ -82,6 +82,7 @@ add_executable(omachat_integration_tests
     integration/test_permission_preview.cpp
     integration/test_channel_duplicate.cpp
     integration/test_channel_conflicts.cpp
+    integration/test_placement_revision.cpp
     integration/test_send_recovery_daemon.cpp
 )
 omachat_set_warnings(omachat_integration_tests)

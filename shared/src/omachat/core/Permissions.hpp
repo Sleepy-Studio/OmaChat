@@ -56,6 +56,8 @@ struct ResolveInput {
     bool isOwner = false;
     Bits defaultRole = 0; // the implicit "everyone" role
     std::span<const Bits> memberRoles; // roles explicitly assigned
+    std::uint64_t defaultRoleId = 0;
+    std::span<const std::uint64_t> memberRoleIds; // optional identities aligned with memberRoles
 
     // Channel scope. Leave empty to compute server-level permissions.
     // Each layer is applied in order: category first, then the channel.
@@ -63,6 +65,7 @@ struct ResolveInput {
         bool category = false; // labels inherited layers in explanations
         Override defaultRole; // override targeting the default role
         std::vector<Override> memberRoles; // overrides targeting the member's roles
+        std::vector<std::uint64_t> memberRoleIds;
         Override user; // override targeting this user
     };
     std::span<const Layer> layers;
@@ -82,6 +85,7 @@ struct PermissionSource {
     Bits permission = 0;
     bool allowed = false;
     std::string_view source;
+    std::vector<std::uint64_t> roles;
 };
 struct Explanation {
     Bits effective = 0;

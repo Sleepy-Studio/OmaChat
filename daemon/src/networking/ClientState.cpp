@@ -451,6 +451,7 @@ QJsonObject ClientState::channelJson(const proto::Channel& c) const
     return {{"id", idString(c.id())}, {"server_id", idString(c.server_id())}, {"name", name},
         {"type", channelTypeName(c.type())}, {"parent_id", idString(c.parent_id())},
         {"position", static_cast<int>(c.position())}, {"topic", QString::fromStdString(c.topic())},
+        {"placement_token", QString::fromStdString(c.placement_token())},
         {"description", QString::fromStdString(c.description())},
         {"icon_attachment_id", idString(c.icon_attachment_id())},
         {"banner_attachment_id", idString(c.banner_attachment_id())}, {"permissions", effective},

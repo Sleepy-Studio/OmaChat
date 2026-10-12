@@ -1,5 +1,6 @@
 #include "core/State.hpp"
 
+#include <QUuid>
 #include <algorithm>
 
 namespace omachat::server {
@@ -15,6 +16,10 @@ void State::load(std::vector<UserRecord> users, std::vector<ServerRecord> server
     }
     for (auto& s : servers)
         putServer(std::move(s));
+    for (const auto& [id, record] : m_servers) {
+        (void)record;
+        m_placementTokens[id] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
     for (auto& c : channels)
         m_channels.emplace(c.id, std::move(c));
     for (auto& o : overrides)
@@ -157,6 +162,8 @@ void State::putServer(ServerRecord s)
     }
     const Id id = s.id;
     m_servers[id] = std::move(s);
+    if (!m_placementTokens.contains(id))
+        m_placementTokens[id] = QUuid::createUuid().toString(QUuid::WithoutBraces);
     invalidatePermissions();
 }
 
@@ -172,11 +179,26 @@ void State::removeServer(Id id)
     for (const auto& [rid, r] : it->second.roles)
         m_roleServer.erase(rid);
     m_servers.erase(it);
+    m_placementTokens.erase(id);
     invalidatePermissions();
+}
+
+QString State::placementToken(Id serverId) const
+{
+    const auto it = m_placementTokens.find(serverId);
+    return it == m_placementTokens.end() ? QString{} : it->second;
 }
 
 void State::putChannel(ChannelRecord c)
 {
+    const auto* old = channel(c.id);
+    if (!old || old->serverId != c.serverId || old->parentId != c.parentId || old->position != c.position
+        || old->kind != c.kind) {
+        if (old && old->serverId && old->serverId != c.serverId && server(old->serverId))
+            m_placementTokens[old->serverId] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (c.serverId && server(c.serverId))
+            m_placementTokens[c.serverId] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    }
     if (c.serverId) {
         if (ServerRecord* s = server(c.serverId))
             s->channels.insert(c.id);
@@ -192,6 +214,7 @@ void State::removeChannel(Id id)
     if (it == m_channels.end())
         return;
     if (ServerRecord* s = server(it->second.serverId)) {
+        m_placementTokens[s->id] = QUuid::createUuid().toString(QUuid::WithoutBraces);
         s->channels.erase(id);
         // Children of a deleted category become top-level.
         for (Id cid : s->channels) {
@@ -364,53 +387,85 @@ Bits State::evaluateChannelPermissions(Id channelId, Id userId, Explanation* exp
         if (std::ranges::find(c->recipients, userId) != c->recipients.end())
             result = ViewChannel | SendMessages | ReadHistory | AddReactions | AttachFiles;
     } else if (c) {
-        const ServerRecord* s = server(c->serverId);
-        const MemberRecord* m = member(c->serverId, userId);
-        if (s && m) {
-            std::vector<Bits> roles;
-            for (Id rid : m->roles) {
-                auto rit = s->roles.find(rid);
-                if (rit != s->roles.end())
-                    roles.push_back(rit->second.permissions);
-            }
-            Bits defaults = 0;
-            if (auto dit = s->roles.find(s->defaultRoleId); dit != s->roles.end())
-                defaults = dit->second.permissions;
+        result = evaluateGuildPermissions(*c, userId, 0, explanation);
+    }
+    return result;
+}
 
-            auto buildLayer = [&](Id cid) {
-                ResolveInput::Layer layer;
-                for (const OverrideRecord& o : overridesFor(cid)) {
-                    const Override ov{o.allow, o.deny};
-                    if (o.targetType == 1) {
-                        if (o.targetId == userId)
-                            layer.user = ov;
-                    } else if (o.targetId == s->defaultRoleId) {
-                        layer.defaultRole = ov;
-                    } else if (m->roles.contains(o.targetId)) {
-                        layer.memberRoles.push_back(ov);
-                    }
+Explanation State::permissionPreview(Id serverId, Id channelId, Id parentId, Id userId, Id roleId) const
+{
+    ChannelRecord hypothetical;
+    hypothetical.serverId = serverId;
+    hypothetical.parentId = parentId;
+    const auto* c = channelId ? channel(channelId) : &hypothetical;
+    Explanation result;
+    if (c)
+        evaluateGuildPermissions(*c, userId, roleId, &result);
+    return result;
+}
+
+Bits State::evaluateGuildPermissions(const ChannelRecord& record, Id userId, Id roleId, Explanation* explanation) const
+{
+    const auto* c = &record;
+    Bits result = 0;
+    const ServerRecord* s = server(c->serverId);
+    const MemberRecord* m = member(c->serverId, userId);
+    if (s && (m || roleId)) {
+        std::vector<Bits> roles;
+        std::vector<Id> roleIds;
+        std::set<Id> selectedRoles;
+        if (roleId) {
+            if (roleId != s->defaultRoleId)
+                selectedRoles.insert(roleId);
+        } else if (m)
+            selectedRoles = m->roles;
+        for (Id rid : selectedRoles) {
+            auto rit = s->roles.find(rid);
+            if (rit != s->roles.end()) {
+                roles.push_back(rit->second.permissions);
+                roleIds.push_back(rid);
+            }
+        }
+        Bits defaults = 0;
+        if (auto dit = s->roles.find(s->defaultRoleId); dit != s->roles.end())
+            defaults = dit->second.permissions;
+
+        auto buildLayer = [&](Id cid) {
+            ResolveInput::Layer layer;
+            for (const OverrideRecord& o : overridesFor(cid)) {
+                const Override ov{o.allow, o.deny};
+                if (o.targetType == 1) {
+                    if (userId && o.targetId == userId)
+                        layer.user = ov;
+                } else if (o.targetId == s->defaultRoleId) {
+                    layer.defaultRole = ov;
+                } else if (selectedRoles.contains(o.targetId)) {
+                    layer.memberRoles.push_back(ov);
+                    layer.memberRoleIds.push_back(o.targetId);
                 }
-                return layer;
-            };
-            std::vector<ResolveInput::Layer> layers;
-            if (c->parentId) {
-                layers.push_back(buildLayer(c->parentId));
-                layers.back().category = true;
             }
-            layers.push_back(buildLayer(c->id));
+            return layer;
+        };
+        std::vector<ResolveInput::Layer> layers;
+        if (c->parentId) {
+            layers.push_back(buildLayer(c->parentId));
+            layers.back().category = true;
+        }
+        layers.push_back(buildLayer(c->id));
 
-            ResolveInput in;
-            in.isOwner = s->ownerId == userId;
-            in.defaultRole = defaults;
-            in.memberRoles = roles;
-            in.layers = layers;
-            in.channelScope = true;
-            if (explanation) {
-                *explanation = explain(in);
-                result = explanation->effective;
-            } else {
-                result = resolve(in);
-            }
+        ResolveInput in;
+        in.isOwner = userId && s->ownerId == userId;
+        in.defaultRole = defaults;
+        in.defaultRoleId = s->defaultRoleId;
+        in.memberRoles = roles;
+        in.memberRoleIds = roleIds;
+        in.layers = layers;
+        in.channelScope = true;
+        if (explanation) {
+            *explanation = explain(in);
+            result = explanation->effective;
+        } else {
+            result = resolve(in);
         }
     }
     return result;

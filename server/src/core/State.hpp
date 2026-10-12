@@ -61,6 +61,7 @@ public:
     permissions::Bits serverPermissions(Id serverId, Id userId) const;
     permissions::Bits channelPermissions(Id channelId, Id userId) const;
     permissions::Explanation channelPermissionExplanation(Id channelId, Id userId) const;
+    permissions::Explanation permissionPreview(Id serverId, Id channelId, Id parentId, Id userId, Id roleId) const;
     bool can(Id channelId, Id userId, permissions::Bits required) const;
     bool canInServer(Id serverId, Id userId, permissions::Bits required) const;
 
@@ -70,13 +71,18 @@ public:
     // Users that may observe events in this channel (VIEW_CHANNEL or DM recipient).
     std::vector<Id> channelAudience(Id channelId) const;
 
+    QString placementToken(Id serverId) const;
+
     void invalidatePermissions() const { m_permCache.clear(); }
 
 private:
     permissions::Bits evaluateChannelPermissions(Id channelId, Id userId, permissions::Explanation* explanation) const;
+    permissions::Bits evaluateGuildPermissions(
+        const ChannelRecord& channel, Id userId, Id roleId, permissions::Explanation* explanation) const;
     std::map<Id, UserRecord> m_users;
     std::map<QString, Id> m_usernames;
     std::map<Id, ServerRecord> m_servers;
+    std::map<Id, QString> m_placementTokens;
     std::map<Id, ChannelRecord> m_channels;
     std::map<Id, Id> m_roleServer; // role id -> server id
     std::map<Id, std::vector<OverrideRecord>> m_overrides;
