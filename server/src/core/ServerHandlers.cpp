@@ -699,6 +699,7 @@ void ChatServer::handleCreateChannel(Session& s, std::uint64_t rid, const proto:
     proto::Event e;
     *e.mutable_channel_create() = toProto(c, 0);
     publish(e, m_state.channelAudience(c.id));
+    publishPermissionsChanged(c.serverId);
 
     proto::Envelope env;
     *env.mutable_channel() = toProto(c, s.userId);
@@ -782,6 +783,7 @@ void ChatServer::handleDuplicateChannel(Session& s, std::uint64_t rid, const pro
     proto::Event event;
     *event.mutable_channel_create() = toProto(copy, 0);
     publish(event, m_state.channelAudience(copy.id));
+    publishPermissionsChanged(copy.serverId);
     proto::Envelope env;
     *env.mutable_channel() = toProto(copy, s.userId);
     reply(s, rid, std::move(env));
@@ -1119,6 +1121,7 @@ void ChatServer::handleDeleteChannel(Session& s, std::uint64_t rid, const proto:
     d->set_channel_id(channelId);
     d->set_server_id(serverId);
     publish(e, audience);
+    publishPermissionsChanged(serverId);
     replyOk(s, rid);
 }
 
