@@ -3,6 +3,7 @@
 
 #include "application/Daemon.hpp"
 #include "networking/OAuthLoginFlow.hpp"
+#include <cmath>
 
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Paths.hpp"
@@ -1426,6 +1427,31 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("kind must be icon or banner"));
             return;
         }
+        proto::ArtworkFraming framing;
+        if (p.contains(QStringLiteral("framing"))) {
+            if (!m_conn->capabilities().contains(QStringLiteral("artwork.framing.v1"))) {
+                r.error(e::BadRequest, QStringLiteral("this server does not support shared artwork framing"));
+                return;
+            }
+            const auto f = p.value(QStringLiteral("framing")).toObject();
+            const QStringList fields{QStringLiteral("source_width"), QStringLiteral("source_height"),
+                QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")};
+            for (const auto& field : fields) {
+                const auto value = f.value(field);
+                const double number = value.toDouble(-1);
+                if (!value.isDouble() || number < 0 || number > 8192 || number != std::floor(number)) {
+                    r.error(e::BadRequest, QStringLiteral("invalid artwork framing coordinates"));
+                    return;
+                }
+            }
+            framing.set_kind(kind == u"icon" ? proto::ArtworkFraming::ICON : proto::ArtworkFraming::BANNER);
+            framing.set_source_width(static_cast<uint32_t>(f.value("source_width").toInt()));
+            framing.set_source_height(static_cast<uint32_t>(f.value("source_height").toInt()));
+            framing.set_x(static_cast<uint32_t>(f.value("x").toInt()));
+            framing.set_y(static_cast<uint32_t>(f.value("y").toInt()));
+            framing.set_width(static_cast<uint32_t>(f.value("width").toInt()));
+            framing.set_height(static_cast<uint32_t>(f.value("height").toInt()));
+        }
         const QString path = p.value(QStringLiteral("file")).toString();
         if (path.isEmpty()) {
             proto::Envelope env;
@@ -1473,7 +1499,7 @@ void Daemon::registerMethods()
                 forward(std::move(env), r,
                     [model](const proto::Envelope& reply) { return model->serverJson(reply.server()); });
             },
-            true);
+            true, framing);
     };
     m[QStringLiteral("invite.create")] = [this](const QJsonObject& p, const Responder& r) {
         const Id sid = serverParam(p, r);
@@ -1830,6 +1856,31 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("kind must be icon or banner"));
             return;
         }
+        proto::ArtworkFraming framing;
+        if (p.contains(QStringLiteral("framing"))) {
+            if (!m_conn->capabilities().contains(QStringLiteral("artwork.framing.v1"))) {
+                r.error(e::BadRequest, QStringLiteral("this server does not support shared artwork framing"));
+                return;
+            }
+            const auto f = p.value(QStringLiteral("framing")).toObject();
+            const QStringList fields{QStringLiteral("source_width"), QStringLiteral("source_height"),
+                QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")};
+            for (const auto& field : fields) {
+                const auto value = f.value(field);
+                const double number = value.toDouble(-1);
+                if (!value.isDouble() || number < 0 || number > 8192 || number != std::floor(number)) {
+                    r.error(e::BadRequest, QStringLiteral("invalid artwork framing coordinates"));
+                    return;
+                }
+            }
+            framing.set_kind(kind == u"icon" ? proto::ArtworkFraming::ICON : proto::ArtworkFraming::BANNER);
+            framing.set_source_width(static_cast<uint32_t>(f.value("source_width").toInt()));
+            framing.set_source_height(static_cast<uint32_t>(f.value("source_height").toInt()));
+            framing.set_x(static_cast<uint32_t>(f.value("x").toInt()));
+            framing.set_y(static_cast<uint32_t>(f.value("y").toInt()));
+            framing.set_width(static_cast<uint32_t>(f.value("width").toInt()));
+            framing.set_height(static_cast<uint32_t>(f.value("height").toInt()));
+        }
         const QString path = p.value(QStringLiteral("file")).toString();
         if (path.isEmpty()) {
             proto::Envelope env;
@@ -1865,7 +1916,7 @@ void Daemon::registerMethods()
                 forward(std::move(env), r,
                     [model](const proto::Envelope& reply) { return model->channelJson(reply.channel()); });
             },
-            true);
+            true, framing);
     };
     m[QStringLiteral("channel.delete")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
@@ -2194,23 +2245,41 @@ void Daemon::registerMethods()
             r.error(e::BadRequest, QStringLiteral("attachment id required"));
             return;
         }
+        const QString variantName = p.value(QStringLiteral("artwork_variant")).toString();
+        if ((!variantName.isEmpty() && variantName != u"full" && variantName != u"small" && variantName != u"source")
+            || (p.contains(QStringLiteral("artwork_variant"))
+                && !p.value(QStringLiteral("artwork_variant")).isString())) {
+            r.error(e::BadRequest, QStringLiteral("artwork_variant must be full, small or source"));
+            return;
+        }
+        const auto variant = variantName == u"small" ? proto::DownloadRequest::SMALL
+            : variantName == u"source"               ? proto::DownloadRequest::SOURCE
+                                                     : proto::DownloadRequest::FULL;
+        if (variant != proto::DownloadRequest::FULL
+            && !m_conn->capabilities().contains(QStringLiteral("artwork.framing.v1"))) {
+            r.error(e::BadRequest, QStringLiteral("this server does not support artwork variants"));
+            return;
+        }
+        QString filename = p.value(QStringLiteral("filename")).toString();
+        if (variant != proto::DownloadRequest::FULL && p.value(QStringLiteral("to")).toString() == u"cache")
+            filename = variantName + u'-' + filename;
         QString error;
-        const QString dest = downloadDestination(aid, p.value(QStringLiteral("filename")).toString(),
-            p.value(QStringLiteral("to")).toString(QStringLiteral("downloads")), &error);
+        const QString dest = downloadDestination(
+            aid, filename, p.value(QStringLiteral("to")).toString(QStringLiteral("downloads")), &error);
         if (dest.isEmpty()) {
             r.error(e::StorageError, error);
             return;
         }
         // Cached copies are reused; attachments never change once sent.
         const auto size = p.value(QStringLiteral("size")).toDouble(-1);
-        if (p.value(QStringLiteral("to")).toString() == u"cache" && size > 0
+        if (variant == proto::DownloadRequest::FULL && p.value(QStringLiteral("to")).toString() == u"cache" && size > 0
             && QFileInfo(dest).size() == qint64(size)) {
             r.ok({{"path", dest}, {"cached", true}});
             return;
         }
         if (!requireConnected(r))
             return;
-        if (const auto file = m_e2e->fileFor(aid)) {
+        if (const auto file = m_e2e->fileFor(aid); file && variant == proto::DownloadRequest::FULL) {
             // End-to-end encrypted: fetch the ciphertext, then decrypt it in place.
             const QString sealed = dest + QStringLiteral(".encrypted");
             const QByteArray key = QByteArray::fromStdString(file->key());
@@ -2229,12 +2298,25 @@ void Daemon::registerMethods()
             });
             return;
         }
-        m_transfers->download(aid, dest, [r](const FileTransfers::Result& res) {
-            if (res.ok)
-                r.ok({{"path", res.path}, {"cached", false}});
-            else
-                r.error(res.code, res.message);
-        });
+        m_transfers->download(
+            aid, dest,
+            [r](const FileTransfers::Result& res) {
+                if (!res.ok) {
+                    r.error(res.code, res.message);
+                    return;
+                }
+                QJsonObject result{{"path", res.path}, {"cached", false}};
+                if (res.attachment.has_artwork_framing()) {
+                    const auto& f = res.attachment.artwork_framing();
+                    result.insert(QStringLiteral("framing"),
+                        QJsonObject{{"kind", f.kind() == proto::ArtworkFraming::ICON ? "icon" : "banner"},
+                            {"source_width", int(f.source_width())}, {"source_height", int(f.source_height())},
+                            {"x", int(f.x())}, {"y", int(f.y())}, {"width", int(f.width())},
+                            {"height", int(f.height())}});
+                }
+                r.ok(result);
+            },
+            variant);
     };
     m[QStringLiteral("transfer.list")]
         = [this](const QJsonObject&, const Responder& r) { r.ok({{"transfers", m_transfers->activeJson()}}); };

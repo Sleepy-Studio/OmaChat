@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 14);
+    EXPECT_EQ(store.schemaVersion(), 15);
     const QString instance = store.instanceId();
     EXPECT_FALSE(instance.isEmpty());
     EXPECT_EQ(store.instanceId(), instance);
@@ -87,7 +87,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 14);
+    EXPECT_EQ(store.schemaVersion(), 15);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 
@@ -393,4 +393,199 @@ TEST(ServerStore, LoginSessionPagesAndScopedRevocationPersist)
     EXPECT_FALSE(reopened.sessionActive(205, 1, 100));
     EXPECT_FALSE(reopened.sessionByDigest(QByteArray("205")));
     EXPECT_TRUE(reopened.sessionActive(207, 2, 100));
+}
+
+TEST(ServerStore, VersionFourteenArtworkMigratesWithoutChangingReferences)
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("artwork.db");
+    {
+        server::Store store;
+        QString error;
+        ASSERT_TRUE(store.open(path, &error));
+        ASSERT_TRUE(store.insertUser({1, "owner", "Owner", {}, {}, 0}));
+        server::ServerRecord community;
+        community.id = 10;
+        community.name = "Artwork";
+        community.ownerId = 1;
+        ASSERT_TRUE(store.insertServer(community, 0));
+        server::ChannelRecord channel;
+        channel.id = 20;
+        channel.serverId = 10;
+        channel.name = "Images";
+        ASSERT_TRUE(store.insertChannel(channel, 0));
+        server::AttachmentRecord attachment;
+        attachment.id = 30;
+        attachment.channelId = 20;
+        attachment.uploaderId = 1;
+        attachment.filename = "icon.png";
+        attachment.mimeType = "image/png";
+        attachment.size = 20;
+        attachment.sha256 = QByteArray(32, 'a');
+        attachment.artwork = true;
+        ASSERT_TRUE(store.insertAttachment(attachment));
+        channel.iconAttachmentId = 30;
+        ASSERT_TRUE(store.updateChannel(channel));
+        ASSERT_TRUE(store.insertEmoji({40, 10, "kept", 30, 1, 0}));
+    }
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", "artwork-v14-fixture");
+        db.setDatabaseName(path);
+        ASSERT_TRUE(db.open());
+        QSqlQuery query(db);
+        // Recreate the actual v14 CASCADE schema, with a dependent emoji row.
+        ASSERT_TRUE(query.exec(R"(CREATE TABLE attachments_old(
+            id INTEGER PRIMARY KEY,
+            channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+            uploader_id INTEGER NOT NULL,
+            message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+            filename TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL,
+            sha256 BLOB NOT NULL, created_at INTEGER NOT NULL, artwork INTEGER NOT NULL DEFAULT 0))"));
+        ASSERT_TRUE(query.exec("INSERT INTO attachments_old SELECT id, channel_id, uploader_id, message_id, "
+                               "filename, mime_type, size, sha256, created_at, artwork FROM attachments"));
+        ASSERT_TRUE(query.exec("DROP TABLE attachments"));
+        ASSERT_TRUE(query.exec("ALTER TABLE attachments_old RENAME TO attachments"));
+        ASSERT_TRUE(query.exec("CREATE INDEX attachments_by_message ON attachments(message_id)"));
+        ASSERT_TRUE(
+            query.exec("CREATE INDEX attachments_pending ON attachments(uploader_id) WHERE message_id IS NULL"));
+        ASSERT_TRUE(query.exec("PRAGMA user_version=14"));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase("artwork-v14-fixture");
+    server::Store migrated;
+    QString error;
+    ASSERT_TRUE(migrated.open(path, &error)) << error.toStdString();
+    EXPECT_EQ(migrated.schemaVersion(), 15);
+    ASSERT_TRUE(migrated.attachment(30));
+    EXPECT_TRUE(migrated.attachment(30)->artworkFraming.isEmpty());
+    EXPECT_EQ(migrated.artworkChannel(30), 20u);
+    ASSERT_TRUE(migrated.emoji(40));
+    EXPECT_EQ(migrated.emoji(40)->attachmentId, 30u);
+    EXPECT_EQ(migrated.emojiFor(10).size(), 1u);
+    auto second = *migrated.attachment(30);
+    second.id = 31;
+    second.artworkFraming = QByteArray("immutable-framing");
+    ASSERT_TRUE(migrated.insertAttachment(second));
+    EXPECT_EQ(migrated.attachment(31)->artworkFraming, second.artworkFraming);
+}
+
+TEST(ServerStore, ServerArtworkOutlivesAllChannelsAndOrphansAreReclaimed)
+{
+    QTemporaryDir dir;
+    server::Store store;
+    QString error;
+    ASSERT_TRUE(store.open(dir.filePath("lifetime.db"), &error)) << error.toStdString();
+    ASSERT_TRUE(store.insertUser({1, "owner", "Owner", {}, {}, 0}));
+    server::ServerRecord community;
+    community.id = 10;
+    community.name = "Artwork";
+    community.ownerId = 1;
+    ASSERT_TRUE(store.insertServer(community, 0));
+    server::ChannelRecord carrier;
+    carrier.id = 20;
+    carrier.serverId = 10;
+    carrier.name = "Carrier";
+    ASSERT_TRUE(store.insertChannel(carrier, 0));
+    auto last = carrier;
+    last.id = 21;
+    ASSERT_TRUE(store.insertChannel(last, 0));
+    server::AttachmentRecord asset;
+    asset.channelId = 20;
+    asset.uploaderId = 1;
+    asset.filename = "image.png";
+    asset.mimeType = "image/png";
+    asset.sha256 = QByteArray(32, 'a');
+    asset.artwork = true;
+    asset.artworkFraming = "framing";
+    for (server::Id id : {30u, 31u, 32u, 33u}) {
+        asset.id = id;
+        ASSERT_TRUE(store.insertAttachment(asset));
+    }
+    community.iconAttachmentId = 30;
+    community.bannerAttachmentId = 31;
+    ASSERT_TRUE(store.updateServer(community));
+    carrier.iconAttachmentId = 32;
+    ASSERT_TRUE(store.updateChannel(carrier));
+    ASSERT_TRUE(store.insertEmoji({40, 10, "kept", 33, 1, 0}));
+    // Pending ordinary uploads still disappear with their upload channel.
+    asset.id = 34;
+    asset.artwork = false;
+    ASSERT_TRUE(store.insertAttachment(asset));
+    EXPECT_EQ(store.pendingAttachmentCount(1), 1);
+    // Attached message files still follow the message's CASCADE lifetime.
+    asset.id = 35;
+    ASSERT_TRUE(store.insertAttachment(asset));
+    server::MessageRecord message{60, 20, 1, "message", 0, 0, false, {}, {*store.attachment(35)}, {}};
+    ASSERT_TRUE(store.insertMessage(message));
+    ASSERT_TRUE(store.deleteMessage(60));
+    EXPECT_FALSE(store.attachment(35));
+    ASSERT_TRUE(store.deleteChannel(20));
+    EXPECT_FALSE(store.attachment(34));
+    EXPECT_FALSE(store.attachment(32));
+    for (server::Id id : {30u, 31u, 33u}) {
+        ASSERT_TRUE(store.attachment(id));
+        EXPECT_EQ(store.attachment(id)->channelId, 0u);
+        EXPECT_EQ(store.attachment(id)->artworkFraming, QByteArray("framing"));
+    }
+    ASSERT_TRUE(store.deleteChannel(21));
+    EXPECT_TRUE(store.attachment(30));
+    EXPECT_TRUE(store.attachment(31));
+    EXPECT_EQ(store.artworkServer(30), 10u);
+    EXPECT_TRUE(store.purgePendingAttachments(100).empty());
+    ASSERT_TRUE(store.deleteServer(10));
+    EXPECT_TRUE(store.allAttachmentIds().empty());
+    EXPECT_FALSE(store.emoji(40));
+    // Enforcement was restored after the rebuild migration.
+    asset.id = 50;
+    asset.channelId = 999;
+    EXPECT_FALSE(store.insertAttachment(asset));
+}
+
+TEST(ServerStore, FailedArtworkMigrationRollsBackAndRestoresForeignKeys)
+{
+    QTemporaryDir dir;
+    const auto path = dir.filePath("broken-artwork.db");
+    {
+        server::Store seed;
+        QString error;
+        ASSERT_TRUE(seed.open(path, &error));
+        ASSERT_TRUE(seed.insertUser({1, "owner", "Owner", {}, {}, 0}));
+        server::ServerRecord community;
+        community.id = 10;
+        community.name = "Artwork";
+        community.ownerId = 1;
+        ASSERT_TRUE(seed.insertServer(community, 0));
+    }
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", "broken-artwork-fixture");
+        db.setDatabaseName(path);
+        ASSERT_TRUE(db.open());
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec("ALTER TABLE attachments DROP COLUMN artwork_framing"));
+        ASSERT_TRUE(query.exec("INSERT INTO emoji VALUES(40, 10, 'broken', 999, 1, 0)"));
+        ASSERT_TRUE(query.exec("PRAGMA user_version=14"));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase("broken-artwork-fixture");
+    const auto existingConnections = QSqlDatabase::connectionNames();
+    server::Store migrated;
+    QString error;
+    EXPECT_FALSE(migrated.open(path, &error));
+    EXPECT_TRUE(error.contains("foreign key check"));
+    EXPECT_EQ(migrated.schemaVersion(), 14);
+    for (const auto& name : QSqlDatabase::connectionNames()) {
+        if (existingConnections.contains(name))
+            continue;
+        const auto db = QSqlDatabase::database(name);
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec("PRAGMA foreign_keys"));
+        ASSERT_TRUE(query.next());
+        EXPECT_EQ(query.value(0).toInt(), 1);
+        ASSERT_TRUE(query.exec("SELECT COUNT(*) FROM emoji WHERE id=40"));
+        ASSERT_TRUE(query.next());
+        EXPECT_EQ(query.value(0).toInt(), 1);
+        ASSERT_TRUE(query.exec("SELECT COUNT(*) FROM sqlite_master WHERE name='attachments_v15'"));
+        ASSERT_TRUE(query.next());
+        EXPECT_EQ(query.value(0).toInt(), 0);
+    }
 }

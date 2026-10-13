@@ -167,6 +167,7 @@ public:
 private:
     bool exec(const QString& sql, const std::vector<QVariant>& binds = {});
     bool migrate(QString* error);
+    bool reclaimDetachedAttachments();
 
     QString m_connectionName;
     QSqlDatabase m_db;

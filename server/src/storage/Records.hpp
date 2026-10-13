@@ -149,6 +149,7 @@ struct AttachmentRecord {
     QByteArray sha256;
     std::int64_t createdAt = 0;
     bool artwork = false;
+    QByteArray artworkFraming; // immutable validated protobuf; empty for legacy assets
 };
 
 struct MessageRecord {

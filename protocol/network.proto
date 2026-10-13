@@ -86,12 +86,27 @@ message Member {
   int64 joined_at = 4;      // unix ms
 }
 
+// Immutable framing of a metadata-free, oriented source raster. Coordinates
+// are source pixels, not UI crop-travel fractions. The focal point is the
+// normalized centre of this rectangle. Capability: artwork.framing.v1.
+message ArtworkFraming {
+  enum Kind { NONE = 0; ICON = 1; BANNER = 2; }
+  Kind kind = 1;
+  uint32 source_width = 2;
+  uint32 source_height = 3;
+  uint32 x = 4;
+  uint32 y = 5;
+  uint32 width = 6;
+  uint32 height = 7;
+}
+
 message Attachment {
   uint64 id = 1;
   string filename = 2;
   string mime_type = 3;
   uint64 size = 4;
   bytes sha256 = 5;          // digest of the stored bytes
+  ArtworkFraming artwork_framing = 6;
 }
 
 message Reaction {
@@ -642,6 +657,7 @@ message BeginUploadRequest {
   string mime_type = 3;
   uint64 size = 4;
   bool channel_artwork = 5;            // ManageChannel; also permits voice/category uploads
+  ArtworkFraming artwork_framing = 6; // source raster upload; absent keeps legacy normalization
 }
 message UploadTicket {
   uint64 attachment_id = 1;
@@ -663,12 +679,15 @@ message DownloadRequest {
   uint64 attachment_id = 1;
   uint64 offset = 2;
   uint32 length = 3;              // clamped to the server chunk size
+  enum ArtworkVariant { FULL = 0; SMALL = 1; SOURCE = 2; }
+  ArtworkVariant artwork_variant = 4; // SOURCE is manager-only; SMALL falls back for legacy assets
 }
 message FileChunk {
   uint64 attachment_id = 1;
   uint64 offset = 2;
   bytes data = 3;
   uint64 total_size = 4;
+  ArtworkFraming artwork_framing = 5;
 }
 
 message TypingRequest { uint64 channel_id = 1; }

@@ -98,6 +98,7 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("profile.v1");
     r->add_capabilities("discord.import");
     r->add_capabilities("channel.identity.v1");
+    r->add_capabilities("artwork.framing.v1");
     r->add_capabilities("channel.placement.v1");
     r->add_capabilities("channel.details.cas.v1");
     r->add_capabilities("channel.duplicate.v1");

@@ -429,7 +429,7 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
     // Server artwork reuses the channel upload pipeline: the attachment is
     // uploaded with channel_artwork=true against any channel of this server,
     // then referenced here. This keeps image normalization in one place.
-    const auto applyArtwork = [&](Id assetId, Id& destination) {
+    const auto applyArtwork = [&](Id assetId, Id& destination, proto::ArtworkFraming::Kind kind) {
         if (assetId == destination)
             return true;
         if (!assetId) {
@@ -443,6 +443,11 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
         const ChannelRecord* carrier = m_state.channel(asset->channelId);
         if (!carrier || carrier->serverId != srv->id)
             return false;
+        if (!asset->artworkFraming.isEmpty()) {
+            proto::ArtworkFraming framing;
+            if (!framing.ParseFromString(asset->artworkFraming.toStdString()) || framing.kind() != kind)
+                return false;
+        }
         QImageReader reader(attachmentPath(assetId));
         reader.setDecideFormatFromContent(true);
         const QByteArray format = reader.format().toLower();
@@ -454,11 +459,12 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
         destination = assetId;
         return true;
     };
-    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId)) {
+    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId, proto::ArtworkFraming::ICON)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid server icon image"));
         return;
     }
-    if (m.set_banner() && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId)) {
+    if (m.set_banner()
+        && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId, proto::ArtworkFraming::BANNER)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid server banner image"));
         return;
     }
@@ -884,7 +890,7 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         }
         updated.description = *description;
     }
-    const auto applyArtwork = [&](Id assetId, Id& destination) {
+    const auto applyArtwork = [&](Id assetId, Id& destination, proto::ArtworkFraming::Kind kind) {
         if (assetId == destination)
             return true;
         if (!assetId) {
@@ -895,6 +901,11 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         if (!asset || !asset->artwork || asset->channelId != c->id || asset->uploaderId != s.userId || asset->messageId
             || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId) || m_store.artworkServer(assetId))
             return false;
+        if (!asset->artworkFraming.isEmpty()) {
+            proto::ArtworkFraming framing;
+            if (!framing.ParseFromString(asset->artworkFraming.toStdString()) || framing.kind() != kind)
+                return false;
+        }
         QImageReader reader(attachmentPath(assetId));
         reader.setDecideFormatFromContent(true);
         const QByteArray format = reader.format().toLower();
@@ -906,11 +917,12 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         destination = assetId;
         return true;
     };
-    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId)) {
+    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId, proto::ArtworkFraming::ICON)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel icon image"));
         return;
     }
-    if (m.set_banner() && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId)) {
+    if (m.set_banner()
+        && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId, proto::ArtworkFraming::BANNER)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel banner image"));
         return;
     }

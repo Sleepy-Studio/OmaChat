@@ -136,6 +136,19 @@ says where to continue. `Download{attachment_id, offset, length}` →
 `FileChunk{offset, data, total_size}` for anyone who may read the
 message's channel history.
 
+Artwork framing (`artwork.framing.v1`) adds optional `ArtworkFraming` to
+`BeginUploadRequest` and `Attachment`, and `artwork_variant` to `DownloadRequest`.
+Framing uploads a metadata-free full source and exact source-pixel crop rectangle
+for an icon/banner. Default downloads remain the canonical crop; `SMALL` requests
+the smaller variant with legacy fallback, and `SOURCE` requires current artwork
+management permission (or the uploader's still-authorized pending upload).
+`FileChunk` returns framing metadata for framed assets. Each chunk rechecks
+reference-based authorization. New image selection retains a source only through
+an explicit crop-dialog choice; old clients keep their existing upload contract.
+Schema 15 persists framing and gives attachments a nullable upload carrier so
+server artwork survives its carrier's deletion; message deletion still cascades.
+See [shared-artwork-framing.md](shared-artwork-framing.md) for limits and API usage.
+
 ### End-to-end encryption (`e2e.v1`)
 
 `PublishDeviceKey{public_key}` (32-byte X25519, ≤ 10 per user),
@@ -212,7 +225,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 | channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.details.reload`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
 | messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search {channel \| server, query}`, `message.react`, `typing`, `presence.set` |
 | profile | `profile.update {display_name, avatar_url, bio}` |
-| attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?}` → `{path, cached}`, `transfer.list`, `transfer.cancel {id}` |
+| attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?, artwork_variant?: full\|small\|source}` → `{path, cached, framing?}`, `transfer.list`, `transfer.cancel {id}` |
 | voice | `voice.join`, `voice.leave`, `voice.mute`, `voice.unmute`, `voice.toggle_mute`, `voice.deafen`, `voice.undeafen`, `voice.toggle_deafen`, `voice.mode`, `voice.stats`, `ptt.begin`, `ptt.end` |
 | encryption | `e2e.status` → `{enabled, ready, device}`, `e2e.safety {user}` → `{number, devices, verified}`, `e2e.verify {user, verified?}` |
 | screen sharing | `stream.start {audio?}` (answers after the desktop picker; no timeout), `stream.stop`, `stream.watch {user}` → `{path}`, `stream.unwatch {user}`, `stream.stats`, `video.settings`, `video.set` |

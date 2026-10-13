@@ -26,6 +26,10 @@
 
 namespace omachat::server {
 
+namespace artwork {
+struct Images;
+}
+
 namespace auth {
 struct OAuthProfile;
 }
@@ -74,6 +78,8 @@ private:
         Id userId = 0;
         Id channelId = 0;
         bool channelArtwork = false;
+        proto::ArtworkFraming framing;
+        bool preparing = false;
         QString filename;
         QString mimeType;
         std::uint64_t size = 0;
@@ -213,6 +219,8 @@ private:
     void handleDeleteEmoji(Session& s, std::uint64_t rid, const proto::DeleteEmojiRequest& m);
     void handleListEmoji(Session& s, std::uint64_t rid, const proto::ListEmojiRequest& m);
     void detachUploadsOf(quint64 connId);
+    void finishPreparedUpload(
+        Session& s, std::uint64_t rid, Id id, const QByteArray& digest, const artwork::Images& images);
     void removeAttachmentFiles(const std::vector<Id>& ids);
     void collectAttachmentGarbage();
     QString attachmentPath(Id id) const;
@@ -269,6 +277,7 @@ private:
     std::map<Id, QTimer*> m_offlineTimers;
     QHash<QString, int> m_connectionsPerIp;
     std::map<Id, Upload> m_uploads;
+    int m_artworkJobs = 0;
 
     // Brute-force protection, keyed by peer address and by username.
     std::map<QString, TokenBucket> m_authByIp;

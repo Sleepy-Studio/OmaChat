@@ -1,6 +1,12 @@
+#include "core/ArtworkImages.hpp"
 #include "core/ChatServer.hpp"
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Validation.hpp"
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <QPointer>
+#include <QSaveFile>
+#include <QThreadPool>
 
 #include <QBuffer>
 #include <QDir>
@@ -70,6 +76,10 @@ void ChatServer::handleBeginUpload(Session& s, std::uint64_t rid, const proto::B
             QStringLiteral("files on this server are limited to %1 MB").arg(m_config.maxUploadMb));
         return;
     }
+    if (m.has_artwork_framing() && (!m.channel_artwork() || !artwork::validFraming(m.artwork_framing()))) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid artwork framing"));
+        return;
+    }
     int pending = m_store.pendingAttachmentCount(s.userId);
     for (const auto& [id, u] : m_uploads)
         pending += u.userId == s.userId ? 1 : 0;
@@ -84,6 +94,10 @@ void ChatServer::handleBeginUpload(Session& s, std::uint64_t rid, const proto::B
     u.userId = s.userId;
     u.channelId = c->id;
     u.channelArtwork = m.channel_artwork();
+    if (m.has_artwork_framing()) {
+        u.framing = m.artwork_framing();
+        u.framing.mutable_unknown_fields()->clear();
+    }
     u.filename = *name;
     u.mimeType = validation::mimeType(QString::fromStdString(m.mime_type()));
     u.size = m.size();
@@ -111,7 +125,7 @@ ChatServer::Upload* ChatServer::uploadFor(Session& s, std::uint64_t rid, Id atta
 {
     auto it = m_uploads.find(attachmentId);
     // Another connection's upload looks exactly like a missing one.
-    if (it == m_uploads.end() || it->second.connId != s.connId) {
+    if (it == m_uploads.end() || it->second.connId != s.connId || it->second.userId != s.userId) {
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("no such upload"));
         return nullptr;
     }
@@ -170,6 +184,10 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
     if (!u)
         return;
     const Id id = u->id;
+    if (u->preparing) {
+        replyError(s, rid, proto::ERROR_RATE_LIMITED, QStringLiteral("this artwork is being prepared"), 1000);
+        return;
+    }
     if (u->received != u->size) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST,
             QStringLiteral("upload incomplete: %1 of %2 bytes").arg(u->received).arg(u->size));
@@ -181,49 +199,82 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checksum mismatch; upload cancelled"));
         return;
     }
-    if (!u->file->flush()) {
+    if (u->file->isOpen() && !u->file->flush()) {
         abortUpload(id);
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("the server could not store this file"));
         return;
     }
     u->file->close();
 
+    if (!u->channelArtwork) {
+        finishPreparedUpload(s, rid, id, digest, {});
+        return;
+    }
+    if (m_artworkJobs >= 2) {
+        replyError(s, rid, proto::ERROR_RATE_LIMITED, QStringLiteral("artwork workers are busy; retry shortly"), 1000);
+        return;
+    }
+    QFile source(u->file->fileName());
+    if (!source.open(QIODevice::ReadOnly)) {
+        abortUpload(id);
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("cannot read artwork upload"));
+        return;
+    }
+    const QByteArray bytes = source.read(2 * 1024 * 1024 + 1);
+    source.close();
+    u->preparing = true;
+    ++m_artworkJobs;
+    const QPointer<ChatServer> guard(this);
+    const auto connId = s.connId;
+    const auto userId = s.userId;
+    const auto framing = u->framing;
+    QThreadPool::globalInstance()->start([guard, connId, userId, rid, id, digest, bytes, framing] {
+        const auto images = artwork::prepare(bytes, framing.kind() == proto::ArtworkFraming::NONE ? nullptr : &framing);
+        QMetaObject::invokeMethod(
+            QCoreApplication::instance(),
+            [guard, connId, userId, rid, id, digest, images] {
+                if (!guard)
+                    return;
+                --guard->m_artworkJobs;
+                auto it = guard->m_uploads.find(id);
+                if (it == guard->m_uploads.end())
+                    return;
+                it->second.preparing = false;
+                auto* session = guard->sessionFor(connId);
+                if (!session || session->userId != userId || it->second.connId != connId)
+                    return; // The uploader can resume and request finish again.
+                if (!guard->m_state.can(it->second.channelId, userId, ViewChannel | ManageChannel)) {
+                    guard->abortUpload(id);
+                    guard->replyError(*session, rid, proto::ERROR_PERMISSION_DENIED,
+                        QStringLiteral("artwork management access changed during preparation"));
+                    return;
+                }
+                guard->finishPreparedUpload(*session, rid, id, digest, images);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void ChatServer::finishPreparedUpload(
+    Session& s, std::uint64_t rid, Id id, const QByteArray& digest, const artwork::Images& images)
+{
+    Upload* u = uploadFor(s, rid, id);
+    if (!u)
+        return;
     QByteArray normalized;
     QByteArray imageFormat;
+    const bool framed = u->framing.kind() != proto::ArtworkFraming::NONE;
     if (u->channelArtwork) {
-        QImageReader reader(u->file->fileName());
-        reader.setDecideFormatFromContent(true);
-        const QByteArray sourceFormat = reader.format().toLower();
-        const QSize dimensions = reader.size();
-        if ((sourceFormat != "png" && sourceFormat != "jpeg" && sourceFormat != "webp") || !dimensions.isValid()
-            || dimensions.width() > 6000 || dimensions.height() > 6000
-            || qint64(dimensions.width()) * dimensions.height() > 12000000 || reader.imageCount() > 1) {
+        if (!images.error.isEmpty()) {
             abortUpload(id);
-            replyError(s, rid, proto::ERROR_BAD_REQUEST,
-                QStringLiteral("channel artwork must be a static PNG, JPEG, or WebP image"));
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, images.error);
             return;
         }
-        QImage image = reader.read();
-        if (image.isNull()) {
-            abortUpload(id);
-            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("could not decode channel artwork"));
-            return;
-        }
-        if (image.width() > 1600 || image.height() > 1600)
-            image = image.scaled(1600, 1600, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        imageFormat = image.hasAlphaChannel() ? "PNG" : "JPEG";
-        QBuffer buffer(&normalized);
-        buffer.open(QIODevice::WriteOnly);
-        QImageWriter writer(&buffer, imageFormat);
-        writer.setQuality(85);
-        if (!writer.write(image) || normalized.isEmpty() || normalized.size() > 2 * 1024 * 1024) {
-            abortUpload(id);
-            replyError(
-                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("channel artwork could not fit the 2 MB image limit"));
-            return;
-        }
+        normalized = images.full;
+        imageFormat = images.format;
         QFile clean(u->file->fileName());
-        if (!clean.open(QIODevice::WriteOnly | QIODevice::Truncate) || clean.write(normalized) != normalized.size()) {
+        if (!clean.open(QIODevice::WriteOnly | QIODevice::Truncate) || clean.write(normalized) != normalized.size()
+            || !clean.flush()) {
             abortUpload(id);
             replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not save channel artwork"));
             return;
@@ -248,13 +299,29 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
     }
     a.createdAt = now();
     a.artwork = u->channelArtwork;
+    if (framed)
+        a.artworkFraming = QByteArray::fromStdString(u->framing.SerializeAsString());
+    const auto saveVariant = [&](const QString& suffix, const QByteArray& bytes) {
+        QSaveFile file(attachmentPath(id) + suffix);
+        return file.open(QIODevice::WriteOnly) && file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)
+            && file.write(bytes) == bytes.size() && file.commit();
+    };
+    if (framed
+        && (!saveVariant(QStringLiteral(".source"), images.source)
+            || !saveVariant(QStringLiteral(".small"), images.small))) {
+        removeAttachmentFiles({id});
+        abortUpload(id);
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not store artwork variants"));
+        return;
+    }
     const QString partPath = u->file->fileName();
     if (!QFile::rename(partPath, attachmentPath(id)) || !m_store.insertAttachment(a)) {
-        QFile::remove(attachmentPath(id));
+        removeAttachmentFiles({id});
         abortUpload(id);
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("the server could not store this file"));
         return;
     }
+    const auto completedFraming = u->framing;
     m_uploads.erase(id);
 
     proto::Envelope env;
@@ -264,6 +331,8 @@ void ChatServer::handleFinishUpload(Session& s, std::uint64_t rid, const proto::
     p->set_mime_type(a.mimeType.toStdString());
     p->set_size(a.size);
     p->set_sha256(a.sha256.toStdString());
+    if (framed)
+        *p->mutable_artwork_framing() = completedFraming;
     reply(s, rid, std::move(env));
 }
 
@@ -316,13 +385,47 @@ void ChatServer::handleDownload(Session& s, std::uint64_t rid, const proto::Down
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("attachment not found"));
         return;
     }
-    if (m.offset() > a->size) {
+    if (!proto::DownloadRequest_ArtworkVariant_IsValid(m.artwork_variant())
+        || (m.artwork_variant() != proto::DownloadRequest::FULL && !a->artwork)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid artwork variant"));
+        return;
+    }
+    proto::ArtworkFraming framing;
+    if (!a->artworkFraming.isEmpty()
+        && (!framing.ParseFromString(a->artworkFraming.toStdString()) || !artwork::validFraming(framing))) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("artwork framing is unreadable"));
+        return;
+    }
+    framing.mutable_unknown_fields()->clear();
+    QString path = attachmentPath(a->id);
+    if (m.artwork_variant() == proto::DownloadRequest::SOURCE) {
+        const bool manager = !artworkChannels.empty()
+            ? std::ranges::any_of(artworkChannels,
+                  [&](Id channel) { return m_state.can(channel, s.userId, ViewChannel | ManageChannel); })
+            : artworkServer
+            ? m_state.canInServer(artworkServer, s.userId, ManageServer)
+            : a->uploaderId == s.userId && m_state.can(a->channelId, s.userId, ViewChannel | ManageChannel);
+        if (!manager || a->artworkFraming.isEmpty()) {
+            replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("artwork source not found"));
+            return;
+        }
+        path += QStringLiteral(".source");
+    } else if (m.artwork_variant() == proto::DownloadRequest::SMALL && !a->artworkFraming.isEmpty()) {
+        path += QStringLiteral(".small");
+    }
+    const auto fileSize = QFileInfo(path).size();
+    if (fileSize <= 0 || (a->artwork && fileSize > 2 * 1024 * 1024)) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("artwork variant is missing on the server"));
+        return;
+    }
+    const auto total = static_cast<std::uint64_t>(fileSize);
+    if (m.offset() > total) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("offset beyond end of file"));
         return;
     }
     const std::uint64_t want = m.length() == 0 ? kChunkBytes : std::min<std::uint64_t>(m.length(), kChunkBytes);
-    const std::uint64_t len = std::min<std::uint64_t>(want, a->size - m.offset());
-    QFile file(attachmentPath(a->id));
+    const std::uint64_t len = std::min<std::uint64_t>(want, total - m.offset());
+    QFile file(path);
     QByteArray data;
     if (!file.open(QIODevice::ReadOnly) || !file.seek(static_cast<qint64>(m.offset()))
         || (data = file.read(static_cast<qint64>(len))).size() != static_cast<qsizetype>(len)) {
@@ -335,7 +438,9 @@ void ChatServer::handleDownload(Session& s, std::uint64_t rid, const proto::Down
     c->set_attachment_id(a->id);
     c->set_offset(m.offset());
     c->set_data(data.toStdString());
-    c->set_total_size(a->size);
+    c->set_total_size(total);
+    if (!a->artworkFraming.isEmpty())
+        *c->mutable_artwork_framing() = framing;
     reply(s, rid, std::move(env));
 }
 
@@ -360,8 +465,11 @@ void ChatServer::detachUploadsOf(quint64 connId)
 
 void ChatServer::removeAttachmentFiles(const std::vector<Id>& ids)
 {
-    for (Id id : ids)
+    for (Id id : ids) {
         QFile::remove(attachmentPath(id));
+        QFile::remove(attachmentPath(id) + QStringLiteral(".small"));
+        QFile::remove(attachmentPath(id) + QStringLiteral(".source"));
+    }
 }
 
 void ChatServer::collectAttachmentGarbage()
@@ -387,6 +495,14 @@ void ChatServer::collectAttachmentGarbage()
         const Id id = name.toULongLong(&isNumber);
         if (isNumber && !keep.contains(id)) {
             QFile::remove(dir.filePath(name));
+        } else if (name.endsWith(u".small") || name.endsWith(u".source")) {
+            const Id variantId = name.left(name.indexOf(u'.')).toULongLong(&isNumber);
+            if (isNumber && !keep.contains(variantId))
+                QFile::remove(dir.filePath(name));
+        } else if (name.contains(u".source.") || name.contains(u".small.")) {
+            name.left(name.indexOf(u'.')).toULongLong(&isNumber);
+            if (isNumber)
+                QFile::remove(dir.filePath(name)); // Interrupted atomic variant writes.
         } else if (name.endsWith(u".part")) {
             const Id partId = name.chopped(5).toULongLong(&isNumber);
             if (isNumber && !m_uploads.contains(partId))

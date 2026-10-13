@@ -24,6 +24,7 @@ add_executable(omachat_unit_tests
     unit/test_server_state.cpp
     unit/test_server_config_env.cpp
     unit/test_store.cpp
+    unit/test_artwork_images.cpp
     unit/test_send_recovery.cpp
     unit/test_video.cpp
     unit/test_e2e.cpp
@@ -77,6 +78,7 @@ add_executable(omachat_integration_tests
     integration/test_daemon.cpp
     integration/test_voice.cpp
     integration/test_channel_details.cpp
+    integration/test_artwork_framing.cpp
     integration/test_channel_placement.cpp
     integration/test_category_delete.cpp
     integration/test_permission_preview.cpp

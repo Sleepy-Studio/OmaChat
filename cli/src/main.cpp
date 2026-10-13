@@ -86,7 +86,7 @@ Messages
   dm USER TEXT...
   group create USER USER... [--name NAME] group conversation (3-10 people with you)
   group add CHANNEL USER | rename CHANNEL NAME... | leave CHANNEL
-  attachment get ATTACHMENT_ID [--name NAME] [--output DIR|FILE]
+  attachment get ATTACHMENT_ID [--name NAME] [--output DIR|FILE] [--variant full|small|source]
                                           saves to ~/Downloads unless --output is given
   transfer list | cancel TRANSFER_ID
   presence online|idle|dnd
@@ -539,6 +539,8 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
                 {"to", output ? QFileInfo(*output).absoluteFilePath() : QStringLiteral("downloads")}};
             if (name)
                 inv.params.insert(QStringLiteral("filename"), *name);
+            if (const auto variant = optionValue(args, QStringLiteral("--variant")))
+                inv.params.insert(QStringLiteral("artwork_variant"), *variant);
             inv.timeoutMs = 0;
             inv.print = [](const QJsonObject& r) { out() << r.value("path").toString() << "\n"; };
         } else {

@@ -3,6 +3,7 @@
 
 #include "omachat/core/Log.hpp"
 
+#include <QScopeGuard>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStringList>
@@ -11,7 +12,7 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 14;
+constexpr int kSchemaVersion = 15;
 
 const char* const kSchemaV14[] = {
     R"(CREATE TABLE message_operations(
@@ -242,6 +243,26 @@ const char* const kSchemaV13[] = {
     "ALTER TABLE servers ADD COLUMN banner_attachment_id INTEGER NOT NULL DEFAULT 0",
 };
 
+const char* kSchemaV15[] = {
+    // Rebuild with foreign keys disabled outside the migration transaction.
+    // Do not rename the old table: emoji must keep referencing attachments.
+    R"(CREATE TABLE attachments_v15(
+        id INTEGER PRIMARY KEY,
+        channel_id INTEGER REFERENCES channels(id) ON DELETE SET NULL,
+        uploader_id INTEGER NOT NULL,
+        message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL,
+        sha256 BLOB NOT NULL, created_at INTEGER NOT NULL,
+        artwork INTEGER NOT NULL DEFAULT 0,
+        artwork_framing BLOB NOT NULL DEFAULT X''))",
+    "INSERT INTO attachments_v15 SELECT id, channel_id, uploader_id, message_id, filename, "
+    "mime_type, size, sha256, created_at, artwork, X'' FROM attachments",
+    "DROP TABLE attachments",
+    "ALTER TABLE attachments_v15 RENAME TO attachments",
+    "CREATE INDEX attachments_by_message ON attachments(message_id)",
+    "CREATE INDEX attachments_pending ON attachments(uploader_id) WHERE message_id IS NULL",
+};
+
 qint64 sid(Id id)
 {
     return static_cast<qint64>(id);
@@ -297,11 +318,12 @@ AttachmentRecord readAttachment(const QSqlQuery& q)
     a.sha256 = q.value(7).toByteArray();
     a.createdAt = q.value(8).toLongLong();
     a.artwork = q.value(9).toBool();
+    a.artworkFraming = q.value(10).toByteArray();
     return a;
 }
 
-constexpr const char* kAttachmentColumns
-    = "id, channel_id, uploader_id, message_id, filename, mime_type, size, sha256, created_at, artwork";
+constexpr const char* kAttachmentColumns = "id, channel_id, uploader_id, message_id, filename, mime_type, size, "
+                                           "sha256, created_at, artwork, artwork_framing";
 
 constexpr const char* kMessageColumns
     = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions, encrypted, created_at";
@@ -430,7 +452,20 @@ bool Store::migrate(QString* error)
     if (current == kSchemaVersion)
         return true;
 
-    m_db.transaction();
+    // SQLite cannot change foreign_keys inside a transaction. The scope guard
+    // rolls back before restoring enforcement on every failure path.
+    if (!exec(QStringLiteral("PRAGMA foreign_keys=OFF")))
+        return false;
+    const auto restoreForeignKeys = qScopeGuard([&] {
+        m_db.rollback();
+        if (!exec(QStringLiteral("PRAGMA foreign_keys=ON")))
+            m_db.close(); // Never expose a live connection without enforcement.
+    });
+    if (!m_db.transaction()) {
+        if (error)
+            *error = m_db.lastError().text();
+        return false;
+    }
     const auto apply = [&](const auto& statements) {
         for (const char* stmt : statements) {
             QSqlQuery q(m_db);
@@ -471,10 +506,26 @@ bool Store::migrate(QString* error)
         return false;
     if (current < 14 && !apply(kSchemaV14))
         return false;
-    exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
+    if (current < 15 && !apply(kSchemaV15))
+        return false;
+    QSqlQuery check(m_db);
+    if (!check.exec(QStringLiteral("PRAGMA foreign_key_check")) || check.next()) {
+        if (error)
+            *error = QStringLiteral("migration foreign key check failed: %1").arg(check.lastError().text());
+        return false;
+    }
+    check.finish();
+    if (!exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion)))
+        return false;
     if (!m_db.commit()) {
         if (error)
             *error = m_db.lastError().text();
+        return false;
+    }
+    if (!exec(QStringLiteral("PRAGMA foreign_keys=ON"))) {
+        if (error)
+            *error = QStringLiteral("could not restore foreign key enforcement");
+        m_db.close();
         return false;
     }
     OMA_INFO("storage", "database migrated", {"from", current}, {"to", kSchemaVersion});
@@ -855,7 +906,22 @@ bool Store::updateServer(const ServerRecord& s)
 
 bool Store::deleteServer(Id id)
 {
-    return exec(QStringLiteral("DELETE FROM servers WHERE id = ?"), {sid(id)});
+    if (!exec(QStringLiteral("SAVEPOINT delete_server")))
+        return false;
+    // Include emoji: deleting their server drops the referencing rows, too.
+    const bool ok = exec(QStringLiteral("UPDATE attachments SET channel_id = NULL WHERE message_id IS NULL AND "
+                                        "(id IN (SELECT icon_attachment_id FROM servers WHERE id = ?) OR "
+                                        "id IN (SELECT banner_attachment_id FROM servers WHERE id = ?) OR "
+                                        "id IN (SELECT icon_attachment_id FROM channels WHERE server_id = ?) OR "
+                                        "id IN (SELECT banner_attachment_id FROM channels WHERE server_id = ?) OR "
+                                        "id IN (SELECT attachment_id FROM emoji WHERE server_id = ?))"),
+                        {sid(id), sid(id), sid(id), sid(id), sid(id)})
+        && exec(QStringLiteral("DELETE FROM servers WHERE id = ?"), {sid(id)}) && reclaimDetachedAttachments();
+    if (ok && exec(QStringLiteral("RELEASE delete_server")))
+        return true;
+    exec(QStringLiteral("ROLLBACK TO delete_server"));
+    exec(QStringLiteral("RELEASE delete_server"));
+    return false;
 }
 
 bool Store::insertRole(const RoleRecord& r)
@@ -933,30 +999,31 @@ bool Store::setRecipient(Id channelId, Id userId, bool present)
 
 bool Store::deleteChannel(Id id)
 {
-    // Artwork can be shared by duplicated channels. Rehome its owning FK before
-    // deleting the original channel, so CASCADE cannot destroy a surviving reference.
-    // A savepoint composes with the category-deletion transaction as well.
+    // The upload carrier is not the artwork's owner. Detach references being
+    // removed, then collect only rows without a surviving authoritative owner.
+    // Savepoints also compose with category-deletion transactions.
     if (!exec(QStringLiteral("SAVEPOINT delete_channel")))
         return false;
-    const bool ok
-        = exec(QStringLiteral(
-                   "UPDATE attachments SET channel_id = (SELECT c.id FROM channels c WHERE c.id <> ? AND "
-                   "(c.icon_attachment_id = attachments.id OR c.banner_attachment_id = attachments.id) LIMIT 1) "
-                   "WHERE channel_id = ? AND artwork = 1 AND message_id IS NULL AND EXISTS "
-                   "(SELECT 1 FROM channels c WHERE c.id <> ? AND "
-                   "(c.icon_attachment_id = attachments.id OR c.banner_attachment_id = attachments.id))"),
-              {sid(id), sid(id), sid(id)})
-        && exec(QStringLiteral("DELETE FROM channels WHERE id = ?"), {sid(id)});
-    if (!ok) {
-        exec(QStringLiteral("ROLLBACK TO delete_channel"));
-        exec(QStringLiteral("RELEASE delete_channel"));
-        return false;
-    }
-    if (exec(QStringLiteral("RELEASE delete_channel")))
+    const bool ok = exec(QStringLiteral("UPDATE attachments SET channel_id = NULL WHERE message_id IS NULL AND "
+                                        "(id IN (SELECT icon_attachment_id FROM channels WHERE id = ?) OR "
+                                        "id IN (SELECT banner_attachment_id FROM channels WHERE id = ?))"),
+                        {sid(id), sid(id)})
+        && exec(QStringLiteral("DELETE FROM channels WHERE id = ?"), {sid(id)}) && reclaimDetachedAttachments();
+    if (ok && exec(QStringLiteral("RELEASE delete_channel")))
         return true;
     exec(QStringLiteral("ROLLBACK TO delete_channel"));
     exec(QStringLiteral("RELEASE delete_channel"));
     return false;
+}
+
+bool Store::reclaimDetachedAttachments()
+{
+    return exec(QStringLiteral("DELETE FROM attachments WHERE channel_id IS NULL AND message_id IS NULL "
+                               "AND NOT EXISTS (SELECT 1 FROM channels WHERE icon_attachment_id = attachments.id "
+                               "OR banner_attachment_id = attachments.id) "
+                               "AND NOT EXISTS (SELECT 1 FROM servers WHERE icon_attachment_id = attachments.id "
+                               "OR banner_attachment_id = attachments.id) "
+                               "AND NOT EXISTS (SELECT 1 FROM emoji WHERE attachment_id = attachments.id)"));
 }
 
 bool Store::upsertOverride(const OverrideRecord& o)
@@ -1270,10 +1337,11 @@ std::vector<MessageRecord> Store::searchMessages(const std::vector<Id>& channelI
 
 bool Store::insertAttachment(const AttachmentRecord& a)
 {
-    return exec(QStringLiteral("INSERT INTO attachments(id, channel_id, uploader_id, message_id, filename, "
-                               "mime_type, size, sha256, created_at, artwork) VALUES(?,?,?,NULL,?,?,?,?,?,?)"),
+    return exec(QStringLiteral(
+                    "INSERT INTO attachments(id, channel_id, uploader_id, message_id, filename, "
+                    "mime_type, size, sha256, created_at, artwork, artwork_framing) VALUES(?,?,?,NULL,?,?,?,?,?,?,?)"),
         {sid(a.id), sid(a.channelId), sid(a.uploaderId), a.filename, a.mimeType, static_cast<qint64>(a.size), a.sha256,
-            qint64(a.createdAt), a.artwork ? 1 : 0});
+            qint64(a.createdAt), a.artwork ? 1 : 0, a.artworkFraming.isNull() ? QByteArray("") : a.artworkFraming});
 }
 
 std::optional<AttachmentRecord> Store::attachment(Id id)
