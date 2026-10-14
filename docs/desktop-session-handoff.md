@@ -2,6 +2,72 @@
 
 Updated: 2026-10-14. Resume desktop development from this file.
 
+## CI permission regression repaired — 2026-10-14
+
+The four failed assertions reproduce exactly when the artwork enumeration test
+runs as root. CI's Arch container runs its unit/integration steps as root;
+CAP_DAC_OVERRIDE allows enumeration of the chmod-000 directory. The same test
+passes as the ordinary desktop user. No production cache change is required.
+
+`.github/workflows/ci.yml` now creates the existing GUI test user immediately
+after building and runs unit/fuzz, integration and GUI checks under that account.
+The permission regression remains unchanged and is exercised rather than skipped.
+Current test targets rebuild successfully; all **202 unit/fuzz checks** pass
+(the opt-in real-keyring round trip is skipped), and all 36 ArtworkCache-matched
+checks pass through a root-to-user `su` invocation. Actionlint and whitespace pass.
+Evidence: `build/desktop-ci-permissions/evidence/`.
+
+This CI/documentation-only repair is being pushed to the desktop branch for
+exact-SHA verification. No application change, local reinstall or main-branch
+push is needed. Fresh local status is connected with `artwork.framing.v1` and
+**voice/screen sharing active**; no restart or deployment is performed.
+
+**Next:** verify the repaired remote CI, then implement/test stale-keyring-session
+recovery and complete live retained-source/Reframe acceptance after a designated
+test channel is supplied. Existing physical-device, human acceptance and later
+expansion gates remain open. Earlier checkpoint details below are historical.
+
+## Latest checkpoint and next work — 2026-10-14
+
+Current source commit: `2b33fb943844cf7e457a456796d20e6c81e5223b`, pushed to
+`main` and `feature/desktop-accessibility`. All 50 pending desktop/test/doc files
+were committed. User confirms main pushes auto-deploy; the explicit commit/push
+instruction superseded the previous deployment pause. Backup remains unverified.
+No manual deployment was invoked.
+
+Coolify webhook `rpjdbnvdffrfvdid8mwhsvq5` finished at **05:20:03 UTC** for this
+exact source commit. Docker and both Android workflows succeed. **Both CI runs
+fail**; inspected run `38516037816` reports one failing test out of 202:
+`ArtworkCache.StorePruningRejectsIncompleteDirectoryEnumeration`, assertions in
+`tests/unit/test_artwork_cache.cpp` at lines 770/773/774/777. Root cause is not yet
+investigated; do not call the full checkpoint green. Failure log is retained at
+`build/desktop-artwork-rollout-preflight/ci-failed.log`.
+
+The connected live daemon advertises `artwork.framing.v1`, supporting that shared
+artwork backend behavior is deployed. The actual running image digest/revision
+has not been inspected on the host. Latest health/client observation is connected
+with no error; these facts are volatile and must be rechecked.
+
+Local application source matches the already-installed shared-artwork snapshot;
+only documentation and integration tests changed afterward. All **127 installed
+artifacts** and both running binaries match the validated packages; pacman reports
+zero altered files. No local rebuild/reinstall was needed.
+
+After deployment the old daemon could not read saved credentials, logging
+`keyring unavailable: The session does not exist`; both accounts became
+`login_required`. Restarting only `omachat.service` at **05:22:39 UTC** restored
+both accounts from saved credentials. GUI was mapped/visible with title
+`#general — OmaChat`. Evidence points to a stale QtKeychain/Secret Service session;
+automatic recovery is not implemented or claimed. No credential deletion or new
+login was needed. Evidence: `build/desktop-artwork-rollout-preflight/local-recovery.json`.
+
+**Next:** investigate and fix the failing CI regression first. Then address
+stale-keyring-session recovery with a reproducing test and verify live retained
+source upload/Reframe in a designated test channel. Phase 2 personal organization
+and notifications remain open; human acceptance, Android physical-device and
+MLS/SFrame gates remain separate. Preserve the ignored transcript/evidence.
+This checkpoint update is local documentation, not yet committed or pushed.
+
 ## Commit and automatic deployment authorized — 2026-10-14
 
 The user explicitly requests committing and pushing the current work and states

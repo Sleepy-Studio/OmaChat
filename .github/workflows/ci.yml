@@ -20,13 +20,21 @@ jobs:
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOMACHAT_WARNINGS_AS_ERRORS=ON
       - name: Build
         run: cmake --build build
+      - name: Prepare unprivileged test user
+        run: |
+          useradd -m ci
+          chmod 1777 /tmp
+          mkdir -p -m 700 /tmp/runtime
+          chown -R ci /tmp/runtime .
       - name: Unit and fuzz tests
-        run: ctest --test-dir build -L 'unit|fuzz' --output-on-failure
+        # Permission-denial regressions need ordinary user access, not root's
+        # CAP_DAC_OVERRIDE inside the Arch container.
+        run: su ci -c "ctest --test-dir build -L 'unit|fuzz' --output-on-failure"
       - name: Integration tests (loopback TLS/UDP, null audio)
         env:
           QT_QPA_PLATFORM: offscreen
           XDG_RUNTIME_DIR: /tmp/runtime
-        run: mkdir -p -m 700 /tmp/runtime && ctest --test-dir build -L integration --output-on-failure
+        run: su ci -c 'ctest --test-dir build -L integration --output-on-failure'
       - name: GUI smoke test (offscreen render)
         env:
           QT_QPA_PLATFORM: xcb
@@ -35,11 +43,7 @@ jobs:
           XDG_RUNTIME_DIR: /tmp/runtime
           OMACHAT_SOCKET: /tmp/runtime/none.sock
           OMACHAT_SCREENSHOT_DELAY_MS: "1500"
-        run: |
-          useradd -m ci || true
-          chmod 1777 /tmp
-          chown -R ci /tmp/runtime .
-          su ci -c 'TMPDIR=/tmp/runtime xvfb-run -a -s "-screen 0 1280x800x24" build/client/omachat --screenshot /tmp/runtime/gui.png' && test -s /tmp/runtime/gui.png
+        run: su ci -c 'TMPDIR=/tmp/runtime xvfb-run -a -s "-screen 0 1280x800x24" build/client/omachat --screenshot /tmp/runtime/gui.png' && test -s /tmp/runtime/gui.png
 
   format:
     runs-on: ubuntu-latest
