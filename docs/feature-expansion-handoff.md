@@ -16,14 +16,31 @@ passes as the ordinary desktop user. No production cache change is required.
 after building and runs unit/fuzz, integration and GUI checks under that account.
 The permission regression remains unchanged and is exercised rather than skipped.
 Current test targets rebuild successfully; all **202 unit/fuzz checks** pass
-(the opt-in real-keyring round trip is skipped), and all 36 ArtworkCache-matched
+(the opt-in real-keyring round trip passes in a separate enabled run), and all 36 ArtworkCache-matched
 checks pass through a root-to-user `su` invocation. Actionlint and whitespace pass.
 Evidence: `build/desktop-ci-permissions/evidence/`.
 
-This CI/documentation-only repair is being pushed to the desktop branch for
-exact-SHA verification. No application change, local reinstall or main-branch
+CI/documentation-only repair **c3626222906f44c1fdd1ad57faed4972e754b9a9** is
+pushed to the desktop branch. Exact-SHA CI run `38541795394` passes build,
+format/plugin and all 202 unit/fuzz checks; Android run `38541795417` also passes.
+Integration reaches 225 checks: 222 pass and three GUI layout checks fail.
+The GUI smoke step is not reached. This is not a fully green CI checkpoint.
+
+A Fontconfig configuration with no fonts reproduces all three failures locally,
+including the exact permission-dialog Close position (914 versus 720 pixels).
+An isolated Liberation-only font configuration passes all three unchanged checks.
+The CI dependency list now explicitly installs `ttf-liberation`; no application
+layout or test assertion is changed. Font-fixture logs and failed CI logs are
+retained in the same evidence directory. The font repair needs exact-SHA CI. No application change, local reinstall or main-branch
 push is needed. Fresh local status is connected with `artwork.framing.v1` and
 **voice/screen sharing active**; no restart or deployment is performed.
+
+An isolated QtKeychain/libsecret probe creates only synthetic credentials and
+closes its own Secret Service session through the owning GLib D-Bus connection.
+Reads still succeed, including a second entry; both synthetic entries are removed.
+This does **not reproduce** the observed expired-session error or establish a
+recovery fix. Probe and real-keyring evidence are retained alongside CI evidence.
+Do not add speculative retry/reset logic without a faithful failing regression.
 
 **Next:** verify the repaired remote CI, then implement/test stale-keyring-session
 recovery and complete live retained-source/Reframe acceptance after a designated
