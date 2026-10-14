@@ -1,16 +1,157 @@
 # Channel customization plan
 
-Status: staged roadmap, reviewed 2026-10-06. The channel identity increment, bounded artwork cache and conservative safe category deletion are implemented in this working tree; the tables below include work still open.
 
-The implemented desktop continuation is reviewed, installed locally from source
-`891e4c2` and pushed to `feature/desktop-accessibility` and `main`. Local validation
-passes 276/276 checks; the clean package passes 265 selected plus 11 remaining GUI
-checks. All 126 installed artifacts match, with zero package alterations. The
-`891e4c2` server image published, a forced post-publication deployment is healthy,
-and the connected client reports exact-placement and checked-detail capabilities.
-See [desktop-session-handoff.md](desktop-session-handoff.md) for dated provenance,
-CI results and the standing local-install/server-push workflow. The roadmap below
-remains scoped; these outcomes do not complete the later phases.
+## Shared framing continuation — local install, rollout pending (2026-10-13)
+
+Opt-in retained sources, immutable source-pixel framing, server-generated display
+variants and keyboard Reframe are implemented and locally installed. Crop-only
+selection remains the default; source downloads require management permission.
+Schema 15 preserves artwork through upload-carrier/final-channel deletion and
+checks migration integrity. Release/package **440 each**, native **27 each**, both
+QML lints and independent review pass. All **127 installed/runtime artifacts**
+match, zero pacman alterations; connected/visible. Backend **83441d0** is pushed
+and its matching Docker image published. All five exact-SHA CI/Android/Docker workflows pass.
+
+**Hosted rollout is pending deploy access.** The live endpoint lacks the new
+capability; health is good. No deploy tool/browser is available, and the local
+MCP credential cannot authenticate to the deploy API. Resume the latest section
+of [desktop-session-handoff.md](desktop-session-handoff.md). Later phases and
+human acceptance remain open; client edits/transcript are preserved.
+
+## Device-local crop memory installed — 2026-10-13
+
+Approved crop choices restore for the same account/endpoint/server, canonical
+image pixels and icon/banner slot after restart. Reset/Cancel and rejected crops
+retain the accepted preference; late preparation and epoch renewal retain newer
+local adjustments. Persistence is private, off-thread, atomic and bounded to
+128 choices/64 KiB/90 days; no source paths or image bytes are stored. I/O/lock/
+busy failure falls back to ordinary crop preparation without failing an upload.
+
+Release and clean Arch package each pass 424/424; native/package-native each
+21/21 and both QML lint targets pass. Compact/wide dark/light captures are
+inspected. All 127 installed artifacts match with zero pacman alterations,
+and running client/daemon binaries match; connected/visible. Backend/protocol
+is unchanged. The uncommitted source, prior edits and transcript are preserved.
+See [desktop-session-handoff.md](desktop-session-handoff.md) and
+`build/desktop-crop-memory/` for provenance and limits.
+
+Shared focal metadata and server-generated variants remain **open**. This
+precursor remembers crop travel on this device; it retains no originals and
+sends the canonical cropped raster through the existing upload contract. Later
+roadmap phases and human usability acceptance remain separate.
+
+
+## Installed role previews and whole-list placement — 2026-10-13
+
+Named winning role contributors, manager role-only previews and authoritative
+inherited creation previews are installed. Ordinary self-review retains generic
+sources; role-only means the default role plus one role, without a real member
+or personal override. Whole-server opaque placement tokens cover hidden siblings
+and structural ABA/restart, with full authorized snapshot refresh and retained
+choices on conflicts. Drag keeps its press-time original. Reload waits for the
+matching current snapshot and never reinstalls stale reply metadata.
+
+Release/package each pass 414/414, native/package-native each 25/25, both QML lint
+targets and format checks pass. Compact/wide dark/light captures confirm loaded
+rows, plain names, readable type labels and fixed actions. All 127 installed
+artifacts match with zero alterations; client connected/visible. Backend 5708472
+is pushed and deployed healthy after five exact-SHA workflows and matching image
+publication. Exact provenance and bounded guarantees are in
+[desktop-session-handoff.md](desktop-session-handoff.md).
+
+Remaining: persisted focal metadata/artwork variants, later roadmap phases and
+human usability acceptance. The feature expansion audit remains a separate
+backlog; this section supersedes older remaining-role/placement queues below.
+
+
+## Parallel desktop continuation — 2026-10-12
+
+Implemented in the working tree: atomic configuration duplication with copied
+permission overrides and shared artwork references; checked artwork/placement
+saves with retained draft/conflict reload; encrypted restart-persistent send
+recovery. Category snapshots and events honor ViewChannel; a visible child whose
+parent is hidden remains reachable at top level. Shared artwork authorization
+uses any visible referencing channel and survives source deletion.
+
+Artwork CAS compares original icon/banner references. Placement CAS compares
+source parent/position, while before-target validity is checked against current
+server state. The placement dialog also detects visible source/destination/order
+changes and retains the selected destination until explicit reload. This does
+not compare a whole server list revision or detect every hidden-sibling reorder.
+Duplicate categories copy their configuration, not children. The GUI keeps the
+source category and blocks repeat submissions after uncertain completion.
+
+Encrypted recovery uses an independent secure keyring key, authenticated
+ciphertext and account/endpoint/verified-certificate/user binding. Limits are
+20 records/128 KiB/30 days per account. Uncertain sends never auto-resend; only
+explicit server rejection permits a deliberate retry. Storage, acknowledgement
+cleanup and purge failures remain visible. Source/installed/deployed state and
+validation evidence are in [desktop-session-handoff.md](desktop-session-handoff.md).
+
+Remaining: named role contributors, role-only/full creation previews, persisted
+focal metadata/variants, whole-list placement revision checks and later roadmap
+phases. Human usability acceptance remains separate from automated checks.
+
+
+## Permission sources and member previews — 2026-10-11
+
+Installed: server-authoritative resolution stages for current-user access and
+manager previews of existing members. Numeric self IDs, pending/snapshot refresh,
+deleted contexts and stale replies are guarded; older servers retain self mask
+review. Named role contributors, role-only and creation previews remain open.
+Release/package 337/337, native/package-native 10/10, both QML lint targets and
+independent review pass. All 126 installed artifacts match; zero alterations,
+connected/visible. Backend 16e3ed8 is pushed/deployed; exact-SHA CI/Android/Docker
+pass, live capability and 21-row mask parity verified. Client work remains in the
+uncommitted installed snapshot. See desktop handoff and
+`build/desktop-permission-sources/` for provenance and limits.
+
+Next pass explicitly requires coordinator + three parallel subagents to complete
+as much ready work as possible, with exclusive file ownership, worker refills,
+central integration and serialized installation/deployment/native checks.
+
+Status: staged roadmap, reviewed 2026-10-11. The channel identity increment, bounded artwork cache and conservative safe category deletion are implemented in this working tree; the tables below include work still open.
+
+The October 7 client-only continuation is reviewed and installed locally from a
+recorded uncommitted source snapshot based on `d35634a`. It adds creation crop
+staging, bounded placement edge scrolling, quick-switcher icons and existing
+joined-voice identity icons. The final package build passes 291/291 CTest, both
+QML lint targets and 13 native Wayland checks; all 126 installed artifacts match,
+with zero package alterations. The hosted October 6 server stays on `891e4c2`.
+See [desktop-session-handoff.md](desktop-session-handoff.md) for exact provenance,
+installed/source state and remaining gates. This does not complete later phases.
+
+The next October 7 client slice installs current-user inherited-access review
+before creation: server/category masks, type-specific actions, live/offline
+refresh and keyboard viewport focus. Package 293/293, both QML lint targets and
+6/6 native Wayland permission checks pass; all 126 installed artifacts match.
+Full source attribution and other-member creation previews remain open.
+Evidence: `build/desktop-access-review/` and the desktop handoff.
+
+The latest October 7 installed slice adds Overview/Appearance/Permissions channel
+settings navigation and a joined-voice details action with a stable room banner,
+loading/retry/fallback and bounded description surface. Draft/CAS/discard state
+survives section changes and the nested overrides editor. Context/access loss
+clears details; cached offline content is read-only. Release 304/304, both QML
+lint targets, native 11/11 and exact verification of 126 installed artifacts pass.
+See `build/desktop-room-settings/` and the handoff. The existing server was
+restarted to repair connectivity; no new server implementation was published.
+
+The October 11 continuation installs bounded asynchronous validation for both
+cached and downloaded artwork. Shared worker slots, retained staging ownership,
+request serials and file-identity checks protect delayed completion. Directory
+pruning and final filesystem operations remain synchronous. Release 314/314,
+package 299+15 and native/package-native 4/4 pass; all installed artifacts match.
+See `build/desktop-async-store/` and the latest desktop handoff.
+
+The latest October 11 slice installs store-time pruning on the shared bounded
+worker path, with incoming capacity reservations, stale-plan rescan and guarded
+32-candidate owner-thread cleanup batches. All directory scans and artwork
+validation are off-thread; final file operations still run on the owner thread.
+Incomplete enumeration or insufficient pinned capacity rejects admission.
+Final Release coverage 318+10, cache 35/35, package 313+15 and native/package-native
+7/7 pass. Fresh packages are locally installed and all 126 artifacts match.
+Self-review and evidence: `build/desktop-store-pruning/` and the desktop handoff.
 
 ### Implemented in the first increment
 
@@ -32,7 +173,7 @@ remains scoped; these outcomes do not complete the later phases.
   cue and server-resolved before/end operation. It supports channel moves into
   and out of categories and category ordering. Pending/rejected drops retain
   authoritative order; Escape, invalid targets and context changes cancel.
-  The gesture stays within the visible list; edge scrolling is not implemented.
+  The October 7 client continuation adds bounded in-list edge scrolling with stationary-pointer target resolution.
 - Server settings icon/banner pickers use the shared bounded asynchronous crop
   review and canonical image sizes. Preview fingerprints also bind the selected
   server; stale jobs, changed sources and lost server authority cannot submit.
@@ -45,10 +186,10 @@ remains scoped; these outcomes do not complete the later phases.
 
 ### Still open in Phase 1
 
-- Persisted focal-point metadata, crop in initial creation, image variants, and appearance controls in the quick switcher and voice room. Async cache validation remains a performance follow-on.
-- Unified settings navigation and permission-source/other-member previews. Exact keyboard placement and current-user review are implemented. Category move-to-top-level/Cancel is implemented; preserving inherited overrides automatically during deletion remains open.
-- Secure channel duplication and conflict handling for artwork/placement beyond checked detail edits.
-- A full permission review before channel creation.
+- Persisted focal-point metadata and image variants. A voice-room details banner surface is now installed. October 7 adds initial-creation crop staging and quick-switcher/joined-voice identity icons; validation/install provenance is in the desktop handoff. Cache/download validation and reconciliation/store-pruning scans now run off the GUI thread with two bounded worker slots and stale-result guards. Final filesystem operations remain synchronous.
+- Named contributing-role attribution, role-only previews and full creation access previews. Existing-member source-stage previews and Overview/Appearance/Permissions settings navigation are installed. Exact keyboard placement and current-user review are implemented. Category move-to-top-level/Cancel is implemented; preserving inherited overrides automatically during deletion remains open.
+- Whole-list placement revision comparison and hidden-sibling conflict explanations beyond source parent/position CAS. Atomic duplication and checked artwork/placement saves are implemented in the October 12 continuation.
+- Full permission-source and other-member review before channel creation. Current-user inherited-access preview is installed in the latest October 7 slice.
 
 The later phases remain proposals. They have not been implemented by this increment.
 
@@ -243,3 +384,16 @@ and provide a backup/rollback plan for self-hosted servers.
 - Exact icon/banner dimensions and storage limits after testing representative
   images on narrow and large windows; the limits should be server configurable
   within safe bounds.
+
+### Artwork reconciliation responsiveness — 2026-10-11
+
+Authorization updates are state-only and immediately clear revoked previews.
+Read-only directory scans/eviction planning use bounded shared workers; the owner
+applies revision/file/directory-guarded deletion in batches of at most 32 candidates
+per event-loop turn. Stale account/access/staging/store/LRU snapshots and destroyed
+controllers cannot apply cleanup. Store-time pruning/final file operations remain
+synchronous; batch size does not guarantee latency on slow storage.
+Release 320/320, cache 28/28, native/package-native 6/6, package 305+15 and both
+lint targets pass. Fresh main/debug packages are installed and file-verified,
+connected and visible. See docs/desktop-session-handoff.md and
+build/desktop-async-reconcile/. No server changes or publication.

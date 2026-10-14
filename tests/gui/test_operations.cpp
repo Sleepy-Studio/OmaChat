@@ -646,7 +646,7 @@ TEST_F(Operations, ArtworkCacheSurvivesGuiRestartOfflineAndRevokesReplacedArtwor
         daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", imagePath}}).ok);
     ASSERT_TRUE(waitFor([&] { return app->selectedChannelBannerId() != firstId; }));
     EXPECT_FALSE(app->previews().contains(firstId));
-    EXPECT_FALSE(QFileInfo::exists(firstPath));
+    ASSERT_TRUE(waitFor([&] { return !QFileInfo::exists(firstPath); }));
     const QString secondId = app->selectedChannelBannerId();
     app->requestPreview(secondId, "channel-banner.png", 0);
     ASSERT_TRUE(waitFor([&] { return app->previews().contains(secondId); }));
@@ -659,10 +659,253 @@ TEST_F(Operations, ArtworkCacheSurvivesGuiRestartOfflineAndRevokesReplacedArtwor
     app = std::make_unique<client::AppController>(config);
     app->start();
     ASSERT_TRUE(waitFor([&] { return app->selectedChannelBannerId() == secondId; }));
-    app->requestPreview(secondId, "channel-banner.png", 0);
+    // Cached decode must not complete on the GUI caller's stack. Repeated
+    // requests coalesce while validation is pending, including offline reuse.
+    ASSERT_FALSE(app->previews().contains(secondId));
+    for (int i = 0; i < 20; ++i)
+        app->requestPreview(secondId, "channel-banner.png", 0);
+    EXPECT_FALSE(app->previews().contains(secondId));
     ASSERT_TRUE(waitFor([&] { return app->previews().contains(secondId); }));
     EXPECT_EQ(app->previews().value(secondId).toUrl().toLocalFile(), secondPath);
     EXPECT_FALSE(QImage(secondPath).isNull());
+}
+
+TEST_F(Operations, DeferredArtworkLookupRejectsRevocationAndDestroyedController)
+{
+    const QString channel = app->selectedChannelId();
+    const QString imagePath = files.filePath("deferred-artwork.png");
+    QImage image(64, 64, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    ASSERT_TRUE(image.save(imagePath));
+    ASSERT_TRUE(
+        daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", imagePath}}).ok);
+    ASSERT_TRUE(
+        waitFor([&] { return !app->selectedChannelBannerId().isEmpty() && app->selectedChannelBannerId() != "0"; }));
+    const QString id = app->selectedChannelBannerId();
+    app->requestPreview(id, "banner.png", 0);
+    ASSERT_TRUE(waitFor([&] { return app->previews().contains(id); }));
+    const QString path = app->previews().value(id).toUrl().toLocalFile();
+    auto* pool = QThreadPool::globalInstance();
+    pool->waitForDone();
+    const int previousThreads = pool->maxThreadCount();
+    pool->setMaxThreadCount(1);
+    QSemaphore entered, resume;
+    const auto unblock = qScopeGuard([&] {
+        resume.release();
+        pool->waitForDone();
+        pool->setMaxThreadCount(previousThreads);
+    });
+    auto block = [&] {
+        pool->start([&] {
+            entered.release();
+            resume.acquire();
+        });
+        entered.acquire();
+    };
+    block();
+    for (int i = 0; i < 20; ++i)
+        app->requestPreview(id, "banner.png", 0);
+    // The GUI event loop still receives authorization changes with the worker
+    // blocked; releasing the old decode must not restore a revoked preview.
+    ASSERT_TRUE(daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", ""}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->selectedChannelBannerId() != id; }));
+    EXPECT_FALSE(app->previews().contains(id));
+    // Authorization and URL removal are immediate; disk cleanup waits for its worker.
+    EXPECT_TRUE(QFile::exists(path));
+    resume.release();
+    pool->waitForDone();
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(app->previews().contains(id));
+    EXPECT_FALSE(app->previewErrors().contains(id));
+    ASSERT_TRUE(waitFor([&] { return !QFile::exists(path); }));
+
+    ASSERT_TRUE(
+        daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", imagePath}}).ok);
+    ASSERT_TRUE(
+        waitFor([&] { return !app->selectedChannelBannerId().isEmpty() && app->selectedChannelBannerId() != "0"; }));
+    block();
+    app->requestPreview(app->selectedChannelBannerId(), "banner.png", 0);
+    app.reset();
+    resume.release();
+    pool->waitForDone();
+    // The queued callback owns only a guarded pointer, never the controller.
+    QCoreApplication::processEvents();
+}
+
+TEST_F(Operations, DeferredArtworkCleanupKeepsGuiResponsiveAndDoesNotOutliveController)
+{
+    const QString channel = app->selectedChannelId();
+    const QString imagePath = files.filePath("cleanup-artwork.png");
+    QImage image(64, 64, QImage::Format_RGB32);
+    image.fill(Qt::blue);
+    ASSERT_TRUE(image.save(imagePath));
+    ASSERT_TRUE(
+        daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", imagePath}}).ok);
+    ASSERT_TRUE(
+        waitFor([&] { return !app->selectedChannelBannerId().isEmpty() && app->selectedChannelBannerId() != "0"; }));
+    const QString id = app->selectedChannelBannerId();
+    app->requestPreview(id, "banner.png", 0);
+    ASSERT_TRUE(waitFor([&] { return app->previews().contains(id); }));
+    const QString path = app->previews().value(id).toUrl().toLocalFile();
+    QTest::qWait(100);
+    auto* pool = QThreadPool::globalInstance();
+    pool->waitForDone();
+    QCoreApplication::processEvents();
+    const int previousThreads = pool->maxThreadCount();
+    pool->setMaxThreadCount(1);
+    QSemaphore entered, resume;
+    const auto unblock = qScopeGuard([&] {
+        resume.release();
+        pool->waitForDone();
+        pool->setMaxThreadCount(previousThreads);
+    });
+    pool->start([&] {
+        entered.release();
+        resume.acquire();
+    });
+    ASSERT_TRUE(entered.tryAcquire(1, 5000));
+    ASSERT_TRUE(daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", ""}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->selectedChannelBannerId() != id; }));
+    EXPECT_FALSE(app->previews().contains(id));
+    EXPECT_TRUE(QFile::exists(path));
+    int ticks = 0;
+    QTimer heartbeat;
+    QObject::connect(&heartbeat, &QTimer::timeout, [&] { ++ticks; });
+    heartbeat.start(1);
+    QTest::qWait(50);
+    EXPECT_GT(ticks, 0);
+    app.reset();
+    resume.release();
+    pool->waitForDone();
+    QCoreApplication::processEvents();
+    // A dead owner cannot apply a queued cleanup plan.
+    EXPECT_TRUE(QFile::exists(path));
+    config::ClientConfig config;
+    config.startup.launchDaemon = false;
+    app = std::make_unique<client::AppController>(config);
+    app->start();
+    ASSERT_TRUE(waitFor([&] { return app->state() == "connected"; }));
+    // The new controller's authorized snapshot can clean the revoked entry;
+    // Worker capacity remains available after controller destruction.
+    ASSERT_TRUE(waitFor([&] { return !QFile::exists(path); }));
+}
+
+TEST_F(Operations, DeferredArtworkDownloadRemainsResponsiveAndRejectsStaleCompletion)
+{
+    const QString channel = app->selectedChannelId();
+    const QString imagePath = files.filePath("download-artwork.png");
+    QImage image(64, 64, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    ASSERT_TRUE(image.save(imagePath));
+    auto* pool = QThreadPool::globalInstance();
+    pool->waitForDone();
+    const int previousThreads = pool->maxThreadCount();
+    pool->setMaxThreadCount(1);
+    QSemaphore entered, resume;
+    const auto unblock = qScopeGuard([&] {
+        resume.release();
+        pool->waitForDone();
+        pool->setMaxThreadCount(previousThreads);
+    });
+    for (int scenario = 0; scenario < 3; ++scenario) {
+        const QString previous = app->selectedChannelBannerId();
+        ASSERT_TRUE(
+            daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", imagePath}}).ok);
+        ASSERT_TRUE(waitFor([&] {
+            return !app->selectedChannelBannerId().isEmpty() && app->selectedChannelBannerId() != "0"
+                && app->selectedChannelBannerId() != previous;
+        }));
+        const QString id = app->selectedChannelBannerId();
+        // Queue a blocker after the cache miss worker, before processing its
+        // GUI callback. The real daemon can download while store decode waits.
+        app->requestPreview(id, "banner.png", 0);
+        pool->start(
+            [&] {
+                entered.release();
+                resume.acquire();
+            },
+            -1);
+        ASSERT_TRUE(entered.tryAcquire(1, 5000));
+        const QDir staging(files.filePath("omachat/artwork-v1/staging"));
+        ASSERT_TRUE(waitFor([&] { return !staging.entryList({"*.image"}, QDir::Files).isEmpty(); }));
+        QTest::qWait(100);
+        EXPECT_FALSE(app->previews().contains(id));
+        for (int i = 0; i < 20; ++i)
+            app->requestPreview(id, "banner.png", 0);
+        EXPECT_EQ(staging.entryList({"*.image"}, QDir::Files).size(), 1);
+        if (scenario == 1) {
+            ASSERT_TRUE(
+                daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", ""}}).ok);
+            ASSERT_TRUE(waitFor([&] { return app->selectedChannelBannerId() != id; }));
+        } else if (scenario == 2) {
+            app.reset();
+        }
+        resume.release();
+        pool->waitForDone();
+        QCoreApplication::processEvents();
+        if (scenario == 0) {
+            ASSERT_TRUE(waitFor([&] { return app->previews().contains(id); }));
+            EXPECT_FALSE(QImage(app->previews().value(id).toUrl().toLocalFile()).isNull());
+            EXPECT_TRUE(staging.entryList({"*.image"}, QDir::Files).isEmpty());
+        } else if (scenario == 1) {
+            EXPECT_FALSE(app->previews().contains(id));
+            EXPECT_FALSE(app->previewErrors().contains(id));
+            EXPECT_TRUE(staging.entryList({"*.image"}, QDir::Files).isEmpty());
+        }
+    }
+}
+
+TEST_F(Operations, ConcurrentArtworkDownloadsRespectGlobalStoreBudget)
+{
+    const QString channel = app->selectedChannelId();
+    const QString imagePath = files.filePath("budget-artwork.png");
+    QImage image(64, 64, QImage::Format_RGB32);
+    image.fill(Qt::green);
+    ASSERT_TRUE(image.save(imagePath));
+    ASSERT_TRUE(daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "icon"}, {"file", imagePath}}).ok);
+    ASSERT_TRUE(
+        daemon->call("channel.artwork.set", {{"channel", channel}, {"kind", "banner"}, {"file", imagePath}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return !app->channelDetails(channel).value("icon_attachment_id").toString().isEmpty()
+            && app->channelDetails(channel).value("icon_attachment_id").toString() != "0"
+            && !app->selectedChannelBannerId().isEmpty() && app->selectedChannelBannerId() != "0";
+    }));
+    QTest::qWait(100);
+    QThreadPool::globalInstance()->waitForDone();
+    QCoreApplication::processEvents();
+    const QDir root(files.filePath("omachat/artwork-v1"));
+    const QDir old(root.filePath("old-budget-scope"));
+    ASSERT_TRUE(QDir().mkpath(old.path()));
+    for (int i = 0; i < 255; ++i)
+        ASSERT_TRUE(QFile::copy(imagePath, old.filePath(QString::number(i) + ".image")));
+    const QString icon = app->channelDetails(channel).value("icon_attachment_id").toString();
+    const QString banner = app->selectedChannelBannerId();
+    int ticks = 0;
+    QTimer heartbeat;
+    QObject::connect(&heartbeat, &QTimer::timeout, [&] { ++ticks; });
+    heartbeat.start(1);
+    app->requestPreview(icon, "icon.png", 0);
+    app->requestPreview(banner, "banner.png", 0);
+    for (int i = 0; i < 20; ++i) {
+        app->requestPreview(icon, "icon.png", 0);
+        app->requestPreview(banner, "banner.png", 0);
+    }
+    ASSERT_TRUE(waitFor([&] { return app->previews().contains(icon) && app->previews().contains(banner); }));
+    EXPECT_GT(ticks, 0);
+    EXPECT_FALSE(app->previewErrors().contains(icon));
+    EXPECT_FALSE(app->previewErrors().contains(banner));
+    const QString iconPath = app->previews().value(icon).toUrl().toLocalFile();
+    const QString bannerPath = app->previews().value(banner).toUrl().toLocalFile();
+    EXPECT_FALSE(QImage(iconPath).isNull());
+    EXPECT_FALSE(QImage(bannerPath).isNull());
+    int count = 0;
+    for (const auto& scope : root.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (scope != "staging")
+            count += QDir(root.filePath(scope)).entryList({"*.image", "*.image.part"}, QDir::Files).size();
+    }
+    EXPECT_LE(count, 256);
+    EXPECT_LT(old.entryList(QDir::Files).size(), 255);
+    EXPECT_TRUE(QDir(root.filePath("staging")).entryList({"*.image"}, QDir::Files).isEmpty());
 }
 
 TEST_F(Operations, CompactAndWideAdministrationEmojiAndDrawerKeyboardAcceptance)
@@ -979,7 +1222,7 @@ TEST_F(Operations, ArtworkAccountSwitchAndRevokedChannelAccessInvalidateCachedUr
             .ok);
     ASSERT_TRUE(waitFor([&] { return app->channels()->indexOf("itemId", channel) < 0; }));
     EXPECT_FALSE(app->previews().contains(artwork));
-    EXPECT_FALSE(QFileInfo::exists(readerPath));
+    ASSERT_TRUE(waitFor([&] { return !QFileInfo::exists(readerPath); }));
 }
 
 TEST_F(Operations, LongSearchMetadataStaysInsideCompactResultsAndInvalidActivationIsSafe)
@@ -1045,7 +1288,11 @@ TEST_F(Operations, SidebarKeyboardCategoriesAndReorderingUseRealServerState)
         {{"server", app->selectedServerId()}, {"name", "keyboard-second"}, {"type", "text"}, {"parent", categoryId}});
     ASSERT_TRUE(second.ok);
     const QString secondId = second.result.value("id").toString();
-    ASSERT_TRUE(waitFor([&] { return app->channels()->indexOf("itemId", secondId) >= 0; }));
+    ASSERT_TRUE(waitFor([&] {
+        return app->channels()->indexOf("itemId", secondId) >= 0
+            && app->channelDetails(childId).value("placement_token").toString()
+            == second.result.value("placement_token").toString();
+    }));
     theme.setScale(1.5);
     QQmlEngine engine;
     QQmlComponent component(&engine);
@@ -1136,7 +1383,11 @@ TEST_F(Operations, ExactPlacementUsesAuthoritativeOrderAndRejectsStaleTargets)
     ASSERT_TRUE(first.ok);
     ASSERT_TRUE(last.ok);
     const QString before = last.result.value("id").toString();
-    ASSERT_TRUE(waitFor([&] { return !app->channelDetails(before).isEmpty(); }));
+    ASSERT_TRUE(waitFor([&] {
+        return !app->channelDetails(before).isEmpty()
+            && app->channelDetails(source).value("placement_token").toString()
+            == last.result.value("placement_token").toString();
+    }));
     QString error;
     int finished = 0;
     QObject::connect(app.get(), &client::AppController::administrationFinished, app.get(),
@@ -1196,7 +1447,11 @@ TEST_F(Operations, PlacementDialogKeyboardAndPointerFitCompactAndWideThemes)
         {{"server", app->selectedServerId()}, {"name", "placement-target"}, {"type", "text"}, {"parent", parent}});
     ASSERT_TRUE(sibling.ok);
     const QString before = sibling.result.value("id").toString();
-    ASSERT_TRUE(waitFor([&] { return !app->channelDetails(before).isEmpty(); }));
+    ASSERT_TRUE(waitFor([&] {
+        return !app->channelDetails(before).isEmpty()
+            && app->channelDetails(source).value("placement_token").toString()
+            == sibling.result.value("placement_token").toString();
+    }));
     ASSERT_TRUE(app->capabilities().contains("channel.placement.v1"));
     for (bool light : {false, true}) {
         if (light) {
@@ -1339,6 +1594,9 @@ TEST_F(Operations, ArtworkCropDialogKeyboardPointerAndCanonicalUploadAcrossTheme
             auto* apply = namedControl(window->contentItem(), "artworkCropApply");
             ASSERT_TRUE(viewport);
             ASSERT_TRUE(apply);
+            // Other layout passes intentionally remembered their last approved
+            // edge crop. This gesture test starts from an explicit Reset.
+            clickText(window, "Reset");
             viewport->forceActiveFocus();
             const double original = editor->property("focalX").toDouble();
             QTest::keyClick(window, Qt::Key_Right);
@@ -1424,7 +1682,7 @@ TEST_F(Operations, PlacementPendingDialogClosesOnSameAccountArtworkInvalidation)
     EXPECT_FALSE(editor->property("saving").toBool());
 }
 
-TEST_F(Operations, ArtworkCropPendingInvalidationClosesDialogAndIgnoresStaleWorker)
+TEST_F(Operations, ArtworkCropSameScopeEpochRetainsDraftAndIgnoresStaleWorker)
 {
     const QString id = app->selectedChannelId();
     const QString account = app->accountId();
@@ -1448,6 +1706,10 @@ TEST_F(Operations, ArtworkCropPendingInvalidationClosesDialogAndIgnoresStaleWork
     ASSERT_TRUE(openCrop());
     ASSERT_TRUE(waitFor([&] { return !editor->property("fingerprint").toString().isEmpty(); }));
     const QString fingerprint = editor->property("fingerprint").toString();
+    const auto preview = editor->property("preview");
+    const auto scope = app->artworkScopeFingerprint();
+    editor->setProperty("focalX", 0.25);
+    editor->setProperty("zoom", 1.75);
     auto* pool = QThreadPool::globalInstance();
     pool->waitForDone();
     const int previousThreads = pool->maxThreadCount();
@@ -1476,9 +1738,14 @@ TEST_F(Operations, ArtworkCropPendingInvalidationClosesDialogAndIgnoresStaleWork
     EXPECT_EQ(app->accountId(), account);
     EXPECT_EQ(app->selectedServerId(), serverId);
     EXPECT_FALSE(editor->property("uploading").toBool());
-    ASSERT_TRUE(waitFor([&] { return !editor->property("visible").toBool(); }));
-    ASSERT_TRUE(openCrop());
-    // A stale completion must not settle this new dialog's pending operation.
+    EXPECT_EQ(app->artworkScopeFingerprint(), scope);
+    EXPECT_TRUE(editor->property("visible").toBool());
+    EXPECT_TRUE(editor->property("needsReload").toBool());
+    EXPECT_EQ(editor->property("preview"), preview);
+    EXPECT_EQ(editor->property("fileUrl").toUrl(), QUrl::fromLocalFile(path));
+    EXPECT_DOUBLE_EQ(editor->property("focalX").toDouble(), 0.25);
+    EXPECT_DOUBLE_EQ(editor->property("zoom").toDouble(), 1.75);
+    // A stale completion must not settle a later operation in the retained dialog.
     ASSERT_TRUE(editor->setProperty("uploading", true));
     resume.release();
     pool->waitForDone();
@@ -1486,6 +1753,9 @@ TEST_F(Operations, ArtworkCropPendingInvalidationClosesDialogAndIgnoresStaleWork
     EXPECT_TRUE(editor->property("uploading").toBool());
     EXPECT_TRUE(editor->property("visible").toBool());
     EXPECT_EQ(finished, 0);
+    EXPECT_NE(editor->property("fingerprint").toString(), fingerprint);
+    EXPECT_FALSE(editor->property("fingerprint").toString().isEmpty());
+    EXPECT_TRUE(editor->property("needsReload").toBool());
     EXPECT_EQ(app->channelDetails(id).value("icon_attachment_id").toString(), "0");
     editor->setProperty("uploading", false);
 }
@@ -1547,7 +1817,11 @@ TEST_F(Operations, SidebarPointerPlacementMovesIntoAndOutOfCategoryAcrossThemes)
         "channel.create", {{"server", app->selectedServerId()}, {"name", "pointer-anchor"}, {"type", "text"}});
     ASSERT_TRUE(anchor.ok);
     const QString anchorId = anchor.result.value("id").toString();
-    ASSERT_TRUE(waitFor([&] { return app->channels()->indexOf("itemId", anchorId) >= 0; }));
+    ASSERT_TRUE(waitFor([&] {
+        return app->channels()->indexOf("itemId", anchorId) >= 0
+            && app->channelDetails(source).value("placement_token").toString()
+            == anchor.result.value("placement_token").toString();
+    }));
     for (bool light : {false, true}) {
         if (light) {
             QFile colors(files.filePath("drag-light.toml"));
@@ -1635,6 +1909,108 @@ ApplicationWindow {
             window->close();
             QTest::qWait(80);
         }
+    }
+}
+
+TEST_F(Operations, PointerPlacementEdgeScrollKeepsGrabAndCancelsAtLongListBounds)
+{
+    const QString source = app->selectedChannelId();
+    for (int i = 0; i < 30; ++i)
+        ASSERT_TRUE(daemon
+                ->call("channel.create",
+                    {{"server", app->selectedServerId()}, {"name", QString("scroll-%1").arg(i)}, {"type", "text"}})
+                .ok);
+    const auto category = daemon->call("channel.create",
+        {{"server", app->selectedServerId()}, {"name", "Long list destination"}, {"type", "category"}});
+    ASSERT_TRUE(category.ok);
+    const QString categoryId = category.result.value("id").toString();
+    ASSERT_TRUE(waitFor([&] { return app->channels()->indexOf("itemId", categoryId) >= 0; }));
+    ASSERT_TRUE(daemon->call("channel.update", {{"channel", source}, {"parent", "0"}, {"position", 0}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->channels()->indexOf("itemId", source) == 0; }));
+    for (bool light : {false, true}) {
+        if (light) {
+            QFile colors(files.filePath("edge-light.toml"));
+            ASSERT_TRUE(colors.open(QIODevice::WriteOnly));
+            colors.write("background = '#fafafa'\nforeground = '#262626'\naccent = '#2563eb'\n");
+            colors.close();
+            ASSERT_TRUE(theme.loadFile(colors.fileName()));
+        }
+        theme.setScale(1.5);
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+import OmaChat
+ApplicationWindow {
+    width: 720; height: 460; visible: true
+    ChannelSidebar { objectName: "sidebar"; width: 340; anchors.top: parent.top; anchors.bottom: parent.bottom }
+})",
+            QUrl());
+        std::unique_ptr<QObject> object(component.create());
+        ASSERT_TRUE(object) << component.errorString().toStdString();
+        auto* window = qobject_cast<QQuickWindow*>(object.get());
+        auto* sidebar = object->findChild<QObject*>("sidebar");
+        ASSERT_TRUE(window);
+        ASSERT_TRUE(sidebar);
+        QTest::qWait(200);
+        if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+            const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+            ASSERT_EQ(QProcess::execute("hyprctl",
+                          {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+                0);
+            ASSERT_EQ(QProcess::execute("hyprctl",
+                          {"eval",
+                              QString("hl.dispatch(hl.dsp.window.resize({x=720,y=460,relative=false,window='%1'}))")
+                                  .arg(match)}),
+                0);
+            QTest::qWait(100);
+            ASSERT_EQ(window->width(), 720);
+            ASSERT_EQ(window->height(), 460);
+        }
+        auto* list = namedControl(window->contentItem(), "channelList");
+        ASSERT_TRUE(list);
+        const auto edge = list->mapToScene(QPointF(list->width() / 2, list->height() - 2)).toPoint();
+        auto* sourceRow = namedControl(window->contentItem(), "channelPlacementRow_" + source);
+        ASSERT_TRUE(sourceRow);
+        const auto start = sourceRow->mapToScene(QPointF(sourceRow->width() / 2, sourceRow->height() / 2)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(window, edge, 50);
+        ASSERT_TRUE(waitFor([&] { return sidebar->property("dragging").toBool(); }));
+        ASSERT_TRUE(waitFor(
+            [&] {
+                return list->property("contentY").toDouble() >= list->property("originY").toDouble()
+                    + list->property("contentHeight").toDouble() - list->height() - 1;
+            },
+            10000));
+        EXPECT_TRUE(sidebar->property("dragging").toBool());
+        auto* timer = sidebar->findChild<QObject*>("channelPlacementEdgeScroll");
+        ASSERT_TRUE(timer);
+        ASSERT_TRUE(waitFor([&] { return !timer->property("running").toBool(); }));
+        EXPECT_TRUE(window->grabWindow().save(QString("/tmp/omachat-edge-%1.png").arg(light ? "light" : "dark")));
+        auto* destination = namedControl(window->contentItem(), "channelPlacementRow_" + categoryId);
+        ASSERT_TRUE(destination);
+        const auto drop
+            = destination->mapToScene(QPointF(destination->width() / 2, destination->height() / 2)).toPoint();
+        QTest::mouseMove(window, drop, 30);
+        if (!light) {
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, drop);
+            ASSERT_TRUE(
+                waitFor([&] { return app->channelDetails(source).value("parent_id").toString() == categoryId; }));
+            ASSERT_TRUE(waitFor([&] { return sidebar->property("pendingPlacementId").toString().isEmpty(); }));
+            ASSERT_TRUE(daemon->call("channel.update", {{"channel", source}, {"parent", "0"}, {"position", 0}}).ok);
+            ASSERT_TRUE(waitFor([&] { return app->channelDetails(source).value("parent_id").toString() == "0"; }));
+        } else {
+            QTest::keyClick(window, Qt::Key_Escape);
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, drop);
+            EXPECT_FALSE(timer->property("running").toBool());
+            EXPECT_EQ(app->channelDetails(source).value("parent_id").toString(), "0");
+            const double stopped = list->property("contentY").toDouble();
+            QTest::qWait(100);
+            EXPECT_EQ(list->property("contentY").toDouble(), stopped);
+        }
+        window->close();
+        QTest::qWait(80);
     }
 }
 
@@ -1793,11 +2169,103 @@ TEST_F(Operations, ReloadedLongChannelDetailsKeepCompactSaveActionsInsideWindow)
     }
 }
 
+TEST_F(Operations, UnifiedSettingsAndVoiceDetailsRouteThroughMainViewWithoutLosingDraft)
+{
+    theme.setScale(1.5);
+    theme.setReducedMotion(true);
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+import OmaChat
+ApplicationWindow {
+    width: 720; height: 460; visible: true; color: Theme.background
+    MainView { anchors.fill: parent }
+})",
+        QUrl());
+    std::unique_ptr<QObject> object(component.create());
+    ASSERT_TRUE(object) << component.errorString().toStdString();
+    auto* window = qobject_cast<QQuickWindow*>(object.get());
+    if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+        QTest::qWait(100);
+        const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+        ASSERT_EQ(QProcess::execute("hyprctl",
+                      {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+            0);
+        ASSERT_EQ(
+            QProcess::execute("hyprctl",
+                {"eval",
+                    QString("hl.dispatch(hl.dsp.window.resize({x=720,y=460,relative=false,window='%1'}))").arg(match)}),
+            0);
+        ASSERT_EQ(
+            QProcess::execute("hyprctl", {"eval", QString("hl.dispatch(hl.dsp.focus({window='%1'}))").arg(match)}), 0);
+        QTest::qWait(100);
+    }
+    auto* settings = object->findChild<QObject*>("channelSettingsDialog");
+    auto* permissions = object->findChild<QObject*>("channelPermissionsDialog");
+    auto* details = object->findChild<QObject*>("channelDetailsDialog");
+    ASSERT_TRUE(settings);
+    ASSERT_TRUE(permissions);
+    ASSERT_TRUE(details);
+    const QString selected = app->selectedChannelId();
+    ASSERT_TRUE(QMetaObject::invokeMethod(settings, "openFor", Q_ARG(QVariant, selected)));
+    QTest::qWait(150);
+    auto* name = settings->findChild<QObject*>("channelName");
+    ASSERT_TRUE(name);
+    name->setProperty("text", "draft stays while reviewing access");
+    ASSERT_TRUE(QMetaObject::invokeMethod(
+        settings, "openPermissionsRequested", Q_ARG(QString, selected), Q_ARG(QString, app->selectedChannelName())));
+    ASSERT_TRUE(waitFor([&] { return permissions->property("visible").toBool(); }));
+    EXPECT_TRUE(settings->property("visible").toBool());
+    EXPECT_EQ(permissions->property("channelId").toString(), selected);
+    ASSERT_TRUE(QMetaObject::invokeMethod(permissions, "close"));
+    QTest::qWait(150);
+    EXPECT_TRUE(settings->property("activeFocus").toBool());
+    EXPECT_EQ(name->property("text").toString(), "draft stays while reviewing access");
+    EXPECT_TRUE(settings->property("dirty").toBool());
+    // Cleanup is deliberate in this isolated fixture; no user draft is touched.
+    ASSERT_TRUE(QMetaObject::invokeMethod(settings, "close"));
+    QTest::qWait(100);
+    const auto created = daemon->call(
+        "channel.create", {{"server", app->selectedServerId()}, {"name", "Room details"}, {"type", "voice"}});
+    ASSERT_TRUE(created.ok);
+    const QString room = created.result.value("id").toString();
+    ASSERT_TRUE(waitFor([&] { return app->channelDetails(room).value("type").toString() == "voice"; }));
+    app->joinVoice(room);
+    ASSERT_TRUE(waitFor([&] { return app->voiceJoined(); }));
+    QTest::qWait(150);
+    auto* roomDetails = namedControl(window->contentItem(), "voiceChannelDetailsAction");
+    ASSERT_TRUE(roomDetails);
+    ASSERT_TRUE(roomDetails->isEnabled());
+    const QPointF center = roomDetails->mapToScene(QPointF(roomDetails->width() / 2, roomDetails->height() / 2));
+    ASSERT_GE(center.x(), 0);
+    ASSERT_LT(center.x(), window->width());
+    ASSERT_GE(center.y(), 0);
+    ASSERT_LT(center.y(), window->height());
+    roomDetails->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_Space);
+    ASSERT_TRUE(waitFor([&] { return details->property("visible").toBool(); }));
+    EXPECT_EQ(details->property("channelId").toString(), room);
+    EXPECT_EQ(app->selectedChannelId(), selected);
+    EXPECT_TRUE(app->voiceJoined());
+    ASSERT_TRUE(QMetaObject::invokeMethod(details, "close"));
+    app->leaveVoice();
+    ASSERT_TRUE(waitFor([&] { return !app->voiceJoined(); }));
+    ASSERT_TRUE(QMetaObject::invokeMethod(details, "openFor", Q_ARG(QVariant, room)));
+    ASSERT_TRUE(waitFor([&] { return details->property("visible").toBool(); }));
+    ASSERT_TRUE(daemon->call("channel.delete", {{"channel", room}}).ok);
+    ASSERT_TRUE(waitFor([&] { return !details->property("visible").toBool(); }));
+    EXPECT_TRUE(details->property("details").toMap().isEmpty());
+}
+
 int main(int argc, char** argv)
 {
     if (!qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     qputenv("OMACHAT_THEME", "builtin");
+    QTemporaryDir dataHome;
+    qputenv("XDG_DATA_HOME", dataHome.path().toUtf8());
     QGuiApplication app(argc, argv);
     qmlRegisterSingletonType<client::AppController>("OmaChat", 1, 0, "App", &client::AppController::create);
     qmlRegisterSingletonType<client::ThemeProvider>("OmaChat", 1, 0, "Theme", &client::ThemeProvider::create);
@@ -1824,5 +2292,7 @@ int main(int argc, char** argv)
         }
     }
     ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+    const int result = RUN_ALL_TESTS();
+    QThreadPool::globalInstance()->waitForDone();
+    return result;
 }

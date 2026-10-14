@@ -101,3 +101,17 @@ TEST(ArtworkCrop, FingerprintBindsPixelsAndDimensionsWithoutSourceMetadata)
     EXPECT_NE(artwork::fingerprint(source), original);
     EXPECT_NE(artwork::fingerprint(source.scaled(80, 120)), original);
 }
+
+TEST(ArtworkCrop, SharedSourceEncodingKeepsFullPixelsAndDropsText)
+{
+    QImage image(100, 50, QImage::Format_RGB32);
+    image.fill(Qt::blue);
+    image.setText("Author", "private source author");
+    QString error;
+    const auto bytes = artwork::encodeSource(image, &error);
+    ASSERT_FALSE(bytes.isEmpty()) << error.toStdString();
+    EXPECT_EQ(QImage::fromData(bytes).size(), image.size());
+    EXPECT_TRUE(QImage::fromData(bytes).textKeys().isEmpty());
+    EXPECT_FALSE(bytes.contains("private source author"));
+    EXPECT_TRUE(artwork::encodeSource({}, &error).isEmpty());
+}

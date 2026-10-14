@@ -110,6 +110,38 @@ QByteArray encodeCrop(
     return bytes;
 }
 
+QByteArray encodeSource(const QImage& source, QString* error)
+{
+    if (!validSize(source.size())) {
+        *error = QStringLiteral("Invalid artwork source dimensions.");
+        return {};
+    }
+    const QImage pixels = source.convertToFormat(QImage::Format_RGBA8888);
+    QImage clean(source.size(), QImage::Format_RGBA8888);
+    if (pixels.isNull() || clean.isNull()) {
+        *error = QStringLiteral("Cannot prepare this artwork source.");
+        return {};
+    }
+    bool opaque = true;
+    for (int y = 0; y < clean.height(); ++y) {
+        memcpy(clean.scanLine(y), pixels.constScanLine(y), size_t(clean.width()) * 4);
+        for (int x = 0; x < clean.width(); ++x)
+            opaque &= clean.constScanLine(y)[x * 4 + 3] == 255;
+    }
+    QByteArray bytes = png(clean);
+    if ((bytes.isEmpty() || bytes.size() > maxSourceBytes) && opaque) {
+        bytes.clear();
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        clean.convertToFormat(QImage::Format_RGB888).save(&buffer, "JPEG", 90);
+    }
+    if (bytes.isEmpty() || bytes.size() > maxSourceBytes) {
+        *error = QStringLiteral("The metadata-free full image exceeds 2 MiB. Choose a smaller image.");
+        return {};
+    }
+    return bytes;
+}
+
 QString fingerprint(const QImage& source)
 {
     const QImage canonical = source.convertToFormat(QImage::Format_RGBA8888);

@@ -16,6 +16,9 @@
 #include <QTimer>
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
+#include <memory>
+
+class QTemporaryFile;
 
 namespace omachat::client {
 
@@ -118,6 +121,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList serverEmoji READ serverEmoji NOTIFY emojiListChanged)
     Q_PROPERTY(bool canManageEmoji READ canManageEmoji NOTIFY rolesChanged)
     Q_PROPERTY(QVariantList channelOverrides READ channelOverrides NOTIFY overridesChanged)
+    Q_PROPERTY(QVariantMap permissionPreview READ permissionPreview NOTIFY permissionPreviewChanged)
     Q_PROPERTY(QVariantList safetyNumbers READ safetyNumbers NOTIFY safetyChanged)
     Q_PROPERTY(QVariantList permissionCatalog READ permissionCatalog CONSTANT)
 
@@ -132,6 +136,7 @@ class AppController : public QObject {
     Q_PROPERTY(QVariantList sendOperations READ sendOperations NOTIFY sendOperationsChanged)
     Q_PROPERTY(int failedSendCount READ failedSendCount NOTIFY sendOperationsChanged)
     Q_PROPERTY(quint64 artworkGeneration READ artworkGeneration NOTIFY artworkGenerationChanged)
+    Q_PROPERTY(QString artworkScopeFingerprint READ artworkScopeFingerprint NOTIFY artworkGenerationChanged)
     Q_PROPERTY(QVariantMap previews READ previews NOTIFY previewsChanged)
     Q_PROPERTY(QVariantMap previewErrors READ previewErrors NOTIFY previewsChanged)
     Q_PROPERTY(QVariantMap videoThumbnails READ videoThumbnails NOTIFY videoThumbnailsChanged)
@@ -237,7 +242,7 @@ public:
     QString selectedServerName() const;
     QString selectedServerDescription() const;
     QString selectedServerBannerId() const;
-    QVariantMap serverDetails(const QString& id) const;
+    Q_INVOKABLE QVariantMap serverDetails(const QString& id) const;
     bool homeSelected() const { return m_selectedServer == u"home"; }
     QString selectedChannelId() const { return m_selectedChannel; }
     QString selectedChannelName() const;
@@ -269,6 +274,7 @@ public:
     QVariantList sendOperations() const;
     int failedSendCount() const;
     quint64 artworkGeneration() const { return m_artworkCache.generation(); }
+    QString artworkScopeFingerprint() const { return m_artworkCache.scopeFingerprint(); }
     QVariantMap previews() const { return m_previews; }
     QVariantMap previewErrors() const { return m_previewErrors; }
     QVariantMap videoThumbnails() const { return m_videoThumbnails; }
@@ -403,22 +409,30 @@ public:
     Q_INVOKABLE void createChannel(const QString& name, const QString& type, const QString& parentId,
         const QString& topic, const QString& description, const QUrl& iconFile, const QUrl& bannerFile);
     Q_INVOKABLE void deleteChannel(const QString& id);
+    Q_INVOKABLE void duplicateChannel(const QString& id, const QString& name);
     Q_INVOKABLE void setTopic(const QString& topic);
     Q_INVOKABLE void updateChannelDetails(const QString& id, const QString& name, const QString& topic,
         const QString& description, const QVariantMap& original = {});
     Q_INVOKABLE void reloadChannelDetails(const QString& id);
-    Q_INVOKABLE void setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl);
+    Q_INVOKABLE void setChannelArtwork(
+        const QString& id, const QString& kind, const QUrl& fileUrl, const QVariantMap& original = {});
+    Q_INVOKABLE void stageArtworkCrop(int requestId, const QUrl& fileUrl, const QString& kind, double focalX,
+        double focalY, double zoom, const QString& fingerprint, bool keepSource = false);
+    Q_INVOKABLE void discardStagedArtwork(const QUrl& token);
     Q_INVOKABLE void prepareArtworkCrop(int requestId, const QUrl& fileUrl, const QString& kind);
+    Q_INVOKABLE void requestArtworkSource(int requestId, const QString& attachmentId);
     Q_INVOKABLE void setChannelArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
-        double focalY, double zoom, const QString& fingerprint);
+        double focalY, double zoom, const QString& fingerprint, const QVariantMap& original = {},
+        bool keepSource = false);
     Q_INVOKABLE void setServerArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
-        double focalY, double zoom, const QString& fingerprint);
+        double focalY, double zoom, const QString& fingerprint, bool keepSource = false);
     Q_INVOKABLE QVariantMap channelDetails(const QString& id) const { return channel(id).toVariantMap(); }
     Q_INVOKABLE QVariantList channelCategories() const;
     Q_INVOKABLE void moveChannelToCategory(const QString& id, const QString& parentId);
     Q_INVOKABLE void moveChannelRelative(const QString& id, int delta);
     Q_INVOKABLE QVariantList channelPlacementSiblings(const QString& id, const QString& parentId) const;
-    Q_INVOKABLE void placeChannel(const QString& id, const QString& parentId, const QString& beforeId);
+    Q_INVOKABLE void placeChannel(
+        const QString& id, const QString& parentId, const QString& beforeId, const QVariantMap& original = {});
     Q_INVOKABLE QString renderChannelDescription(const QString& content) const { return renderMarkdown(content); }
     Q_INVOKABLE void setChannelMuted(const QString& id, bool muted);
     Q_INVOKABLE bool channelMuted(const QString& id) const { return m_mutedChannels.contains(id); }
@@ -486,7 +500,17 @@ public:
     Q_INVOKABLE void deleteRole(const QString& roleId);
     Q_INVOKABLE void setMemberRole(const QString& userId, const QString& roleId, bool add);
     Q_INVOKABLE void loadOverrides(const QString& channelId);
+    Q_INVOKABLE void reloadChannelPlacement(const QString& id);
+    QVariantMap permissionPreview() const { return m_permissionPreview; }
+    Q_INVOKABLE void loadPermissionPreview(
+        const QString& channelId, const QString& userId = QString(), const QString& roleId = QString());
+    Q_INVOKABLE void loadCreationPermissionPreview(const QString& type, const QString& parentId,
+        const QString& userId = QString(), const QString& roleId = QString());
+    void requestPermissionPreview(const QString& channelId, const QString& userId, const QString& roleId, bool creation,
+        const QString& type, const QString& parentId);
+    void invalidatePermissionPreview();
     Q_INVOKABLE QVariantMap channelPermissionReview(const QString& channelId) const;
+    Q_INVOKABLE QVariantMap channelCreationAccessReview(const QString& type, const QString& parentId) const;
     // targetType is "role" or "user"; empty allow and deny remove the override.
     Q_INVOKABLE void setOverride(const QString& channelId, const QString& targetType, const QString& targetId,
         const QStringList& allow, const QStringList& deny);
@@ -496,8 +520,10 @@ public:
     Q_INVOKABLE QString userStatus(const QString& userId) const;
 
 signals:
+    void artworkCropStaged(int requestId, const QUrl& token, const QString& error);
+    void artworkSourceReady(int requestId, const QUrl& url, const QVariantMap& framing, const QString& error);
     void artworkCropPrepared(int requestId, const QString& previewUrl, const QString& error, const QString& fingerprint,
-        int sourceWidth, int sourceHeight);
+        int sourceWidth, int sourceHeight, const QVariantMap& remembered = {});
     void daemonChanged();
     void statusChanged();
     void instanceStatusChanged();
@@ -529,6 +555,7 @@ signals:
     void emojiListChanged();
     void safetyChanged();
     void overridesChanged();
+    void permissionPreviewChanged();
     // QML hooks
     void composerRestore(const QString& text);
     void sendOperationsChanged();
@@ -567,7 +594,8 @@ private:
     int selfRank() const; // highest role position held in the selected server
     void persistSelection();
     void setArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX, double focalY,
-        double zoom, const QString& fingerprint, bool serverArtwork);
+        double zoom, const QString& fingerprint, bool serverArtwork, const QVariantMap& original = {},
+        bool keepSource = false);
 
     config::ClientConfig m_config;
     bool m_uiSaving = false;
@@ -589,6 +617,10 @@ private:
     QHash<QString, QJsonObject> m_rolesById;
     QHash<QString, QJsonObject> m_emojiById;
     QVariantList m_channelOverrides;
+    QVariantMap m_permissionPreview;
+    quint64 m_permissionPreviewSerial = 0;
+    QString m_permissionPreviewAccount;
+    QString m_permissionPreviewServer;
     QVariantList m_safetyNumbers;
     bool m_addingAccount = false;
     bool m_shareStarting = false;
@@ -633,16 +665,48 @@ private:
     struct SendOperation {
         QString account, channel, content, replyTo, original, error;
         QVariantList files;
-        bool action = false, pending = true, retryable = false;
+        bool action = false, pending = true, retryable = false, durable = false, restored = false;
+        QString recoveryScope;
     };
     QHash<QString, SendOperation> m_sendOperations;
     void dispatchSend(const QString& id);
+    void refreshSendRecovery();
+    QString sendRecoveryScope() const;
+    QString sendRecoveryEndpoint() const;
+    QHash<QString, QString> m_recoveryPeerFingerprints;
+    quint64 m_sendRecoveryRequest = 0;
+    quint64 m_duplicateOperation = 0;
+    int currentSendCount() const;
     void refreshTransfers();
     void refreshArtworkCache(bool modelReady = false);
+    void scheduleArtworkCleanup();
+    void applyArtworkCleanup(const std::shared_ptr<ArtworkCache::Cleanup>& cleanup);
+    bool m_artworkCleanupRunning = false;
+    void downloadPreview(const QString& attachmentId, const QString& filename, double size, bool artwork);
+    void validateArtworkDownload(const ArtworkCache::Store& store, const QString& id, const QString& staging,
+        quint64 serial, bool cleanupOnly = false);
+    void finishArtworkDownload(
+        const std::shared_ptr<ArtworkCache::Store>& store, const QString& id, const QString& staging, quint64 serial);
     ArtworkCache m_artworkCache;
+    QHash<QString, quint64> m_artworkLookups;
+    quint64 m_artworkLookupSerial = 0;
     quint64 m_placementOperation = 0;
     quint64 m_cropOperation = 0;
+    struct StagedArtwork {
+        std::shared_ptr<QTemporaryFile> file;
+        QString account, server, kind;
+        quint64 generation = 0;
+        QJsonObject framing;
+    };
+    QHash<QString, StagedArtwork> m_stagedArtwork;
+    std::shared_ptr<QTemporaryFile> m_remoteArtworkSource;
+    bool m_sourceLoading = false;
+    quint64 m_stagedCropOperation = 0;
+    QString m_creationAccount, m_creationServer;
+    quint64 m_creationArtworkGeneration = 0;
+    void refreshCreationContext();
     quint64 m_channelDetailsGeneration = 0;
+    quint64 m_channelCreateGeneration = 0;
     QString m_artworkModelIdentity;
     QVariantMap m_previews; // attachment id -> local file URL
     QVariantMap m_previewErrors; // attachment id -> failed eager download

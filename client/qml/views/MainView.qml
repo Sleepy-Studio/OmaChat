@@ -55,6 +55,7 @@ Item {
             onOpenChannelPermissions: (id, name) => channelPermissions.openFor(id, name)
             onOpenChannelSettings: id => channelSettings.openFor(id)
             onOpenChannelDetails: id => channelDetails.openFor(id)
+            onDuplicateChannel: id => duplicateChannelDialog.openFor(id)
         }
     }
 
@@ -149,6 +150,7 @@ Item {
             id: bottomBar
             Layout.fillWidth: true
             onOpenSettings: settingsDialog.open()
+            onOpenChannelDetails: id => channelDetails.openFor(id)
         }
     }
 
@@ -276,10 +278,19 @@ Item {
         acceptText: qsTr("Rename")
         onAccepted: value => App.renameGroup(channelId, value)
     }
-    ChannelPermissionsDialog { id: channelPermissions }
-    ChannelSettingsDialog { id: channelSettings }
-    ChannelDetailsDialog { id: channelDetails; onEditRequested: id => channelSettings.openFor(id) }
+    ChannelPermissionsDialog {
+        id: channelPermissions
+        objectName: "channelPermissionsDialog"
+        onClosed: { if (channelSettings.visible) channelSettings.contentItem.forceActiveFocus() }
+    }
+    ChannelSettingsDialog {
+        id: channelSettings
+        objectName: "channelSettingsDialog"
+        onOpenPermissionsRequested: (id, name) => channelPermissions.openFor(id, name)
+    }
+    ChannelDetailsDialog { id: channelDetails; objectName: "channelDetailsDialog"; onEditRequested: id => channelSettings.openFor(id) }
     CreateChannelDialog { id: createChannelDialog }
+    DuplicateChannelDialog { id: duplicateChannelDialog }
 
     CreateServerDialog {
         id: createServerDialog

@@ -14,6 +14,7 @@ Rectangle {
     signal openChannelPermissions(string channelId, string name)
     signal openChannelSettings(string channelId)
     signal openChannelDetails(string channelId)
+    signal duplicateChannel(string channelId)
     signal newGroup()
     signal addToGroup(string channelId)
     signal renameGroup(string channelId, string name)
@@ -26,8 +27,11 @@ Rectangle {
     property string dragType: ""
     property string dragServer: ""
     property string dragAccount: ""
+    property var dragOriginal: ({})
     property var dragGeneration: 0
     property point dragStart: Qt.point(0, 0)
+    property point dragPoint: Qt.point(0, 0)
+    property int dragPreviousIndex: -1
     property bool dragging: false
     property bool suppressPlacementClick: false
     property var dropTarget: null
@@ -36,10 +40,16 @@ Rectangle {
     property bool placementFailed: false
 
     function cancelPlacementGesture() {
+        const hadGesture = dragId.length > 0
         if (dragging) suppressPlacementClick = true
         dragging = false
         dragId = ""
+        dragOriginal = ({})
         dropTarget = null
+        edgeScroll.stop()
+        if (hadGesture && dragPreviousIndex >= -1 && dragPreviousIndex < list.count)
+            list.currentIndex = dragPreviousIndex
+        dragPreviousIndex = -1
     }
     function placementContextValid() {
         return placementAllowed && App.selectedServerId === dragServer && App.accountId === dragAccount
@@ -53,7 +63,15 @@ Rectangle {
         dragServer = App.selectedServerId
         dragAccount = App.accountId
         dragGeneration = App.artworkGeneration
+        dragOriginal = App.channelDetails(id)
         dragStart = point
+        dragPoint = point
+        dragPreviousIndex = list.currentIndex
+        // ListView retains currentItem outside its cache. Pin only the pressed
+        // delegate so its mouse grab survives scrolling through a long list.
+        for (let i = 0; i < list.count; ++i) {
+            if (list.model.get(i).itemId === id) { list.currentIndex = i; break }
+        }
         dropTarget = null
     }
     function updatePlacement(point) {
@@ -61,11 +79,54 @@ Rectangle {
         if (!placementContextValid()) { cancelPlacementGesture(); return }
         if (!dragging && Math.hypot(point.x - dragStart.x, point.y - dragStart.y) < Metrics.px(8)) return
         dragging = true
+        dragPoint = point
         suppressPlacementClick = true
         list.forceActiveFocus()
+        resolvePlacement(point)
+        edgeScroll.running = edgeScrollStep() !== 0
+    }
+    function edgeScrollStep() {
+        if (!dragging || !dragId.length || !placementContextValid() || pendingPlacementId.length
+            || dragPoint.x < 0 || dragPoint.x >= list.width || dragPoint.y < 0 || dragPoint.y >= list.height) return 0
+        const zone = Math.min(Metrics.px(36), list.height / 4)
+        if (zone <= 0) return 0
+        const minimum = list.originY
+        const maximum = minimum + Math.max(0, list.contentHeight - list.height)
+        // One bounded step per tick, proportional to penetration into the edge.
+        if (dragPoint.y < zone && list.contentY > minimum)
+            return -Math.max(1, Metrics.px(12) * (zone - dragPoint.y) / zone)
+        if (dragPoint.y > list.height - zone && list.contentY < maximum)
+            return Math.max(1, Metrics.px(12) * (dragPoint.y - list.height + zone) / zone)
+        return 0
+    }
+    function scrollPlacementEdge() {
+        if (!placementContextValid()) { cancelPlacementGesture(); return }
+        const step = edgeScrollStep()
+        if (!step) { edgeScroll.stop(); return }
+        list.contentY = Math.max(list.originY, Math.min(list.originY + Math.max(0, list.contentHeight - list.height), list.contentY + step))
+        // Layout newly visible delegates before resolving the stationary pointer.
+        list.forceLayout()
+        resolvePlacement(dragPoint)
+        if (!edgeScrollStep()) edgeScroll.stop()
+    }
+    Timer {
+        id: edgeScroll
+        objectName: "channelPlacementEdgeScroll"
+        interval: 30
+        repeat: true
+        onTriggered: sidebar.scrollPlacementEdge()
+    }
+    function resolvePlacement(point) {
         dropTarget = null
-        // Bounds are deliberate: there is no edge scrolling or off-list drop.
+        // Leaving the viewport neither scrolls nor accepts a drop.
         if (point.x < 0 || point.x >= list.width || point.y < 0 || point.y >= list.height) return
+        // The final narrow strip also exposes top-level/category end placement
+        // when the last row exactly fills the scrolled viewport.
+        if (point.y + list.contentY >= list.originY + list.contentHeight - Metrics.px(3)) {
+            dropTarget = {parentId: "0", beforeId: "", cueY: Math.min(list.height - 2, list.originY + list.contentHeight - list.contentY),
+                label: dragType === "category" ? qsTr("Category at the end") : qsTr("At the end · Top level")}
+            return
+        }
         const index = list.indexAt(point.x + list.contentX, point.y + list.contentY)
         if (index < 0) {
             // Only the empty space below the final row is a top-level end target.
@@ -113,13 +174,14 @@ Rectangle {
         updatePlacement(point)
         const id = dragId
         const target = dropTarget
+        const original = dragOriginal
         const valid = placementContextValid()
         cancelPlacementGesture()
         if (!valid || !target || pendingPlacementId.length) return
         pendingPlacementId = id
         placementFailed = false
         placementFeedback = qsTr("Saving placement…")
-        App.placeChannel(id, target.parentId, target.beforeId)
+        App.placeChannel(id, target.parentId, target.beforeId, original)
     }
     function resetPlacementContext() {
         cancelPlacementGesture()
@@ -700,6 +762,12 @@ Rectangle {
         property string channelId
         property string channelName
         MenuAction {
+            text: qsTr("Duplicate category…")
+            enabled: App.state === "connected" && App.canManageChannels
+                && App.capabilities.indexOf("channel.duplicate.v1") >= 0
+            onTriggered: Qt.callLater(() => sidebar.duplicateChannel(categoryMenu.channelId))
+        }
+        MenuAction {
             text: qsTr("Category settings")
             enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
             onTriggered: Qt.callLater(() => sidebar.openChannelSettings(categoryMenu.channelId))
@@ -747,6 +815,13 @@ Rectangle {
         property bool isVoice
         property bool isGroup
         property string userId
+        MenuAction {
+            text: qsTr("Duplicate channel…")
+            enabled: App.state === "connected" && App.canManageChannels
+                && channelMenu.userId.length === 0 && !channelMenu.isGroup
+                && App.capabilities.indexOf("channel.duplicate.v1") >= 0
+            onTriggered: Qt.callLater(() => sidebar.duplicateChannel(channelMenu.channelId))
+        }
         MenuAction {
             text: channelMenu.isVoice ? qsTr("Join voice") : qsTr("Open")
             onTriggered: App.selectChannel(channelMenu.channelId)

@@ -5,6 +5,7 @@
 
 #include "omachat/core/Paths.hpp"
 #include "platform/ArtworkCrop.hpp"
+#include "platform/ArtworkCropMemory.hpp"
 #include "text/PasteContent.hpp"
 
 #include <QClipboard>
@@ -25,6 +26,7 @@
 #include <QTemporaryFile>
 #include <QThreadPool>
 #include <QUrl>
+#include <QUuid>
 #include <atomic>
 #include <memory>
 
@@ -33,24 +35,48 @@ namespace omachat::client {
 namespace {
 
 QString cropIdentityFingerprint(
-    const QImage& source, const QString& identity, const QString& server, quint64 generation)
+    const QString& pixels, const QString& identity, const QString& server, quint64 generation)
 {
-    return QString::fromLatin1(
-        QCryptographicHash::hash((artwork::fingerprint(source) + QLatin1Char('/') + identity + QLatin1Char('/') + server
-                                     + QLatin1Char('/') + QString::number(generation))
-                                     .toUtf8(),
-            QCryptographicHash::Sha256)
+    return QString::fromLatin1(QCryptographicHash::hash((pixels + QLatin1Char('/') + identity + QLatin1Char('/')
+                                                            + server + QLatin1Char('/') + QString::number(generation))
+                                                            .toUtf8(),
+        QCryptographicHash::Sha256)
             .toHex());
 }
 
 constexpr int kMaxFilesPerMessage = 10;
 std::atomic<int> artworkJobs{0};
+std::atomic<int> artworkLookupJobs{0};
+std::atomic<int> cropMemoryJobs{0};
 bool reserveArtworkJob()
 {
     if (artworkJobs.fetch_add(1) < 2)
         return true;
     artworkJobs.fetch_sub(1);
     return false;
+}
+// Snapshot paths on the GUI thread; persistence itself stays off-thread.
+QJsonObject sourceFraming(const QImage& source, const QString& kind, double x, double y, double zoom)
+{
+    const QRect rect = artwork::cropRect(source.size(), kind, x, y, zoom);
+    if (rect.isEmpty())
+        return {};
+    return {{"source_width", source.width()}, {"source_height", source.height()}, {"x", rect.x()}, {"y", rect.y()},
+        {"width", rect.width()}, {"height", rect.height()}};
+}
+
+void rememberCrop(const QString& directory, const QString& key, artwork::CropChoice choice)
+{
+    if (key.isEmpty())
+        return;
+    if (cropMemoryJobs.fetch_add(1) >= 8) {
+        cropMemoryJobs.fetch_sub(1);
+        return;
+    }
+    QThreadPool::globalInstance()->start([directory, key, choice] {
+        artwork::saveCropChoice(directory, key, choice);
+        cropMemoryJobs.fetch_sub(1);
+    });
 }
 // Previews download automatically, so keep them to what a glance needs.
 constexpr double kMaxPreviewBytes = 10.0 * 1024 * 1024;
@@ -325,18 +351,28 @@ void AppController::refreshArtworkCache(bool modelReady)
     const quint64 before = m_artworkCache.generation();
     const QSet<QString> removed
         = m_artworkCache.reconcile(identity, authorizedIds, active, accessLost || identity == m_artworkModelIdentity);
+    for (auto it = m_stagedArtwork.begin(); it != m_stagedArtwork.end();) {
+        if (accessLost || it->account != accountId() || it->server != m_selectedServer
+            || it->generation != m_artworkCache.generation())
+            it = m_stagedArtwork.erase(it);
+        else
+            ++it;
+    }
     bool changed = false;
     for (const auto& id : removed) {
         changed |= m_previews.remove(id) > 0;
         changed |= m_previewErrors.remove(id) > 0;
         m_previewRequests.remove(id);
+        m_artworkLookups.remove(id);
     }
     if (before != m_artworkCache.generation()) {
+        m_remoteArtworkSource.reset();
         // Attachment IDs have meaning only within an authenticated endpoint.
         changed |= !m_previews.isEmpty() || !m_previewErrors.isEmpty();
         m_previews.clear();
         m_previewErrors.clear();
         m_previewRequests.clear();
+        m_artworkLookups.clear();
         m_videoThumbnails.clear();
         m_videoThumbnailRequests.clear();
         m_pendingMediaRequests.clear();
@@ -347,6 +383,46 @@ void AppController::refreshArtworkCache(bool modelReady)
     }
     if (changed)
         emit previewsChanged();
+    scheduleArtworkCleanup();
+}
+
+void AppController::scheduleArtworkCleanup()
+{
+    if (m_artworkCleanupRunning || !m_artworkCache.cleanupPending())
+        return;
+    m_artworkCleanupRunning = true;
+    if (artworkLookupJobs.fetch_add(1) >= 2) {
+        artworkLookupJobs.fetch_sub(1);
+        QTimer::singleShot(50, this, [this] {
+            m_artworkCleanupRunning = false;
+            scheduleArtworkCleanup();
+        });
+        return;
+    }
+    const auto cleanup = m_artworkCache.prepareCleanup();
+    const QPointer<AppController> guard(this);
+    QThreadPool::globalInstance()->start([guard, cleanup] {
+        const auto result = std::make_shared<ArtworkCache::Cleanup>(ArtworkCache::scanCleanup(cleanup));
+        artworkLookupJobs.fetch_sub(1);
+        QMetaObject::invokeMethod(
+            QCoreApplication::instance(),
+            [guard, result] {
+                if (guard)
+                    guard->applyArtworkCleanup(result);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::applyArtworkCleanup(const std::shared_ptr<ArtworkCache::Cleanup>& cleanup)
+{
+    const auto result = m_artworkCache.finishCleanup(*cleanup);
+    if (result == ArtworkCache::CleanupResult::More) {
+        QTimer::singleShot(0, this, [this, cleanup] { applyArtworkCleanup(cleanup); });
+        return;
+    }
+    m_artworkCleanupRunning = false;
+    scheduleArtworkCleanup();
 }
 
 void AppController::requestPreview(const QString& attachmentId, const QString& filename, double size)
@@ -363,24 +439,62 @@ void AppController::requestPreview(const QString& attachmentId, const QString& f
         artwork |= identifiesArtwork(object);
     if (artwork && !m_artworkCache.authorized(attachmentId))
         return;
-    const QString cachedArtwork = artwork ? m_artworkCache.lookup(attachmentId) : QString();
-    if (artwork && m_previews.contains(attachmentId)) {
-        // Detect deleted/corrupt disk entries before considering a URL reusable.
-        if (cachedArtwork.isEmpty()) {
-            m_previews.remove(attachmentId);
-            emit previewsChanged();
-        }
-    }
-    if (size > kMaxPreviewBytes || m_previews.contains(attachmentId) || m_previewRequests.contains(attachmentId))
+    if (size > kMaxPreviewBytes || m_previewRequests.contains(attachmentId))
         return;
-    if (artwork) {
-        if (!cachedArtwork.isEmpty()) {
-            m_previewErrors.remove(attachmentId);
-            m_previews.insert(attachmentId, QUrl::fromLocalFile(cachedArtwork));
-            emit previewsChanged();
-            return;
-        }
+    if (!artwork) {
+        if (!m_previews.contains(attachmentId))
+            downloadPreview(attachmentId, filename, size, false);
+        return;
     }
+    m_previewRequests.insert(attachmentId);
+    const quint64 serial = ++m_artworkLookupSerial;
+    m_artworkLookups.insert(attachmentId, serial);
+    if (artworkLookupJobs.fetch_add(1) >= 2) {
+        artworkLookupJobs.fetch_sub(1);
+        // Deduplicated backpressure: do not enqueue an unbounded decoder queue.
+        QTimer::singleShot(50, this, [this, attachmentId, filename, size, serial] {
+            if (m_artworkLookups.value(attachmentId) != serial)
+                return;
+            m_artworkLookups.remove(attachmentId);
+            m_previewRequests.remove(attachmentId);
+            requestPreview(attachmentId, filename, size);
+        });
+        return;
+    }
+    const auto lookup = m_artworkCache.prepareLookup(attachmentId);
+    const QPointer<AppController> guard(this);
+    QThreadPool::globalInstance()->start([guard, lookup, attachmentId, filename, size, serial] {
+        const auto result = ArtworkCache::validateLookup(lookup);
+        artworkLookupJobs.fetch_sub(1);
+        QMetaObject::invokeMethod(
+            QCoreApplication::instance(),
+            [guard, result, attachmentId, filename, size, serial] {
+                if (!guard || guard->m_artworkLookups.value(attachmentId) != serial)
+                    return;
+                guard->m_artworkLookups.remove(attachmentId);
+                guard->m_previewRequests.remove(attachmentId);
+                if (!guard->m_artworkCache.authorized(attachmentId))
+                    return;
+                const QString path = guard->m_artworkCache.finishLookup(result);
+                if (!path.isEmpty()) {
+                    const QUrl url = QUrl::fromLocalFile(path);
+                    const bool changed = guard->m_previews.value(attachmentId).toUrl() != url;
+                    const bool error = guard->m_previewErrors.remove(attachmentId) > 0;
+                    guard->m_previews.insert(attachmentId, url);
+                    if (changed || error)
+                        emit guard->previewsChanged();
+                    return;
+                }
+                if (guard->m_previews.remove(attachmentId))
+                    emit guard->previewsChanged();
+                guard->downloadPreview(attachmentId, filename, size, true);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::downloadPreview(const QString& attachmentId, const QString& filename, double size, bool artwork)
+{
     if (artwork && m_artworkCache.stagingFull()) {
         // Keep one pending timer per authorized ID while transfer slots are full.
         // Capacity pressure is loading, not a download failure.
@@ -407,22 +521,39 @@ void AppController::requestPreview(const QString& attachmentId, const QString& f
     if (m_previewErrors.remove(attachmentId))
         emit previewsChanged();
     const quint64 generation = m_artworkCache.generation();
+    const quint64 serial = ++m_artworkLookupSerial;
+    if (artwork)
+        m_artworkLookups.insert(attachmentId, serial);
+    QJsonObject params{{"attachment", attachmentId}, {"filename", filename},
+        {"to", artwork ? staging : QStringLiteral("cache")}, {"size", size}};
+    if (artwork && capabilities().contains(QStringLiteral("artwork.framing.v1"))) {
+        bool banner = false;
+        for (const auto& object : m_channelsById)
+            banner |= object.value(QStringLiteral("banner_attachment_id")).toString() == attachmentId;
+        for (const auto& object : m_serversById)
+            banner |= object.value(QStringLiteral("banner_attachment_id")).toString() == attachmentId;
+        if (!banner)
+            params.insert(QStringLiteral("artwork_variant"), QStringLiteral("small"));
+    }
     m_link.request(
-        QStringLiteral("attachment.download"),
-        {{"attachment", attachmentId}, {"filename", filename}, {"to", artwork ? staging : QStringLiteral("cache")},
-            {"size", size}},
-        [this, attachmentId, artwork, staging, generation](const ipc::Reply& r) {
-            if (generation != m_artworkCache.generation() || (artwork && !m_artworkCache.authorized(attachmentId))) {
+        QStringLiteral("attachment.download"), params,
+        [this, attachmentId, artwork, staging, generation, serial](const ipc::Reply& r) {
+            if (generation != m_artworkCache.generation()
+                || (artwork
+                    && (!m_artworkCache.authorized(attachmentId) || m_artworkLookups.value(attachmentId) != serial))) {
                 m_artworkCache.discard(staging);
                 return;
             }
+            if (artwork && r.ok) {
+                validateArtworkDownload(
+                    m_artworkCache.prepareStore(attachmentId, staging, generation), attachmentId, staging, serial);
+                return;
+            }
             m_previewRequests.remove(attachmentId);
-            QString path;
-            if (r.ok)
-                path = artwork ? m_artworkCache.store(attachmentId, staging, generation)
-                               : r.result.value(QStringLiteral("path")).toString();
-            else
-                m_artworkCache.discard(staging);
+            if (artwork)
+                m_artworkLookups.remove(attachmentId);
+            const QString path = r.ok ? r.result.value(QStringLiteral("path")).toString() : QString();
+            m_artworkCache.discard(staging);
             if (path.isEmpty()) {
                 m_previewErrors.insert(attachmentId, true);
                 emit previewsChanged();
@@ -432,6 +563,68 @@ void AppController::requestPreview(const QString& attachmentId, const QString& f
             emit previewsChanged();
         },
         0);
+}
+
+void AppController::validateArtworkDownload(
+    const ArtworkCache::Store& store, const QString& id, const QString& staging, quint64 serial, bool cleanupOnly)
+{
+    if (m_artworkLookups.value(id) != serial || !m_artworkCache.authorized(id)) {
+        m_artworkCache.discard(staging);
+        return;
+    }
+    // Share the cache lookup's two process-wide slots. Keep the registered
+    // staging owner while waiting, rather than redownloading under pressure.
+    if (artworkLookupJobs.fetch_add(1) >= 2) {
+        artworkLookupJobs.fetch_sub(1);
+        QTimer::singleShot(50, this, [this, store, id, staging, serial, cleanupOnly] {
+            validateArtworkDownload(store, id, staging, serial, cleanupOnly);
+        });
+        return;
+    }
+    const QPointer<AppController> guard(this);
+    QThreadPool::globalInstance()->start([guard, store, id, staging, serial, cleanupOnly] {
+        const auto result = std::make_shared<ArtworkCache::Store>(
+            cleanupOnly ? ArtworkCache::scanStoreCleanup(store) : ArtworkCache::validateStore(store));
+        artworkLookupJobs.fetch_sub(1);
+        QMetaObject::invokeMethod(
+            QCoreApplication::instance(),
+            [guard, result, id, staging, serial] {
+                if (guard)
+                    guard->finishArtworkDownload(result, id, staging, serial);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::finishArtworkDownload(
+    const std::shared_ptr<ArtworkCache::Store>& store, const QString& id, const QString& staging, quint64 serial)
+{
+    if (m_artworkLookups.value(id) != serial || !m_artworkCache.authorized(id)) {
+        m_artworkCache.discard(staging);
+        return;
+    }
+    QString path;
+    const auto result = m_artworkCache.finishStore(*store, path);
+    if (result == ArtworkCache::CleanupResult::More) {
+        QTimer::singleShot(
+            0, this, [this, store, id, staging, serial] { finishArtworkDownload(store, id, staging, serial); });
+        return;
+    }
+    if (result == ArtworkCache::CleanupResult::Stale) {
+        validateArtworkDownload(m_artworkCache.prepareStoreCleanup(*store), id, staging, serial, true);
+        return;
+    }
+    m_artworkLookups.remove(id);
+    m_previewRequests.remove(id);
+    if (path.isEmpty()) {
+        m_artworkCache.discard(staging);
+        m_previewErrors.insert(id, true);
+    } else {
+        m_previewErrors.remove(id);
+        m_previews.insert(id, QUrl::fromLocalFile(path));
+    }
+    emit previewsChanged();
+    scheduleArtworkCleanup();
 }
 
 // Unlike requestPreview, this is only ever called from a deliberate tap on a
@@ -659,6 +852,54 @@ void AppController::openVideoAttachment(const QString& attachmentId, const QStri
         0);
 }
 
+void AppController::requestArtworkSource(int requestId, const QString& attachmentId)
+{
+    refreshArtworkCache();
+    if (!ready() || !capabilities().contains(QStringLiteral("artwork.framing.v1"))
+        || !m_artworkCache.authorized(attachmentId)) {
+        emit artworkSourceReady(requestId, {}, {}, tr("Connect with access to this artwork before reframing it."));
+        return;
+    }
+    if (m_sourceLoading) {
+        emit artworkSourceReady(requestId, {}, {}, tr("Another artwork source is loading. Try again shortly."));
+        return;
+    }
+    auto file = std::make_shared<QTemporaryFile>(QDir::tempPath() + QStringLiteral("/omachat-source-XXXXXX"));
+    if (!file->open()) {
+        emit artworkSourceReady(requestId, {}, {}, tr("Cannot prepare a private artwork source file."));
+        return;
+    }
+    file->close();
+    const QString identity = accountId();
+    const QString server = m_selectedServer;
+    const quint64 generation = artworkGeneration();
+    const QPointer<AppController> guard(this);
+    m_sourceLoading = true;
+    m_link.request(QStringLiteral("attachment.download"),
+        {{"attachment", attachmentId}, {"to", file->fileName()}, {"artwork_variant", "source"}},
+        [guard, file, requestId, attachmentId, identity, server, generation](const ipc::Reply& reply) {
+            if (!guard)
+                return;
+            guard->m_sourceLoading = false;
+            if (guard->accountId() != identity || guard->m_selectedServer != server
+                || guard->artworkGeneration() != generation || !guard->m_artworkCache.authorized(attachmentId)) {
+                emit guard->artworkSourceReady(
+                    requestId, {}, {}, guard->tr("Artwork access changed. Open the crop again."));
+                return;
+            }
+            if (!reply.ok) {
+                emit guard->artworkSourceReady(requestId, {}, {},
+                    reply.errorCode == u"NotFound" ? guard->tr("No retained source is available, or management access "
+                                                               "changed. Choose a replacement image.")
+                                                   : reply.errorMessage);
+                return;
+            }
+            guard->m_remoteArtworkSource = file;
+            emit guard->artworkSourceReady(requestId, QUrl::fromLocalFile(file->fileName()),
+                reply.result.value(QStringLiteral("framing")).toObject().toVariantMap(), {});
+        });
+}
+
 void AppController::prepareArtworkCrop(int requestId, const QUrl& fileUrl, const QString& kind)
 {
     if (!fileUrl.isLocalFile() || (kind != u"icon" && kind != u"banner")) {
@@ -673,18 +914,27 @@ void AppController::prepareArtworkCrop(int requestId, const QUrl& fileUrl, const
     const QString identity = accountId();
     const QString server = m_selectedServer;
     const quint64 generation = m_artworkCache.generation();
-    QThreadPool::globalInstance()->start([guard, requestId, identity, server, generation,
-                                             path = fileUrl.toLocalFile()] {
+    const QString memoryIdentity = m_artworkCache.scopeFingerprint();
+    const QString memoryDirectory = paths::dataDir() + QStringLiteral("/artwork-crops");
+    QThreadPool::globalInstance()->start([guard, requestId, identity, server, generation, memoryIdentity,
+                                             memoryDirectory, kind, path = fileUrl.toLocalFile()] {
         QString error;
         const QImage source = artwork::readSource(path, &error);
+        const QString pixels = source.isNull() ? QString() : artwork::fingerprint(source);
         const QString preview = source.isNull() ? QString() : artwork::previewUrl(source);
         const QString fingerprint
-            = source.isNull() ? QString() : cropIdentityFingerprint(source, identity, server, generation);
+            = source.isNull() ? QString() : cropIdentityFingerprint(pixels, identity, server, generation);
         const QSize size = source.size();
+        QVariantMap remembered;
+        const auto choice = source.isNull()
+            ? std::nullopt
+            : artwork::loadCropChoice(memoryDirectory, artwork::cropMemoryKey(memoryIdentity, server, pixels, kind));
+        if (choice)
+            remembered = {{"x", choice->x}, {"y", choice->y}, {"zoom", choice->zoom}};
         artworkJobs.fetch_sub(1);
         QMetaObject::invokeMethod(
             QCoreApplication::instance(),
-            [guard, requestId, preview, error, fingerprint, size, identity, server, generation] {
+            [guard, requestId, preview, error, fingerprint, size, identity, server, generation, remembered] {
                 if (!guard)
                     return;
                 if (guard->accountId() != identity || guard->m_selectedServer != server
@@ -693,26 +943,104 @@ void AppController::prepareArtworkCrop(int requestId, const QUrl& fileUrl, const
                         tr("Account, server or artwork access changed. Choose the image again."), {}, 0, 0);
                     return;
                 }
-                emit guard->artworkCropPrepared(requestId, preview, error, fingerprint, size.width(), size.height());
+                emit guard->artworkCropPrepared(
+                    requestId, preview, error, fingerprint, size.width(), size.height(), remembered);
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void AppController::discardStagedArtwork(const QUrl& token)
+{
+    m_stagedArtwork.remove(token.toString());
+}
+
+void AppController::stageArtworkCrop(int requestId, const QUrl& fileUrl, const QString& kind, double focalX,
+    double focalY, double zoom, const QString& fingerprint, bool keepSource)
+{
+    const quint64 operation = ++m_stagedCropOperation;
+    if (!ready() || !fileUrl.isLocalFile() || (kind != u"icon" && kind != u"banner")) {
+        emit artworkCropStaged(requestId, {}, tr("Choose a local image while connected to this server."));
+        return;
+    }
+    if (!reserveArtworkJob()) {
+        emit artworkCropStaged(requestId, {}, tr("Another image is being prepared. Try again shortly."));
+        return;
+    }
+    const QPointer<AppController> guard(this);
+    const QString identity = accountId();
+    const QString server = m_selectedServer;
+    const quint64 generation = m_artworkCache.generation();
+    const bool shared = keepSource && capabilities().contains(QStringLiteral("artwork.framing.v1"));
+    const QString memoryIdentity = m_artworkCache.scopeFingerprint();
+    const QString memoryDirectory = paths::dataDir() + QStringLiteral("/artwork-crops");
+    QThreadPool::globalInstance()->start([guard, requestId, operation, identity, server, generation, kind,
+                                             memoryIdentity, memoryDirectory, shared, path = fileUrl.toLocalFile(),
+                                             focalX, focalY, zoom, fingerprint] {
+        QString error;
+        const QImage source = artwork::readSource(path, &error);
+        const QString pixels = source.isNull() ? QString() : artwork::fingerprint(source);
+        const bool matches = !source.isNull() && !fingerprint.isEmpty()
+            && cropIdentityFingerprint(pixels, identity, server, generation) == fingerprint;
+        if (!source.isNull() && !matches)
+            error = QStringLiteral("The selected image changed. Choose it again before using the crop.");
+        const QJsonObject framing
+            = matches && shared ? sourceFraming(source, kind, focalX, focalY, zoom) : QJsonObject();
+        const QByteArray bytes = !matches ? QByteArray()
+            : shared                      ? (framing.isEmpty() ? QByteArray() : artwork::encodeSource(source, &error))
+                                          : artwork::encodeCrop(source, kind, focalX, focalY, zoom, &error);
+        if (matches && bytes.isEmpty() && error.isEmpty())
+            error = QStringLiteral("Invalid crop settings.");
+        artworkJobs.fetch_sub(1);
+        QMetaObject::invokeMethod(
+            QCoreApplication::instance(),
+            [guard, requestId, operation, identity, server, generation, kind, bytes, framing, error,
+                key = matches ? artwork::cropMemoryKey(memoryIdentity, server, pixels, kind) : QString(),
+                memoryDirectory, choice = artwork::CropChoice{focalX, focalY, zoom}] {
+                if (!guard || guard->m_stagedCropOperation != operation || guard->accountId() != identity
+                    || guard->m_selectedServer != server || guard->m_artworkCache.generation() != generation)
+                    return;
+                if (!error.isEmpty()) {
+                    emit guard->artworkCropStaged(requestId, {}, error);
+                    return;
+                }
+                // At most an icon, banner and their replacements; no unbounded staging queue.
+                if (guard->m_stagedArtwork.size() >= 4) {
+                    emit guard->artworkCropStaged(requestId, {}, tr("Clear an unused crop before choosing another."));
+                    return;
+                }
+                auto file = std::make_shared<QTemporaryFile>(
+                    QDir::tempPath() + QStringLiteral("/omachat-artwork-XXXXXX.png"));
+                if (!file->open() || file->write(bytes) != bytes.size() || !file->flush()) {
+                    emit guard->artworkCropStaged(requestId, {}, tr("Cannot prepare the cropped artwork."));
+                    return;
+                }
+                file->close();
+                const QUrl token(
+                    QStringLiteral("omachat-artwork:") + QUuid::createUuid().toString(QUuid::WithoutBraces));
+                guard->m_stagedArtwork.insert(token.toString(), {file, identity, server, kind, generation, framing});
+                rememberCrop(memoryDirectory, key, choice);
+                emit guard->artworkCropStaged(requestId, token, {});
             },
             Qt::QueuedConnection);
     });
 }
 
 void AppController::setChannelArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
-    double focalY, double zoom, const QString& fingerprint)
+    double focalY, double zoom, const QString& fingerprint, const QVariantMap& original, bool keepSource)
 {
-    setArtworkCrop(id, kind, fileUrl, focalX, focalY, zoom, fingerprint, false);
+    setArtworkCrop(id, kind, fileUrl, focalX, focalY, zoom, fingerprint, false, original, keepSource);
 }
 
 void AppController::setServerArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
-    double focalY, double zoom, const QString& fingerprint)
+    double focalY, double zoom, const QString& fingerprint, bool keepSource)
 {
-    setArtworkCrop(id, kind, fileUrl, focalX, focalY, zoom, fingerprint, true);
+    setArtworkCrop(id, kind, fileUrl, focalX, focalY, zoom, fingerprint, true, {}, keepSource);
 }
 
 void AppController::setArtworkCrop(const QString& id, const QString& kind, const QUrl& fileUrl, double focalX,
-    double focalY, double zoom, const QString& fingerprint, bool serverArtwork)
+    double focalY, double zoom, const QString& fingerprint, bool serverArtwork, const QVariantMap& original,
+    bool keepSource)
 {
     const quint64 operation = ++m_cropOperation;
     const QString operationName
@@ -721,6 +1049,23 @@ void AppController::setArtworkCrop(const QString& id, const QString& kind, const
         emit administrationFinished(operationName, id, tr("Select a server you can manage before uploading artwork."));
         return;
     }
+    const QJsonObject current = channel(id);
+    if (!serverArtwork
+        && (!ready() || state() != u"connected" || !canManageChannels()
+            || current.value(QStringLiteral("server_id")).toString() != m_selectedServer)) {
+        emit administrationFinished(
+            operationName, id, tr("Connect with channel management permission before uploading artwork."));
+        return;
+    }
+    if (!serverArtwork && !capabilities().contains(QStringLiteral("channel.artwork.cas.v1"))) {
+        emit administrationFinished(
+            operationName, id, tr("This server needs an update before checked artwork can be saved."));
+        return;
+    }
+    const QJsonObject baselineArtwork = original.isEmpty() ? current : QJsonObject::fromVariantMap(original);
+    const QJsonObject expected{
+        {"icon_attachment_id", baselineArtwork.value(QStringLiteral("icon_attachment_id")).toString("0")},
+        {"banner_attachment_id", baselineArtwork.value(QStringLiteral("banner_attachment_id")).toString("0")}};
     if (!fileUrl.isLocalFile()) {
         emit administrationFinished(operationName, id, tr("Choose a local image file."));
         return;
@@ -733,20 +1078,32 @@ void AppController::setArtworkCrop(const QString& id, const QString& kind, const
     const QString identity = accountId();
     const QString server = m_selectedServer;
     const quint64 generation = m_artworkCache.generation();
+    const bool shared = keepSource && capabilities().contains(QStringLiteral("artwork.framing.v1"));
+    const QString memoryIdentity = m_artworkCache.scopeFingerprint();
+    const QString memoryDirectory = paths::dataDir() + QStringLiteral("/artwork-crops");
     QThreadPool::globalInstance()->start([guard, id, kind, path = fileUrl.toLocalFile(), focalX, focalY, zoom, identity,
-                                             generation, fingerprint, server, operation, operationName, serverArtwork] {
+                                             memoryIdentity, memoryDirectory, shared, generation, fingerprint, server,
+                                             operation, operationName, serverArtwork, expected] {
         QString error;
         const QImage source = artwork::readSource(path, &error);
+        const QString pixels = source.isNull() ? QString() : artwork::fingerprint(source);
         const bool matches = !source.isNull() && !fingerprint.isEmpty()
-            && cropIdentityFingerprint(source, identity, server, generation) == fingerprint;
+            && cropIdentityFingerprint(pixels, identity, server, generation) == fingerprint;
         if (!source.isNull() && !matches)
             error = QStringLiteral("The selected image changed. Choose it again before uploading.");
-        const QByteArray bytes
-            = !matches ? QByteArray() : artwork::encodeCrop(source, kind, focalX, focalY, zoom, &error);
+        const QJsonObject framing
+            = matches && shared ? sourceFraming(source, kind, focalX, focalY, zoom) : QJsonObject();
+        const QByteArray bytes = !matches ? QByteArray()
+            : shared                      ? (framing.isEmpty() ? QByteArray() : artwork::encodeSource(source, &error))
+                                          : artwork::encodeCrop(source, kind, focalX, focalY, zoom, &error);
+        if (matches && bytes.isEmpty() && error.isEmpty())
+            error = QStringLiteral("Invalid crop settings.");
         artworkJobs.fetch_sub(1);
         QMetaObject::invokeMethod(
             QCoreApplication::instance(),
-            [guard, id, kind, bytes, error, identity, generation, server, operation, operationName, serverArtwork] {
+            [guard, id, kind, bytes, framing, error, identity, generation, server, operation, operationName,
+                serverArtwork, expected, memoryDirectory, choice = artwork::CropChoice{focalX, focalY, zoom},
+                key = matches ? artwork::cropMemoryKey(memoryIdentity, server, pixels, kind) : QString()] {
                 if (!guard)
                     return;
                 // The originating dialog cancels on context/generation changes.
@@ -754,6 +1111,12 @@ void AppController::setArtworkCrop(const QString& id, const QString& kind, const
                 if (guard->m_cropOperation != operation || guard->accountId() != identity
                     || guard->m_artworkCache.generation() != generation || guard->m_selectedServer != server)
                     return;
+                if (!serverArtwork
+                    && (guard->state() != u"connected" || !guard->canManageChannels()
+                        || guard->channel(id).value(QStringLiteral("server_id")).toString() != server)) {
+                    emit guard->administrationFinished(operationName, id, tr("Channel management permission changed."));
+                    return;
+                }
                 if (serverArtwork && !guard->canManageServer()) {
                     emit guard->administrationFinished(operationName, id, tr("Server management permission changed."));
                     return;
@@ -771,20 +1134,30 @@ void AppController::setArtworkCrop(const QString& id, const QString& kind, const
                 }
                 file->close();
                 // Hold the owner until the daemon has completed the upload and artwork update.
-                guard->call(
+                QJsonObject params{{serverArtwork ? QStringLiteral("server") : QStringLiteral("channel"), id},
+                    {"kind", kind}, {"file", file->fileName()}};
+                if (!framing.isEmpty())
+                    params.insert(QStringLiteral("framing"), framing);
+                if (!serverArtwork)
+                    params.insert(QStringLiteral("artwork_original"), expected);
+                guard->m_link.request(
                     serverArtwork ? QStringLiteral("server.artwork.set") : QStringLiteral("channel.artwork.set"),
-                    {{serverArtwork ? QStringLiteral("server") : QStringLiteral("channel"), id}, {"kind", kind},
-                        {"file", file->fileName()}},
-                    [guard, file, id, identity, generation, server, operation, operationName](const QJsonObject&) {
-                        if (guard && guard->m_cropOperation == operation && guard->accountId() == identity
-                            && guard->m_artworkCache.generation() == generation && guard->m_selectedServer == server)
-                            emit guard->administrationFinished(operationName, id, {});
-                    },
-                    serverArtwork ? tr("Cannot update server image") : tr("Cannot update channel image"),
-                    [guard, file, id, identity, generation, server, operation, operationName](const QString& failure) {
-                        if (guard && guard->m_cropOperation == operation && guard->accountId() == identity
-                            && guard->m_artworkCache.generation() == generation && guard->m_selectedServer == server)
-                            emit guard->administrationFinished(operationName, id, failure);
+                    params,
+                    [guard, file, id, identity, generation, server, operation, operationName, key, memoryDirectory,
+                        choice](const ipc::Reply& reply) {
+                        if (!guard || guard->m_cropOperation != operation || guard->accountId() != identity
+                            || guard->m_artworkCache.generation() != generation || guard->m_selectedServer != server)
+                            return;
+                        const QString failure = reply.ok
+                            ? QString()
+                            : (reply.errorMessage.isEmpty() ? reply.errorCode : reply.errorMessage);
+                        if (reply.ok)
+                            rememberCrop(memoryDirectory, key, choice);
+                        if (!failure.isEmpty())
+                            guard->showNotice(guard->tr("Cannot update image: %1").arg(failure), true);
+                        emit guard->administrationFinished(operationName, id, failure,
+                            reply.ok ? reply.result.toVariantMap()
+                                     : QVariantMap{{QStringLiteral("conflict"), reply.errorCode == u"Conflict"}});
                     });
             },
             Qt::QueuedConnection);

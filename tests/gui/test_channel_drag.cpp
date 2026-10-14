@@ -52,8 +52,9 @@ Window {
         property string accountId: "account"
         property int artworkGeneration: 1
         property var calls: []
+        property string placementToken: "original-token"
         signal administrationFinished(string operation, string id, string error, var saved)
-        function channelDetails(id) { return {parent_id: id === "nested" ? "cat" : "0"} }
+        function channelDetails(id) { return {parent_id: id === "nested" ? "cat" : "0", position: 0, placement_token: placementToken} }
         function channelPlacementSiblings(id, parent) {
             let result = []
             let category = id === "cat" || id === "cat2"
@@ -65,7 +66,7 @@ Window {
             }
             return result
         }
-        function placeChannel(id, parent, before) { calls = calls.concat([{id:id, parent:parent, before:before}]) }
+        function placeChannel(id, parent, before, original) { calls = calls.concat([{id:id, parent:parent, before:before, original:original}]) }
     }
     ListModel {
         id: rows
@@ -155,6 +156,16 @@ TEST_F(ChannelDrag, ChannelsMoveIntoCategoryBeforeSiblingAndOutAtEnd)
     ASSERT_EQ(calls().size(), 2);
     EXPECT_EQ(calls().last().toMap().value("parent").toString(), "0");
     EXPECT_EQ(calls().last().toMap().value("before").toString(), "");
+}
+
+TEST_F(ChannelDrag, DropRetainsPressedPlacementTokenAfterNewSnapshot)
+{
+    begin();
+    point("updatePlacement", 45);
+    app->setProperty("placementToken", "newer-token");
+    point("finishPlacement", 45);
+    ASSERT_EQ(calls().size(), 1);
+    EXPECT_EQ(calls().first().toMap().value("original").toMap().value("placement_token").toString(), "original-token");
 }
 
 TEST_F(ChannelDrag, CategoriesOnlyTargetCategorySiblings)

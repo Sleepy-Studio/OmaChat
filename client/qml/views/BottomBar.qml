@@ -7,7 +7,26 @@ import OmaChat
 Rectangle {
     id: bar
     signal openSettings()
+    signal openChannelDetails(string channelId)
     readonly property bool compact: width < Metrics.px(900)
+    property string voiceIconId: ""
+    property bool voiceDetailsAvailable: false
+    function refreshVoiceArtwork(force) {
+        const channel = App.voiceJoined || App.voicePending ? App.channelDetails(App.voiceChannelId) : ({})
+        voiceDetailsAvailable = !!channel.server_id && channel.server_id === App.selectedServerId
+        const previous = voiceIconId
+        voiceIconId = channel.icon_attachment_id || ""
+        if ((force || previous !== voiceIconId) && voiceIconId.length > 0 && voiceIconId !== "0")
+            App.requestPreview(voiceIconId, "channel-icon.png", 0)
+    }
+    Component.onCompleted: refreshVoiceArtwork()
+    Connections {
+        target: App
+        function onVoiceChanged() { bar.refreshVoiceArtwork() }
+        function onSelectionChanged() { bar.refreshVoiceArtwork() }
+        function onChannelDataChanged(id) { if (id === App.voiceChannelId) bar.refreshVoiceArtwork() }
+        function onArtworkGenerationChanged() { bar.refreshVoiceArtwork(true) }
+    }
 
     implicitHeight: Metrics.px(52)
     color: Theme.surfaceAlt
@@ -75,6 +94,7 @@ Rectangle {
 
         // Voice session
         Rectangle {
+            objectName: "voiceSessionIdentity"
             visible: App.voiceJoined || App.voicePending
             Layout.fillHeight: true
             Layout.topMargin: Metrics.px(6)
@@ -89,6 +109,29 @@ Rectangle {
                 anchors.leftMargin: Metrics.px(10)
                 anchors.rightMargin: Metrics.px(4)
                 spacing: Metrics.px(8)
+                Item {
+                    Layout.preferredWidth: Metrics.px(20)
+                    Layout.preferredHeight: Metrics.px(20)
+                    Icon {
+                        objectName: "voiceChannelIconFallback"
+                        anchors.centerIn: parent
+                        visible: voiceImage.status !== Image.Ready
+                        name: "speaker"
+                        size: Metrics.px(20)
+                        Accessible.ignored: true
+                    }
+                    Image {
+                        id: voiceImage
+                        objectName: "voiceChannelIcon"
+                        anchors.fill: parent
+                        visible: status === Image.Ready
+                        source: bar.voiceIconId.length > 0 && bar.voiceIconId !== "0"
+                            ? App.previews[bar.voiceIconId] || "" : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        Accessible.ignored: true
+                    }
+                }
                 Rectangle {
                     width: Metrics.px(8)
                     height: width
@@ -112,6 +155,7 @@ Rectangle {
                         text: App.voiceChannelName + (App.voiceServerName.length > 0 ? " / " + App.voiceServerName : "")
                               + (App.inputMode === "ptt" ? (App.pttActive ? qsTr(" · transmitting") : qsTr(" · push to talk")) : "")
                         color: Theme.textMuted
+                        textFormat: Text.PlainText
                         font.pixelSize: Metrics.px(11)
                         elide: Text.ElideRight
                     }
@@ -138,6 +182,14 @@ Rectangle {
                         enabled: !App.shareStarting
                         onClicked: shareOptionsMenu.popup()
                     }
+                }
+                IconButton {
+                    objectName: "voiceChannelDetailsAction"
+                    visible: App.voiceJoined
+                    iconName: "info"
+                    enabled: bar.voiceDetailsAvailable
+                    tip: enabled ? qsTr("Voice room details") : qsTr("Select the voice room’s server to view details")
+                    onClicked: bar.openChannelDetails(App.voiceChannelId)
                 }
                 IconButton {
                     iconName: "hangup"

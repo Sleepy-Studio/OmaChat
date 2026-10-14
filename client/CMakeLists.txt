@@ -34,6 +34,7 @@ qt_add_qml_module(omachat
         src/platform/ThemeProvider.hpp src/platform/ThemeProvider.cpp
         src/platform/ArtworkCache.hpp src/platform/ArtworkCache.cpp
         src/platform/ArtworkCrop.hpp src/platform/ArtworkCrop.cpp
+        src/platform/ArtworkCropMemory.hpp src/platform/ArtworkCropMemory.cpp
         src/platform/SingleInstance.hpp src/platform/SingleInstance.cpp
         src/views/VideoFrameItem.hpp src/views/VideoFrameItem.cpp
         src/views/AudioLevels.hpp src/views/AudioLevels.cpp
@@ -79,6 +80,7 @@ qt_add_qml_module(omachat
         qml/dialogs/TextPromptDialog.qml
         qml/dialogs/CreateServerDialog.qml
         qml/dialogs/CreateChannelDialog.qml
+        qml/dialogs/DuplicateChannelDialog.qml
         qml/dialogs/CommandHelp.qml
         qml/dialogs/SearchPanel.qml
         qml/dialogs/ConfirmDialog.qml

@@ -108,6 +108,156 @@ TEST_F(PermissionReview, ServerResultIncludesInheritedDenialsAndMemberAllowAndRe
     EXPECT_FALSE(reader.call("message.send", {{"channel", child}, {"content", "revoked"}}).ok);
 }
 
+TEST_F(PermissionReview, CreationPreviewMatchesNewChannelAndClearsWhenUnavailable)
+{
+    ASSERT_TRUE(owner
+            .call("override.set",
+                {{"channel", category}, {"user", "permission-reader"},
+                    {"deny", QJsonArray{"SEND_MESSAGES", "ATTACH_FILES"}}})
+            .ok);
+    ASSERT_TRUE(waitFor([&] { return !allowed(app->channelCreationAccessReview("text", category), "SEND_MESSAGES"); }));
+    const auto preview = app->channelCreationAccessReview("text", category);
+    ASSERT_TRUE(preview.value("available").toBool());
+    EXPECT_TRUE(allowed(preview, "VIEW_CHANNEL"));
+    EXPECT_FALSE(allowed(preview, "SEND_MESSAGES"));
+    EXPECT_FALSE(allowed(preview, "ATTACH_FILES"));
+    EXPECT_TRUE(allowed(app->channelCreationAccessReview("text", "0"), "SEND_MESSAGES"));
+    EXPECT_TRUE(allowed(app->channelCreationAccessReview("category", category), "SEND_MESSAGES"));
+    EXPECT_FALSE(app->channelCreationAccessReview("text", child).value("available").toBool());
+    EXPECT_FALSE(app->channelCreationAccessReview("invalid", "0").value("available").toBool());
+    EXPECT_FALSE(app->channelCreationAccessReview("text", "999999999999").value("available").toBool());
+    const auto created = owner.call("channel.create",
+        {{"server", "Permission review"}, {"name", "preview-check"}, {"type", "text"}, {"parent", category}});
+    ASSERT_TRUE(created.ok);
+    const auto id = created.result.value("id").toString();
+    ASSERT_TRUE(waitFor([&] { return app->channelPermissionReview(id).value("available").toBool(); }));
+    EXPECT_EQ(app->channelPermissionReview(id).value("rows"), preview.value("rows"));
+    EXPECT_FALSE(reader.call("message.send", {{"channel", id}, {"content", "denied"}}).ok);
+    ASSERT_TRUE(
+        owner.call("override.set", {{"channel", category}, {"user", "permission-reader"}, {"remove", true}}).ok);
+    ASSERT_TRUE(waitFor([&] { return allowed(app->channelCreationAccessReview("text", category), "SEND_MESSAGES"); }));
+    const auto voice = app->channelCreationAccessReview("voice", category);
+    for (const auto& row : voice.value("rows").toList())
+        EXPECT_NE(row.toMap().value("name").toString(), "SEND_MESSAGES");
+    server.stop();
+    ASSERT_TRUE(
+        waitFor([&] { return !app->channelCreationAccessReview("text", category).value("available").toBool(); }));
+    EXPECT_TRUE(app->channelCreationAccessReview("text", category).value("rows").toList().isEmpty());
+    EXPECT_TRUE(app->channelCreationAccessReview("text", "0").value("rows").toList().isEmpty());
+}
+
+TEST_F(PermissionReview, ProductionCreationReviewUpdatesCategoryAndOfflineState)
+{
+    const auto creator = owner.call("role.create",
+        {{"server", app->selectedServerId()}, {"name", "Creator"}, {"permissions", QJsonArray{"CREATE_CHANNEL"}}});
+    ASSERT_TRUE(creator.ok);
+    ASSERT_TRUE(owner
+            .call("role.assign",
+                {{"server", app->selectedServerId()}, {"user", "permission-reader"},
+                    {"role", creator.result.value("id")}, {"add", true}})
+            .ok);
+    ASSERT_TRUE(owner
+            .call("override.set",
+                {{"channel", category}, {"user", "permission-reader"}, {"deny", QJsonArray{"ATTACH_FILES"}}})
+            .ok);
+    ASSERT_TRUE(waitFor([&] { return !allowed(app->channelCreationAccessReview("text", category), "ATTACH_FILES"); }));
+    theme.setScale(1.5);
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+import OmaChat
+ApplicationWindow {
+    width: 720; height: 460; visible: true
+    CreateChannelDialog { objectName: "creation" }
+})",
+        QUrl());
+    std::unique_ptr<QObject> object(component.create());
+    ASSERT_TRUE(object) << component.errorString().toStdString();
+    auto* dialog = object->findChild<QObject*>("creation");
+    ASSERT_TRUE(dialog);
+    dialog->setProperty("parentId", category);
+    ASSERT_TRUE(QMetaObject::invokeMethod(dialog, "open"));
+    auto* window = qobject_cast<QQuickWindow*>(object.get());
+    ASSERT_TRUE(window);
+    if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+        QTest::qWait(150);
+        const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+        ASSERT_EQ(QProcess::execute("hyprctl",
+                      {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+            0);
+        ASSERT_EQ(
+            QProcess::execute("hyprctl",
+                {"eval",
+                    QString("hl.dispatch(hl.dsp.window.resize({x=720,y=460,relative=false,window='%1'}))").arg(match)}),
+            0);
+    }
+    ASSERT_TRUE(waitFor([&] { return namedControl(window->contentItem(), "reviewCreationAccess") != nullptr; }));
+    QTest::qWait(180);
+    auto* button = namedControl(window->contentItem(), "reviewCreationAccess");
+    ASSERT_TRUE(button);
+    const auto point = button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint();
+    EXPECT_GE(point.y(), 0);
+    EXPECT_LT(point.y(), window->height());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point);
+    ASSERT_TRUE(waitFor([&] { return dialog->property("reviewingAccess").toBool(); }));
+    ASSERT_TRUE(
+        waitFor([&] { return namedControl(window->contentItem(), "creationPermission_ATTACH_FILES") != nullptr; }));
+    EXPECT_EQ(
+        namedControl(window->contentItem(), "creationPermission_ATTACH_FILES")->property("text").toString(), "Denied");
+    auto* create = namedControl(window->contentItem(), "channelCreate");
+    ASSERT_TRUE(create);
+    const auto createPoint = create->mapToScene(QPointF(create->width() / 2, create->height() / 2));
+    EXPECT_LT(createPoint.y(), window->height());
+    ASSERT_TRUE(
+        owner.call("override.set", {{"channel", category}, {"user", "permission-reader"}, {"remove", true}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return dialog->property("accessReview").toMap().value("available").toBool()
+            && allowed(dialog->property("accessReview").toMap(), "ATTACH_FILES");
+    }));
+    auto* scroll = object->findChild<QQuickItem*>("creationFormScroll");
+    ASSERT_TRUE(scroll);
+    auto* view = scroll->property("contentItem").value<QQuickItem*>();
+    ASSERT_TRUE(view);
+    view->forceActiveFocus();
+    if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+        const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+        ASSERT_EQ(
+            QProcess::execute("hyprctl", {"eval", QString("hl.dispatch(hl.dsp.focus({window='%1'}))").arg(match)}), 0);
+    }
+    ASSERT_TRUE(waitFor([&] { return window->isActive() && view->hasActiveFocus(); }));
+    ASSERT_EQ(window->activeFocusItem(), view);
+    ASSERT_TRUE(waitFor([&] { return view->property("contentHeight").toDouble() > view->height(); }));
+    QTest::keyClick(window, Qt::Key_End);
+    ASSERT_TRUE(waitFor([&] { return view->property("contentY").toDouble() > 0; }))
+        << "visible=" << dialog->property("visible").toBool()
+        << "review=" << dialog->property("reviewingAccess").toBool()
+        << "contentHeight=" << view->property("contentHeight").toDouble() << "height=" << view->height()
+        << "contentY=" << view->property("contentY").toDouble()
+        << "focus=" << (window->activeFocusItem() ? window->activeFocusItem()->metaObject()->className() : "none")
+        << "focusName=" << (window->activeFocusItem() ? window->activeFocusItem()->objectName().toStdString() : "none");
+    const auto compactCapture = window->grabWindow();
+    EXPECT_LE(std::abs(window->width() - 720), 1);
+    EXPECT_LE(std::abs(window->height() - 460), 1);
+    EXPECT_TRUE(compactCapture.save("/tmp/omachat-creation-access-compact.png"));
+    QFile colors(cache.filePath("creation-light.toml"));
+    ASSERT_TRUE(colors.open(QIODevice::WriteOnly));
+    colors.write("background = '#fafafa'\nforeground = '#262626'\naccent = '#2563eb'\n");
+    colors.close();
+    ASSERT_TRUE(theme.loadFile(colors.fileName()));
+    theme.changed();
+    QTest::qWait(80);
+    const auto lightCapture = window->grabWindow();
+    EXPECT_EQ(lightCapture.pixelColor(40, 60).rgb(), theme.surface().rgb());
+    EXPECT_NE(lightCapture.pixelColor(40, 60), compactCapture.pixelColor(40, 60));
+    EXPECT_TRUE(lightCapture.save("/tmp/omachat-creation-access-compact-light.png"));
+    server.stop();
+    ASSERT_TRUE(waitFor([&] { return !dialog->property("accessReview").toMap().value("available").toBool(); }));
+    EXPECT_TRUE(dialog->property("accessReview").toMap().value("rows").toList().isEmpty());
+    EXPECT_TRUE(object->findChild<QObject*>("creationAccessSource")->property("text").toString().contains("Connect"));
+}
+
 TEST_F(PermissionReview, OwnerBypassesOverrides)
 {
     ASSERT_TRUE(owner
@@ -128,6 +278,8 @@ TEST_F(PermissionReview, OwnerBypassesOverrides)
     EXPECT_TRUE(allowed(review, "ATTACH_FILES"));
     EXPECT_TRUE(allowed(review, "READ_HISTORY"));
     EXPECT_TRUE(owner.call("message.send", {{"channel", child}, {"content", "owner bypass"}}).ok);
+    EXPECT_TRUE(allowed(app->channelCreationAccessReview("text", category), "SEND_MESSAGES"));
+    EXPECT_TRUE(allowed(app->channelCreationAccessReview("text", "0"), "SEND_MESSAGES"));
 }
 
 TEST_F(PermissionReview, ProductionDialogReadbackAndOfflineState)

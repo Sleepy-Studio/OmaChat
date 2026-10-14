@@ -23,9 +23,60 @@ Dialog {
     property bool editingOverrides: false
     property var review: ({ available: false, rows: [] })
 
+    property string previewUserId: ""
+    property string previewRoleId: ""
+    property string previewServerId: ""
+    property string previewAccountId: ""
+    readonly property var preview: App.permissionPreview
+    readonly property bool previewMatches: !preview.newChannel && preview.channelId === channelId
+        && preview.roleId === previewRoleId
+        && preview.userId === (previewRoleId ? "0" : (previewUserId || App.selfId))
+    readonly property bool fallbackReview: previewRoleId === "" && previewUserId === "" && previewMatches
+        && preview.supported === false
+    readonly property var accessRows: App.state !== "connected" ? []
+        : fallbackReview ? (review.rows || [])
+        : previewMatches && preview.available && !preview.loading && !preview.error ? (preview.rows || []) : []
+    readonly property var previewMembers: {
+        const members = [{ userId: "", name: qsTr("Your access") }]
+        for (const member of App.serverMembers)
+            if (member.userId !== App.selfId)
+                members.push({ userId: member.userId, name: member.name })
+        if (App.capabilities.indexOf("permission_preview_roles") >= 0)
+            for (const role of App.serverRoles)
+                members.push({ userId: "", roleId: role.id, name: qsTr("Role only: %1").arg(role.name) })
+        return members
+    }
+    readonly property string accessSource: {
+        if (App.state !== "connected") return review.source || qsTr("Connect to review permissions.")
+        if (fallbackReview) return review.source || ""
+        if (!previewMatches || preview.loading) return qsTr("Loading permission sources…")
+        if (preview.error) return preview.error
+        if (!preview.available) return qsTr("Permission sources are unavailable.")
+        if (previewRoleId) return qsTr("Hypothetical role access, confirmed by the server. Uses @everyone and this role; no real member, owner bypass or member-specific overrides.")
+        return previewUserId === "" ? qsTr("Your effective permissions, confirmed by the server.")
+            : qsTr("Effective permissions for the selected member, confirmed by the server.")
+    }
+
     function refreshReview() {
         review = App.channelPermissionReview(channelId)
+        if (visible && !editingOverrides)
+            App.loadPermissionPreview(channelId, previewUserId, previewRoleId)
     }
+    function refreshContext() {
+        if (previewServerId !== App.selectedServerId || previewAccountId !== App.accountId
+                || App.state !== "connected" || !App.canManageRoles)
+            { previewUserId = ""; previewRoleId = "" }
+        previewServerId = App.selectedServerId
+        previewAccountId = App.accountId
+        refreshReview()
+    }
+    onAboutToShow: {
+        refreshContext()
+        App.loadPermissionPreview(channelId, previewUserId, previewRoleId)
+    }
+    onPreviewUserIdChanged: refreshReview()
+    onPreviewRoleIdChanged: refreshReview()
+
 
     function openFor(id, name) {
         channelId = id
@@ -33,6 +84,10 @@ Dialog {
         target = null
         dirty = false
         editingOverrides = false
+        previewUserId = ""
+        previewRoleId = ""
+        previewServerId = App.selectedServerId
+        previewAccountId = App.accountId
         refreshReview()
         open()
     }
@@ -71,8 +126,9 @@ Dialog {
 
     Connections {
         target: App
-        function onStatusChanged() { dialog.refreshReview() }
-        function onSelectionChanged() { dialog.refreshReview() }
+        function onStatusChanged() { dialog.refreshContext() }
+        function onSelectionChanged() { dialog.refreshContext() }
+        function onRolesChanged() { dialog.refreshContext() }
         function onChannelDataChanged(id) {
             if (id === dialog.channelId || id === dialog.review.categoryId)
                 dialog.refreshReview()
@@ -100,7 +156,7 @@ Dialog {
             Layout.fillWidth: true
             FlatButton {
                 objectName: "permissionReviewTab"
-                text: qsTr("Your access")
+                text: App.canManageRoles ? qsTr("Access review") : qsTr("Your access")
                 primary: !dialog.editingOverrides
                 onClicked: { dialog.editingOverrides = false; dialog.refreshReview() }
             }
@@ -117,7 +173,7 @@ Dialog {
         ScrollView {
             objectName: "effectivePermissionReview"
             activeFocusOnTab: true
-            Accessible.name: qsTr("Your effective permissions")
+            Accessible.name: qsTr("Effective permissions and sources")
             Keys.onPressed: event => {
                 const view = contentItem as Flickable
                 if (!view) return
@@ -139,17 +195,54 @@ Dialog {
             ColumnLayout {
                 width: parent.width
                 spacing: Metrics.px(10)
+                RowLayout {
+                    visible: App.canManageRoles && dialog.previewMatches && dialog.preview.supported !== false
+                    Layout.fillWidth: true
+                    Text {
+                        text: qsTr("Review access for")
+                        textFormat: Text.PlainText
+                        color: Theme.textMuted
+                        font.pixelSize: Metrics.px(12)
+                    }
+                    ComboBox {
+                        objectName: "permissionMemberPicker"
+                        Layout.fillWidth: true
+                        model: dialog.previewMembers
+                        textRole: "name"
+                        currentIndex: {
+                            for (let i = 0; i < dialog.previewMembers.length; ++i)
+                                if (dialog.previewMembers[i].userId === dialog.previewUserId
+                                        && (dialog.previewMembers[i].roleId || "") === dialog.previewRoleId) return i
+                            return 0
+                        }
+                        enabled: App.state === "connected" && dialog.preview.canPreviewMembers
+                        Accessible.name: qsTr("Member or hypothetical role whose permissions to review")
+                        font.pixelSize: Metrics.px(13)
+                        palette.button: Theme.surfaceAlt
+                        palette.buttonText: Theme.text
+                        palette.window: Theme.raised
+                        palette.text: Theme.text
+                        palette.highlight: Theme.selection
+                        palette.highlightedText: Theme.text
+                        onActivated: index => {
+                            const subject = dialog.previewMembers[index]
+                            dialog.previewUserId = subject.userId
+                            dialog.previewRoleId = subject.roleId || ""
+                        }
+                    }
+                }
                 Text {
                     objectName: "permissionReviewSource"
                     Layout.fillWidth: true
-                    text: dialog.review.source || ""
+                    text: dialog.accessSource
+                    textFormat: Text.PlainText
                     color: Theme.text
                     wrapMode: Text.Wrap
                     font.pixelSize: Metrics.px(13)
                 }
                 Text {
                     Layout.fillWidth: true
-                    visible: dialog.review.available
+                    visible: dialog.fallbackReview && dialog.review.available
                     text: dialog.review.inheritance || ""
                     textFormat: Text.PlainText
                     color: Theme.textMuted
@@ -157,31 +250,49 @@ Dialog {
                     font.pixelSize: Metrics.px(12)
                 }
                 Repeater {
-                    model: dialog.review.rows || []
-                    delegate: RowLayout {
+                    model: dialog.accessRows
+                    delegate: ColumnLayout {
                         id: accessRow
                         required property var modelData
                         Layout.fillWidth: true
-                        Text {
+                        spacing: Metrics.px(2)
+                        RowLayout {
                             Layout.fillWidth: true
-                            text: accessRow.modelData.label
-                            color: Theme.text
-                            font.pixelSize: Metrics.px(13)
-                            wrapMode: Text.Wrap
+                            Text {
+                                Layout.fillWidth: true
+                                text: accessRow.modelData.label
+                                textFormat: Text.PlainText
+                                color: Theme.text
+                                font.pixelSize: Metrics.px(13)
+                                wrapMode: Text.Wrap
+                            }
+                            Text {
+                                objectName: "effectivePermission_" + accessRow.modelData.name
+                                text: accessRow.modelData.allowed ? qsTr("Allowed") : qsTr("Denied")
+                                textFormat: Text.PlainText
+                                color: Theme.text
+                                font.pixelSize: Metrics.px(13)
+                                Accessible.name: accessRow.modelData.label + ": " + text
+                            }
                         }
                         Text {
-                            objectName: "effectivePermission_" + accessRow.modelData.name
-                            text: accessRow.modelData.allowed ? qsTr("Allowed") : qsTr("Denied")
-                            color: Theme.text
-                            font.pixelSize: Metrics.px(13)
-                            Accessible.name: accessRow.modelData.label + ": " + text
+                            objectName: "permissionSource_" + accessRow.modelData.name
+                            Layout.fillWidth: true
+                            visible: !dialog.fallbackReview
+                            text: accessRow.modelData.source || ""
+                            textFormat: Text.PlainText
+                            color: Theme.textMuted
+                            font.pixelSize: Metrics.px(12)
+                            wrapMode: Text.Wrap
                         }
                     }
                 }
+
                 Text {
                     Layout.fillWidth: true
-                    visible: dialog.review.available
+                    visible: dialog.fallbackReview && dialog.review.available
                     text: dialog.review.explanation || ""
+                    textFormat: Text.PlainText
                     color: Theme.textMuted
                     wrapMode: Text.Wrap
                     font.pixelSize: Metrics.px(12)

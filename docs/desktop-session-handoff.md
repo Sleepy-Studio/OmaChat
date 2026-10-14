@@ -1,22 +1,753 @@
 # OmaChat desktop session handoff
 
-Updated: 2026-10-06. Resume desktop development from this file.
+Updated: 2026-10-14. Resume desktop development from this file.
+
+## Commit and automatic deployment authorized — 2026-10-14
+
+The user explicitly requests committing and pushing the current work and states
+that pushes auto-deploy. Proceed with a normal fast-forward push to main and the
+working branch; no manual deployment is requested. This supersedes the earlier
+pause awaiting backup/access and idle activity. Backup verification remains
+unestablished, and voice/screen sharing were active at the last observation.
+Record actual CI/deployment/health outcomes after the push; authorization alone
+is not evidence that the new image or capability is running.
+
+## Hosted rollout preflight; active session — 2026-10-14
+
+Read-only live recheck at approximately 05:16 UTC: Coolify reports running/healthy;
+connected daemon still lacks `artwork.framing.v1`. Latest deployment remains
+October 13's finished webhook at 83441d0. No scheduled application tasks exist.
+**Voice and screen sharing are active**, superseding the previous idle checkpoint.
+No restart/deployment/install was attempted. Hosted terminal access or a verified
+current backup remains required; neither is established by this continuation.
+
+Registry `latest` still resolves to the intended OCI index digest
+`sha256:b280e8128c09fc229bec90748b8677462f4ad670e277be97c9a2eb3bb96d7bad`;
+its linux/amd64 manifest is
+`sha256:1b1029168b9ca5d0daf6605a080cbe83a4fd2155b2485dcb8cf6e65b34c59d6b`.
+Coolify lists persistent volume `32t4edl2sggh7drj9v2ov2qf_omachat-data` mounted at
+`/var/lib/omachat`. These are volatile observations, not runtime image proof.
+
+Prepared `docs/shared-artwork-rollout.md`: verify actual hosted paths/image,
+wait for idle activity, stop writes, back up and privately verify the entire
+volume (database/WAL, attachments, configuration and TLS identity), then pull
+and deploy the matching image. Require schema14 backup integrity/FK checks;
+post-deploy verify schema15, image revision/digest, TLS identity, live capability,
+health and test-channel behavior. Rollback requires the older image plus restored
+backup, not merely restarting older binaries against schema15.
+
+This continuation changes documentation only; prior source/transcript edits are
+preserved. Earlier test/install evidence remains historical; no new application
+validation, deployment, backup verification, commit or publication is claimed.
+Resume with hosted access/verified backup and a fresh activity check.
+
+## Artwork preparation lifecycle coverage; rollout backup gate — 2026-10-13
+
+Continued the latest shared-artwork handoff. Three new integration regressions
+hold the real worker queue and verify cancellation during preparation prevents
+late publication, an upload resumed on a new connection requires an explicit
+finish, and management permission revoked during preparation aborts publication.
+Each verifies the queued preparation state through a second Finish request's
+rate-limit reply. Source/variants are unavailable after cancellation or revocation;
+a resumed source becomes available only after explicit finish.
+
+The existing RelWithDebInfo integration target builds successfully. All **10/10
+ArtworkFraming tests** pass, including the three new tests and seven existing
+artwork checks. Formatting and whitespace checks pass. This is focused test
+validation; the earlier full Release/package/native results above are unchanged.
+Only integration tests and documentation changed; installed application artifacts
+remain the earlier snapshot. No application rebuild/install or source push is
+needed for this test-only continuation. Tests remain uncommitted with prior edits.
+Evidence: `build/desktop-artwork-lifecycle/evidence/artwork-tests.log`.
+
+Live recheck: Coolify reports running/healthy; the connected daemon still lacks
+`artwork.framing.v1`, and voice/streaming are idle. Coolify's latest deployment
+`tlv969slqqkwkd2mhxzeuocq` is a finished webhook at 83441d0, from
+09:40:55–09:41:08 UTC on October 13. That metadata does not prove the matching
+image is running. Runtime digest remains unavailable through the connector.
+
+A new Coolify MCP now exposes deploy/control actions. The previous no-deploy-tool
+blocker is superseded, but the application has **no scheduled backup tasks**.
+No database backup or hosted filesystem/shell access has been verified. A request
+for hosted terminal/SSH access or confirmation of a current verified database
+backup is pending. No deployment was queued: schema15 prevents rollback to older
+binaries without restoring a schema14 backup. Resume by completing that backup
+gate, pulling the matching published image, and verifying capability and health.
+The deploy action's token ability is not yet proven by an actual mutation.
+Live facts are volatile. No public release, AUR publication or vault commit.
+
+## Shared artwork framing installed locally; hosted rollout pending — 2026-10-13
+
+Managers can opt into **Keep the full image for managers to reframe**. New image
+selections start unchecked; ordinary crop-only uploads retain their contract.
+Reframe retrieves a private retained source, restores its source-pixel crop and
+requires explicit review/upload. Creation staging preserves the chosen source
+and framing under its existing account/server-bound opaque token. Clearing the
+retention choice produces a crop-only replacement. Legacy assets explain that
+no retained source exists. Server settings now expose `serverDetails()` to QML;
+the independent native entry-button check caught and corrected its previously
+empty form. Reframe controls reveal themselves on keyboard focus.
+
+`artwork.framing.v1` stores immutable slot-specific source dimensions and crop
+rectangle (normalized centre = focal point), rather than UI crop-travel values.
+The server generates 512×512/1024×256 crops and 128×128/512×128 variants. Desktop
+icon-only requests select SMALL, while banners/shared slots keep FULL; old assets
+and cached full rasters retain valid fallback. SOURCE is management-only, with
+per-chunk authorization and current-identity checks. No public image URL exists.
+Metadata and unknown framing fields are removed. Static bounded sources are
+limited to 2 MiB, 8192 pixels/dimension and 16 megapixels; each output is ≤2 MiB.
+Opaque sources may be JPEG-recompressed; retained rasters are not original file
+bytes. Two bounded server workers perform preparation, followed by live permission
+checks and atomic publication/cleanup. See docs/shared-artwork-framing.md.
+
+Independent review found a pre-existing upload-carrier ownership bug. Schema
+**14→15** now transactionally makes carriers nullable, preserves server artwork
+through carrier and final-channel deletion, retains message deletion cascades,
+preserves emoji rows/indexes and reclaims unreferenced detached artifacts.
+Foreign-key checks run before commit, and enforcement is restored on success and
+rollback. Dedicated regressions verify these lifetimes and failed migration
+rollback. A server with no channels retains display/source access; its existing
+upload contract still requires a channel before saving new artwork or reframing.
+
+Warnings-as-errors Release and fresh Arch package each pass **440/440 checks**
+(430 non-voice with the real secure-keyring round trip, plus 10 serial voice with
+compilation idle). Both builds pass **27/27 native Wayland checks**. Both QML lint
+targets pass with existing warnings; formatting and whitespace pass. Captures
+cover 720×460/150% and 1440×900/100%, dark/light, restored shared framing, reachable
+retention/actions and a real keyboard Reframe action selecting pixels omitted
+from the earlier crop. Independent review passes after the lifetime correction.
+Initial fixture, lite-protobuf API and new-test compiler failures are preserved
+under build/desktop-shared-artwork/; subsequent corrected builds/checks pass.
+Automated/native checks remain distinct from human usability acceptance.
+
+Backend **83441d0a5a894276bcd53f54d2ef6da64a40ccd6** is committed and pushed to
+feature/desktop-accessibility and main; client/prior desktop edits remain
+uncommitted. All five exact-SHA CI/Android/Docker workflows pass.
+Published image revision matches; digest **sha256:b280e8128c09fc229bec90748b8677462f4ad670e277be97c9a2eb3bb96d7bad**.
+No forced hosted deployment was performed. The connected live endpoint still
+lacks `artwork.framing.v1`, while Coolify reports running/healthy. The current
+connector has no deploy action, the local MCP credential does not authenticate
+to the deploy API, and no browser provider is connected. A request for a browser
+or deploy-capable local API access is pending. These live facts are volatile;
+recheck before acting. Do not claim the new backend or capability deployed.
+
+Arch main/debug **0.2.2-1** are installed from the **442-file** uncommitted snapshot
+based on 83441d0. Source manifest SHA-256:
+`af70565b3d26b864e9eea22e93c7aac90193285a08b9abcfae75c0f3a4e2c4ef`.
+All **127 installed files/symlinks** and both running binaries match; pacman
+reports zero alterations. The client is connected and visible. Voice, streaming
+and transfers were idle before upgrade. Later source changes are documentation
+only. No client/vault commit, public versioned release or AUR publication occurs.
+
+**Resume:** supply/confirm deploy access, use the published matching image,
+perform normal schema-14 database backup before rollout (older binaries reject
+schema 15), and verify rollout/health plus the live capability. Then consider
+preparation cancellation/reconnect/permission-revocation coverage (independent
+review suggestion), Phase 2 personal organization/notifications and human
+acceptance. Android physical-device and MLS/SFrame gates remain separate.
+Evidence: build/desktop-shared-artwork/evidence/, github-runs.json and native logs.
+
+
+## Device-local artwork crop memory installed — 2026-10-13
+
+Reselecting the same canonical image pixels restores the last approved crop
+travel fractions and zoom for that account/endpoint/server/slot, including after
+client restart. Creation remembers an accepted Use crop; existing channel/server
+artwork remembers a successful upload/update. Reset/Cancel and rejected crops do
+not replace the accepted choice. Late preparation and cache-epoch renewal never
+overwrite newer keyboard/drag/zoom edits or retained conflict drafts. Restored
+choices still require explicit review and upload.
+
+The private XDG data store contains only opaque SHA-256 keys, normalized travel
+coordinates, zoom and save times; no source paths, image bytes or identity text.
+Limits: 128 choices, 64 KiB file, 90 days; expired/future/malformed rows are
+ignored and pruned on a later save. Atomic writes and cross-process locking merge
+concurrent choices. Unsafe leaf paths/permissions, corrupt stores and unknown
+versions fail closed. Reads/writes are off-thread and queued writes are bounded.
+Preference saves are best-effort on I/O/lock/busy failure; they never turn an
+otherwise successful upload into an error. Same-user filesystem substitution
+races are not an atomic adversarial filesystem boundary.
+
+This is device-local crop memory, **not completion of shared focal metadata and
+server-generated variants**. Originals remain on the user's device; the server
+still receives the canonical cropped raster. Current x/y values describe crop
+travel, not absolute source-image focal coordinates. Shared original retention,
+wire/schema metadata, authorized variants and slot selection remain open.
+
+Warnings-as-errors Release and clean Arch package each pass **424/424 checks**
+(414 non-voice including the real secure-keyring round trip, plus 10 serial voice
+with compilation idle). Release/package native Wayland each pass **21/21**;
+compact 720x460/150% and wide 1440x900/100% dark/light captures verify restored
+framing, readable feedback, Reset keyboard behavior and bounded actions. Both
+QML lint targets and formatting/whitespace checks pass with existing lint
+warnings. Native compositor geometry allows one-pixel rounding. Automated checks
+and inspected captures remain separate from human usability acceptance.
+
+Early overlapping build orchestration was stopped; its missing-object linker
+failure is retained and subsequent builds are serialized. Four initial native
+failures came from the existing exact-size fixture; a one-pixel tolerance fixes
+it. Initial captures caught the opening fade; final captures use reduced motion
+and wait for full opacity. Original logs remain in build/desktop-crop-memory/.
+The first broad pass exposed a gesture fixture that assumed every crop reopened
+centered. It now explicitly presses Reset before motion checks. All four crop
+fixtures isolate the preference store; a test-only spill from the earlier
+Operations fixture was moved out of application data into ignored evidence.
+Two first package-native checks failed to obtain focus, followed by an existing
+server-crop exact-height assertion. A shared test harness now identifies each
+owned window by a unique title, dispatches to its exact compositor address and
+checks focus/geometry with bounded retries and one-pixel rounding tolerance.
+A later package capture received a deferred 128-pixel height configure. The
+capture harness now fixes the requested size and waits for multiple stable Qt
+and compositor geometry/focus observations without reissuing float commands.
+Later diagnostics showed the native window could lose activation between
+key inputs while the QML dialog retained focus. The test harness now reacquires
+its own window before keyboard input; production shortcut contexts are unchanged.
+Final focused package/native runs include these corrections. Application source
+stays frozen; full package regression/voice validation predates this native-only
+test-harness correction, with identical packaged application artifacts.
+Self-review is recorded; no independent subagent review is claimed.
+
+Main/debug **0.2.2-1** are locally installed from the **437-file** uncommitted
+snapshot based on **5708472**; source manifest SHA-256:
+`4259a775532aaf958b99b12f15320132ded8b0307c17df7f1f296fbdc96acdca`.
+All **127 installed files/symlinks** and running binaries match the
+packages; pacman reports zero alterations. The client is connected and visible.
+Voice, streaming and transfers were idle before upgrade. No backend/protocol
+change or hosted deployment was needed for this pass. Application code matches
+the installed snapshot; subsequent edits are documentation only.
+
+Prior client edits and the ignored transcript are preserved. No client/vault
+commit, public release or AUR publication occurred. Resume this handoff; remaining
+shared focal metadata/variants, later expansion phases, Android physical-device
+and MLS/SFrame gates remain open. Evidence: build/desktop-crop-memory/.
+
+
+## Named role and creation previews; whole-list placement installed — 2026-10-13
+
+Managers can review named winning role contributors, existing members and a
+hypothetical role consisting of the default role plus one selected role.
+Ordinary self-review retains generic sources. Role-only subjects have no real
+member, owner bypass or personal overrides; Administrator roles retain their
+real enforcement behavior. Proposed channels use the same evaluator as actual
+channels, including inherited category/member overrides, with type-filtered GUI
+rows. Categories preview top-level placement. Previews reflect current policy;
+they do not lock it against later edits or introduce draft permission overrides.
+Older-server creation fallback is explicitly a limited current-account estimate.
+Supported-server errors clear rows. Names are plain text; drafts and account,
+server, subject, snapshot, deletion and offline guards remain intact.
+
+Placement now checks an opaque whole-server structural token as well as source
+parent/position. Create, duplicate, delete, move and reorder rotate it; restart
+rotates its epoch, preventing ABA reuse. Hidden siblings contribute without
+exposing their IDs/names. Complete authorized snapshots refresh after structural
+changes. Partial channel events never promote a new token onto an old list.
+Drag retains the press-time original; keyboard helpers use checked placement.
+Conflicts retain choices and require explicit reload. Reload waits up to three
+seconds for the matching GUI snapshot, with current context/permission checks;
+it never inserts stale reply metadata or retries a mutation automatically.
+Unrelated structural changes conservatively conflict. Legacy capability fallback
+retains earlier behavior. Existing GUI navigation gates for server-wide channel
+managers remain; the controller validates current channel management permission.
+
+The creation form now has an explicit keyboard-focused Flickable. Native views
+cover compact 720×460/150% dark/light and wide 1440×900/100% dark/light, actual
+palette assertions, plain role names and fixed action bounds. Automated/native
+checks remain separate from human usability acceptance.
+
+Warnings-as-errors Release and final Arch package each pass **414/414 checks**
+(404 non-voice including real keyring, plus 10 serial voice with compilation idle).
+Release and package-built native Wayland each pass **25/25** checks. Both QML lint
+targets and formatting/whitespace checks pass; lint retains existing warnings.
+Generated protobuf emits GCC LTO warnings during packaging; the non-LTO
+warnings-as-errors build and exact-SHA clean CI pass. Final native captures wait
+for actual loaded rows, verify theme/scale, and allow one-pixel compositor rounding.
+A final light-theme correction makes the channel-type radio labels readable.
+
+Backend commits 928983a and corrective 5708472885afe6ed18dde1dd2ce55a26790e0674
+are pushed to feature/desktop-accessibility and main. The correction fixes an
+indefinitely stale daemon list after create/duplicate/ordinary delete. Its new
+cached-list regression fails against the earlier package and passes against the
+correction. Original failing logs remain in build/desktop-preview-continuation/.
+The earlier 928983a workflows pass; final exact-SHA evidence is recorded below.
+
+All five exact-SHA CI/Android/Docker workflows pass. Matching published image
+digest: `sha256:e350716831cdc2b303c345a723ea7e8aca08d2c8e774a3dd06d19f2baf55db90`. Post-publication deployment
+`s3scmuuobco7fpuobpuoekei` finishes at 5708472; the application reports
+running/healthy. The connector does not expose a running container digest.
+These live-state facts are volatile and must be rechecked.
+
+Main/debug **0.2.2-1** packages are locally installed from the **433-file**
+uncommitted snapshot based on 5708472. Source manifest SHA-256:
+`ec52ce7e9b24816479779f693f683e32cb6094584fb5b7fdb348179b116c1255`.
+All **127 installed regular files/symlinks** match extracted packages, pacman
+reports zero alterations, and running binaries match. Client/daemon are connected
+and the client is mapped/visible. Voice, streaming and transfers were idle before
+upgrade. Live read-only checks confirm numeric-self 21-row mask parity, named
+role-only access, member/role creation previews, opaque placement tokens,
+placement reload and encrypted recovery listing without server channel/message
+mutations. Evidence: `build/desktop-preview-continuation/`. Subsequent edits are
+documentation only.
+
+Client changes remain uncommitted; prior edits and the ignored transcript are
+preserved. No public release, AUR publication or vault Git commit occurs.
+Remaining: persisted focal metadata/artwork variants, later channel/UI roadmap
+phases and the separate Android physical-device/MLS/SFrame gates. The feature
+expansion audit is in docs/feature-expansion-handoff.md; this checkpoint resolves
+its previously unrecorded role-preview and placement-revision baseline.
+
+
+
+## Parallel continuation installed and deployed — 2026-10-12
+
+The requested coordinator + three-worker pass implements atomic restricted
+configuration duplication, checked artwork/placement updates and encrypted
+restart-persistent send recovery. Sources, handlers and focused tests are
+integrated and locally installed; prior client edits and the ignored transcript are preserved.
+This completed pass supersedes the older duplication/recovery/conflict worker queues below.
+
+Release validation passes 394/394 tests (384 non-voice, including the actual
+secure-keyring round trip, and 10 serial voice checks with compilation idle).
+Native Wayland validation passes 30/30 checks, plus four focused native artwork
+checks after the Reload artwork focus-reveal correction. Keyboard Space activates
+the focused reload, and viewport assertions prove status/action reachability. Captures cover
+compact 720×460/150% dark/light and duplication wide 1440×900/100%. QML lint passes
+with existing warnings. Independent reviews identified and corrected missing
+TLS peer binding, late-purge acknowledgement recreation, account-switch uploads,
+ordinary reconnect cancellation, stale duplication replies, last-artwork draft
+loss and the compact duplication form width. Original failing logs remain in
+`build/desktop-parallel-continuation/`.
+
+Backend and daemon changes are committed as bc47c15 plus the shared IPC contract
+correction 5cf7553, pushed to desktop branch and main. The first commit's clean
+CI exposed the omitted shared error header; the corrected SHA is
+5cf7553157d2e70a5e2814bbf044c3293d943ffb. Docker and Android checks for that SHA
+pass, as do both exact-SHA CI workflows. Published image revision matches,
+digest sha256:325dac2929a2d8e8358396a58411dede989379b0dab3ef14a485ba16f8eb540d.
+Post-publication Coolify deployment z7y0n51y5c36toz8a5naheda finished at that SHA;
+application 32t4edl2sggh7drj9v2ov2qf reports running/healthy. The installed daemon
+sees all three new capabilities. The connector does not expose the running
+container digest. Live state is volatile; recheck before acting.
+
+Clean Arch main/debug 0.2.2-1 packages pass 394/394 tests (384 non-voice,
+10 serial voice) and 30/30 package-built native Wayland checks. All 127 installed
+regular files/symlinks match extracted packages, pacman reports zero alterations,
+and running binaries match. Client is connected, mapped and visible. Voice,
+streaming and transfers were idle before upgrade. Live read-only permission
+preview returns 21 source rows matching the snapshot mask; recovery support is
+available and recovery.list succeeds without creating a user message.
+
+Client changes remain uncommitted, installed from the 430-file snapshot based on
+5cf7553. Manifest SHA-256:
+a00b27bab612697bc6f0d8b0d2d9e1d74b430f6b13e0f1e60618c0ba7e3cea47.
+Subsequent changes are documentation only. Evidence, logs, captures, package hashes
+and installation/deployment checkpoints: build/desktop-parallel-continuation/.
+Packaging retains GCC LTO warnings in generated protobuf; the warnings-as-errors
+non-LTO Release and clean CI builds pass. No public release, AUR publication or
+vault Git commit occurred.
+
+Remaining scope: named role contributors, role-only/full creation previews,
+persisted focal metadata/variants and whole-list placement revision checks.
+Duplication copies category configuration, not children; the GUI retains the
+source category. Artwork CAS compares icon/banner references; placement CAS
+compares source parent/position and validates current before target, not every
+hidden sibling revision. Recovery is 20 records/128KiB/30 days per account; requires
+secure keyring and the original attachment files. Uncertain sends never auto-
+resend; certificate changes fail closed. User-dismissal tombstones remain in
+memory for the daemon lifetime. Native/automated checks remain separate from
+human usability acceptance. Public releases/AUR publication remain separate.
+
+
+## Permission sources and member previews installed — 2026-10-11
+
+Existing-channel access review now shows server-authoritative permission source
+stages. Ordinary members can review themselves; members with server Manage Roles
+can preview existing server members only in channels they can see. The same
+shared evaluator supplies authorization masks and explanations; ordinary checks
+retain the trace-free path. Generic stage labels expose no role identity metadata.
+Owners/admins, default/member roles, category/channel everyone/role/member
+layers, ungranted permissions and the visibility gate are distinguished.
+
+The additive `permission_preview` capability and wire tags 92/93 gate the new
+`permission.preview` daemon method. Numeric self/uncached user IDs reach the
+server's authorization check; named references use the existing resolver.
+Older servers retain current-user mask review. Supported-server errors, pending
+requests, offline state, deletion and account/server changes clear stale rows;
+serial/context guards reject old replies. Late snapshots coalesce a fresh request
+for still-valid context. The production dialog has a manager member picker,
+plain-text source rows and compact keyboard scrolling.
+
+Limits: source stages do not identify named contributing roles. Role-only and
+full new-channel creation previews remain open. Queued-reply tests drain actual
+responses but do not use a deterministic response gate. Automated/native checks
+do not establish human usability acceptance.
+
+Independent review passes after fixes for deletion invalidation, numeric-self
+resolution and snapshot cancellation. Clean warnings-as-errors Release passes
+**337/337 tests** (327 non-voice + 10 serial voice). Both QML lint targets pass
+with existing warnings; formatting and whitespace checks pass. Native Wayland
+coverage is **10/10** (4 new + 6 existing permission checks). Inspected compact
+720×460/150% dark/light captures show readable source rows, scrolling and fixed
+Close. Fresh Arch main/debug **0.2.2-1** packages also pass **337/337 tests** and
+**10/10 package-built native checks**. Packaging emits GCC LTO warnings in
+generated protobuf code; the non-LTO warnings-as-errors build passes. Earlier
+failing tests and their fixes remain in evidence logs.
+
+The backend contract and five integration tests are committed as **16e3ed8**,
+pushed to `feature/desktop-accessibility` and deployment branch `main`. Exact-SHA
+GitHub **CI, Android and Docker** workflows pass. Published image revision matches
+`16e3ed8d3b11ab0ec0465de0081d288878236551`, digest
+`sha256:b0ca33d41ffe011c6a4add83e64556ae05a5f03674a6f6702028dd45c14a0dc6`.
+Post-publication Coolify deployment **5glthj3nndnmkhqwsxs1g3oe** finished and the
+app reports running/healthy. The installed daemon sees the capability. The
+connector does not expose the running container digest; do not claim that proof.
+
+Client changes and earlier desktop edits remain uncommitted and locally installed
+from the recorded **418-file snapshot based on 16e3ed8**. All **126 installed
+regular files/symlinks** match extracted packages, pacman reports zero alterations,
+and running binaries match. The daemon connects and GUI is mapped/visible.
+Voice/streaming and transfers were idle before deployment/upgrade. A live
+read-only numeric-self preview returns all 21 source rows and an effective mask
+matching the snapshot. Source manifest SHA-256: `4b7347a03aa0b9f1a05ad5c1ea68155d9bdfb77ea2274e4843d162b31fa158da`.
+Evidence: `build/desktop-permission-sources/`. Subsequent source changes are
+documentation only. Prior edits and ignored `session-ses_f0f5.md` are preserved.
+No public versioned release, AUR publication or vault Git commit occurred.
+
+## Next pass: maximize parallel subagent execution — explicit user direction, 2026-10-11
+
+The user explicitly requests **subagents on the next pass to finish as much as
+possible at once**. Treat this as an execution requirement, not a request for
+another planning-only turn. Use all available slots: currently the coordinator
+plus three implementation workers. Recheck capacity before launch. Earlier
+October 4 parallel instructions below remain useful; this section sets the
+current queues and supersedes their completed first-wave tasks.
+
+Start with the latest installed/source/deployment facts above, the remaining
+channel/UI plans and security/Android handoffs. Preserve the dirty desktop tree
+and ignored transcript. Map exact files before launch: every file has one writer,
+workers are told they are not alone, and shared-controller/protocol/CMake changes
+go through the assigned owner. Never switch the shared checkout under workers.
+
+Launch three bounded, independent implementation lanes together, choosing the
+smallest useful end-to-end slices that can coexist after ownership mapping:
+
+1. **Atomic restricted-channel duplication.** Own its server/daemon/protocol
+   contract and dedicated tests. Copy configuration and overrides atomically;
+   never briefly expose a restricted copy, copy messages/members, or bypass
+   management authorization. Coordinate client entry points with the controller
+   owner. Backend changes must be committed/pushed to `main` and rollout verified.
+2. **Encrypted restart-persistent failed-send recovery.** Scope account/endpoint
+   identity, key storage, bounded retention, deletion and uncertain delivery;
+   implement the smallest secure persistence slice in separately owned storage
+   files and dedicated tests. Controller integration has one owner. Never store
+   message content/file paths in plaintext, auto-resend uncertain sends, or
+   overwrite newer drafts. A security blocker is a reason to move to a ready
+   lane, not to improvise crypto.
+3. **Artwork focal metadata/variants or artwork/placement conflict handling.**
+   Choose whichever bounded slice can own distinct files/contracts alongside
+   lane 1. Keep immediate operations honest and retain local drafts on conflicts.
+   If backend files overlap, do an independent client/UI slice first and queue
+   contract work behind that file's owner; do not let agents edit the same file.
+
+The coordinator owns integration, shared controller/header edits unless explicitly
+assigned, CMake wiring, docs/vault, package provenance and release/deployment
+sequencing. Use spare coordinator time for named role/source attribution,
+role-only/new-channel previews, or a ready independent acceptance gap. Supply
+exact outcomes, file ownership and acceptance checks to every worker. Workers
+write distinct test files and run focused checks; only the coordinator drives
+shared build directories. When a worker finishes, give it the next ready slice
+or an independent review of another lane. Do not idle slots or spawn nested
+agents beyond capacity. Android may use a separate worktree if it does not slow
+desktop integration; physical-device and MLS/SFrame gates remain explicit.
+
+Integrate often. Run one combined checkpoint rather than duplicate full suites
+per worker. Bound total compiler load to the live system profile (recent -j6),
+keep timing-sensitive audio checks free of compiler load, and serialize native
+GUI capture, emulator/device access, deployment and installation. Inspect actual
+compact/wide dark/light views. Independent review, tested package artifacts and
+human acceptance are distinct. Install client changes locally; for server changes,
+wait exact-SHA Docker publication before forcing Coolify deployment, then verify
+health and live behavior/capability. Recheck voice/streaming/transfers and announce
+restart impact. Public releases/AUR publication remain separate.
+
+Finish with integrated outcomes, installed versus source-only state, exact test
+and rollout evidence, remaining blockers and refreshed handoff/shared vault.
+Keep progressing through ready slices within the pass; do not declare later
+roadmap phases complete because one prerequisite is finished.
+
+## Store-time artwork pruning installed — 2026-10-11
+
+Store-time artwork cache directory enumeration and sorting now run on the same two bounded process-wide worker slots as lookup, decode and reconciliation. Each store snapshot reserves its incoming bytes and entry, preserves current pins and the checked destination, and applies guarded cleanup in batches of at most 32 candidates per event-loop turn before publication. Competing stores, LRU/pin/staging/access/account changes refresh the budget plan without repeating decode or download; staging ownership and per-ID request ownership persist through retries. Unreadable directory enumeration, changed candidates and insufficient pinned budgets cannot fund admission. Revocation and destroyed controllers cannot publish stale results.
+
+Limits: final filesystem operations remain synchronous; a candidate count does not guarantee latency on slow storage. External writers are not an atomic multi-process budget transaction, and the existing narrow check/unlink same-user race remains. Frequent in-process mutations can cause rescanning. Automated checks do not establish human usability acceptance.
+
+Incremental self-review records no blocker; this is not an independent agent
+review. Final warnings-as-errors Release build passes. Final CTest coverage is
+**328/328** across a **318/318 non-voice** pass and **10/10 serial voice** pass;
+**35/35 cache checks**, **7/7 native Wayland artwork checks**, both QML lint
+targets (existing warnings), formatting and whitespace checks pass. Final Arch
+package-built validation passes **303 non-voice bundled checks, 10 serial voice
+checks and 15 GUI-only checks**, and
+**7/7 package-built native artwork checks** pass. The package build starts clean,
+then incrementally incorporates the final unreadable-directory regression; the
+obsolete snapshot's check phase was deliberately stopped. A first package rebuild
+retained obsolete objects because preserved source timestamps preceded object
+timestamps; its unit test list exposed the missing new regression before install.
+The affected snapshot files were touched and rebuilt. Final packaging uses
+--nocheck followed by the full separate package-built checks above. The snapshot
+helper now advances timestamps when copied bytes change.
+The first broad run has one screen-share audio frequency assertion failure
+(about 409 Hz versus 440 Hz), with compiler load present. The isolated rerun,
+final serial voice pass and package checks pass without changing voice code.
+Scheduling sensitivity is an inference; the original failure remains in the logs.
+The first compile also exposed a new fixture's nonexistent getter; it uses the
+existing channelDetails API in the final version. Automated checks do not replace
+human usability acceptance.
+
+Fresh main/debug **0.2.2-1** packages are locally installed from the recorded
+**416-file uncommitted snapshot** based on `d35634a`. All **126 installed regular
+files/symlinks** match extracted packages; pacman reports zero alterations.
+Running client/daemon match installed binaries, daemon is connected and GUI
+mapped/visible. Voice/streaming were idle and no transfers existed before upgrade.
+Source manifest SHA-256: `0aab71595e432115688932983264d6a873a6ecf75cdfdbd349778547f7778638`.
+Evidence: `build/desktop-store-pruning/`, including self-review, original/final
+regression logs, snapshot, packages and installation checkpoint. Application
+source matches the snapshot; subsequent changes are documentation only.
+Previous edits and the ignored transcript are preserved. No server change,
+deployment, commit, push, public release or AUR publication occurred.
+
+Next desktop queues: full permission source/member previews, restricted
+channel duplication, artwork/placement conflicts, focal metadata/variants and
+encrypted restart-persistent failed-send recovery. Never auto-resend uncertain
+sends or persist message/file recovery plaintext.
+
+## Asynchronous artwork reconciliation installed — 2026-10-11
+
+Artwork authorization reconciliation no longer scans directories on the GUI thread. Read-only workers enumerate owned, no-follow directory descriptors and plan revocation, expired staging and budget cleanup. Scans share the two process-wide artwork lookup/download slots; one pending cleanup per controller coalesces changes. The owner applies at most 32 candidates per event-loop turn, checking policy revision and file/directory identity before descriptor-relative deletion. Account, permission, pins, staging and LRU/store changes invalidate old plans; destroyed controllers cannot apply them. Preview access clears immediately while disk cleanup is deferred.
+
+Limits: store-time budget pruning and final filesystem operations remain synchronous. Candidate count bounds work volume rather than slow-storage latency. Same-user replacement between the final file check and unlink is still a narrow concurrent-writer race; this does not claim atomic compare-and-delete. Frequent mutations can require rescanning. Automated checks do not replace human usability acceptance.
+
+Independent review finds no blocker. Warnings-as-errors clean Release build,
+**320/320 CTest**, **28/28 cache unit checks**, **6/6 native Wayland artwork
+checks**, both QML lint targets (existing warnings), formatting and whitespace
+checks pass. A clean Arch package build initially found one stale synchronous
+revocation fixture; the corrected final package run passes **305 bundled checks
+plus 15 GUI-only checks**, with **6/6 package-built native Wayland checks**.
+The staging expiry fixture now flushes writes before setting its old timestamp;
+revocation checks retain immediate preview/access assertions and wait for disk cleanup.
+
+Fresh main/debug **0.2.2-1** packages are installed from the recorded **416-file**
+uncommitted snapshot based on `d35634a`. All **126 installed
+regular files/symlinks** match extracted packages; pacman reports zero alterations.
+Running client and daemon match installed binaries; daemon is connected and GUI
+mapped/visible. Pre-install voice and streaming were idle, with zero transfers.
+Source manifest SHA-256: `90314221fab1b444c158509e05ff10c2d28cbd1652388725a15ee596c56f1656`.
+Evidence: `build/desktop-async-reconcile/`. Subsequent changes are documentation only.
+Preserve prior edits and the ignored transcript. No server changes, commit, push,
+public release or AUR publication occurred.
+
+Next desktop queues: store-time directory pruning, full permission source/member
+previews, restricted duplication, artwork/placement conflicts, focal metadata/variants
+and encrypted restart-persistent failed-send recovery. Never auto-resend uncertain
+sends or persist message/file recovery plaintext.
+
+## Downloaded-artwork validation continuation — 2026-10-11
+
+Downloaded artwork now decodes outside the GUI thread, sharing the cache lookup's
+two process-wide worker slots. Completed transfers retain their registered staging
+owner while waiting; per-ID requests coalesce instead of downloading again.
+Workers validate read-only staging and destination snapshots through no-follow,
+directory-relative descriptors. GUI completion rechecks request serial, account
+generation, current authorization and inode/nanosecond file identity before
+publication, chmod, eviction or rename. A destination created or changed during
+validation cannot be overwritten. Immutable valid entries retain their bytes.
+Revoked requests cannot return or clear newer requests. Controller destruction
+is guarded; abandoned staging retains the existing expiry policy.
+Directory reconciliation/pruning and final filesystem operations remain synchronous.
+
+Independent read-only review found no blocker. The warnings-as-errors Release
+build, **314/314 CTest**, **23/23 cache unit tests**, the new blocked-worker real-daemon
+regression, both QML lint targets (existing warnings), formatting and whitespace
+checks pass. **4/4 native Wayland artwork checks** pass, including normal download,
+GUI responsiveness while decode is blocked, deduplication, revocation, destroyed
+controller and offline restart. Fresh Arch package build passes **299 bundled
+checks plus 15 GUI-only checks**; package-built native artwork checks pass **4/4**.
+These automated checks do not replace human usability acceptance.
+
+Fresh main/debug **0.2.2-1** packages are installed from the recorded **416-file**
+uncommitted snapshot based on `d35634a`. All **126 installed
+regular files/symlinks** match extracted packages; pacman reports zero alterations.
+Running client and daemon match installed binaries; daemon is connected and GUI
+mapped/visible. Voice was joined, streaming idle and zero transfers existed before
+upgrade. The announced standard upgrade hook restarted the daemon and disconnected
+voice; it was not automatically rejoined. Source manifest SHA-256: `bf831f57d58be621c72e586b7ca22e419b9b510e8e52283c84cc684d0aeb6fbc`.
+Evidence: `build/desktop-async-store/`. Later changes are documentation only.
+Preserve prior edits and the ignored transcript. No server changes, commit, push,
+public release or AUR publication occurred.
+
+## Artwork-cache lookup continuation — 2026-10-11
+
+Cache-hit decode validation now runs outside the GUI thread. At most two worker
+jobs are outstanding process-wide; excess IDs retry through deduplicated timers.
+Validation snapshots contain account generation, asset identity and inode/size/
+nanosecond modification/change-time stamps. Workers use no-follow directory-relative
+file descriptors, bounded image decoding and no file mutations. GUI completion
+rechecks request serial, authorization, generation and file identity before
+publishing a URL or deleting corruption. Repeated pending requests coalesce;
+revocation invalidates callbacks even without a whole-account generation change.
+Controller destruction is guarded. Offline restart continues to reuse authorized
+cached files. Download/store decode and directory pruning remain synchronous;
+this slice does not make all cache operations asynchronous.
+
+Independent review passes. Fresh warnings-as-errors Release build and 309/309
+CTest, 21/21 focused checks and 6/6 native Wayland checks pass, including deterministic blocked-worker
+revocation/controller-destruction and actual offline restart. Both QML lint
+targets pass with existing warnings. Clean package build passes 294/294 bundled
+checks plus 15/15 GUI-only checks; the package-built native checks also pass 6/6. Fresh main/debug 0.2.2-1 packages are
+installed locally. All 126 installed regular files/symlinks match extracted
+packages, pacman reports zero alterations, running client/daemon match installed
+binaries, and the client is connected and mapped/visible. Voice/streaming were
+idle and no transfers existed before upgrade. Snapshot manifest SHA-256:
+`2d0f33c3604e5775d2686526bc0e8eb74776eb7bb6488fbdcca62ea242f9a728`.
+Subsequent changes are documentation only. Evidence and the exact 416-file
+uncommitted source snapshot are in `build/desktop-async-cache/`. Preserve prior
+edits and the ignored transcript. No server changes or publication in this slice.
 
 ## Current direction
 
-Desktop work is the active priority. **The October 6 continuation adds bounded
-pointer channel placement, server artwork cropping and atomic conflict checks
-for channel detail saves.** It builds on the installed October 5 foundation.
-Reviewed source `891e4c2` is installed locally and pushed to both desktop and
-`main` branches; the post-publication server rollout is healthy and the connected
-client reports `channel.details.cas.v1`. The October 6 section records verification; older sections
-retain their dated history.
+Desktop remains the priority. The latest October 11 slice installs authoritative
+permission source stages and manager member previews, with 337/337 Release and
+package checks and 10/10 native/package-native permission checks. Backend
+16e3ed8 is committed/pushed/deployed with exact-SHA CI/Android/Docker success;
+client UI and prior desktop changes remain uncommitted in the installed snapshot.
+The client/daemon are connected and visible. Artwork scans remain bounded/off-thread
+with guarded cleanup; final filesystem operations remain synchronous.
+Standing workflow: install client changes locally; commit/push server changes to
+main and verify rollout. Public releases/AUR publication remain separate.
+Next pass MUST use parallel subagents per the October 11 execution section above.
+Remaining desktop queues: named role/source attribution and role-only/creation
+previews, atomic restricted duplication, artwork/placement conflicts, focal
+metadata/variants and encrypted restart-persistent failed-send recovery.
 
-Standing workflow authorized by the user on October 5: always install client-side
-changes locally for testing. When changes affect the server, also commit and push
-to the deployment branch so the server redeploys. This supersedes earlier
-session-specific installation and no-push limits. Review and package validation
-still apply; public versioned releases and AUR publication remain separate.
+## Channel settings navigation and room details installed — 2026-10-07
+
+Channel settings now has keyboard-accessible **Overview**, **Appearance** and
+**Permissions** sections. Switching preserves the same name/topic/description
+draft, checked-save originals, conflict/reload state and discard protection.
+Appearance explains its immediate artwork operations; keyboard focus scrolls the
+chosen icon/banner action into view. Permissions shows authoritative current-user
+access and opens the existing overrides editor above the retained settings draft;
+closing that editor returns focus to settings. Other-member/source attribution
+remains open. Save, reload and immediate changes require an active connection;
+read-only/offline controls cannot submit edits. Error feedback is bounded with its
+full text available on hover, and Save/Close stay fixed in compact layouts.
+
+The joined voice identity bar has a keyboard-accessible **Voice room details**
+action for the currently selected server, preserving conversation selection and
+voice membership. Other-server rooms explain that their server must be selected.
+The shared details view reserves banner space from asset identity, supports
+loading/failure/retry/replacement and fixed icon fallbacks, treats names/topics as
+plain text and scrolls long topic/description content above fixed Edit/Close.
+Account/server/generation changes and model-reset access loss clear the view.
+Cached offline details remain readable; editing requires connection. Popup
+reopening cannot erase newer context. This is a room-details banner surface,
+not focal metadata, server variants or a new voice workspace.
+
+Final warnings-as-errors Release build and **304/304 CTest** pass. Both QML lint
+targets pass with existing warning classes (including unresolved RowListModel
+metadata at the new model-reset connections); formatting and whitespace checks
+pass. **11/11 native Wayland checks** pass against production QML, including a
+real server/daemon/controller MainView route and actual channel-deletion reset.
+Inspected compact **720×460/150%** and wide **1440×900/100%** dark/light captures
+verify artwork fallback, scrolling and fixed controls. Native size assertions
+found repeated float dispatch changed geometry; fixtures now float each window
+once and retain exact size checks. Automated acceptance is distinct from human
+usability acceptance. Independent review has no production blocker.
+
+Fresh main/debug **0.2.2-1** packages are installed from the recorded uncommitted
+**416-file** snapshot based on `d35634a`. Package build IDs match the tested
+Release artifacts; all **126 installed regular files/symlinks** match extracted
+packages, and pacman reports **zero alterations**. Running client/daemon match
+the installed binaries, the daemon is active/connected and the native GUI is
+mapped/visible. Voice/streaming were idle and no active transfers existed before
+upgrade. Evidence: `build/desktop-room-settings/`, including snapshot/package
+hashes, full/native/lint logs, review, captures and installation checkpoint.
+Source manifest SHA-256: `c9579e4e2c187e4ecbc72e69b0c3eb8a1d78b0a0f07de57d5557fc5541ec0ba5`. Later edits are documentation only.
+No commit, push, public release or AUR publication occurred.
+
+### Connection repair during this continuation
+
+The user reported the installed client could not connect. Two live faults were
+confirmed: Mullvad blocked LAN traffic to the intentionally mapped server, and
+Coolify's OmaChat application became unhealthy. `mullvad lan set allow` restores
+LAN reachability while keeping the VPN connected; existing `/etc/hosts` mappings
+are preserved. Restart-only Coolify operation
+`vctic3wkq0idlbrhivsy5syg` finished on the existing `891e4c2` server revision with
+the same persistent data/TLS identity. Chat TCP is reachable, Coolify reports
+running/healthy, and the restarted client daemon connects successfully.
+No server source or deployment-branch change was required. Earlier DNS-defect
+inference was incorrect: split LAN routing is intentional, and a public DNS
+address cannot be compared meaningfully with Coolify's internal Docker gateway.
+Sanitized evidence is `evidence/connectivity-repair.json`.
+
+Remaining desktop work: full permission source/member previews, restricted
+channel duplication, artwork/placement conflicts, focal metadata/variants,
+asynchronous directory pruning and encrypted restart-persistent failed-send
+recovery. Preserve prior uncommitted edits and the ignored transcript. Standing
+client installation/server publication workflow still applies.
+
+## Creation inherited-access continuation — 2026-10-07
+
+The creation form now offers **Review inherited access** for the current account
+before submission. Top-level channels use the latest server-reported server
+mask with the channel visibility gate; children use the selected category's
+reported effective permissions. Categories ignore the category picker. Owners
+and administrators bypass overrides; text/voice rows match the selected type.
+Invalid, unavailable or foreign-server categories cannot produce a preview.
+Connection and permission updates refresh the review and clear stale rows offline.
+
+Opening the review focuses the scrolling viewport, so arrows, Home/End and
+Page Up/Down reach the explanation without changing the name field. Create and
+Cancel stay fixed outside the form. All supplied text is plain text. This is a
+current-user inherited-access preview, not a full audit of who can access the
+new channel. Other-member previews and per-permission source attribution remain
+open. Creation adds no private overrides, and the server can apply changed
+permissions before accepting the request.
+
+Validation: independent review passes; the fresh warnings-as-errors Release Arch
+build succeeds, and the final package build passes **293/293 CTest**. Both QML
+lint targets pass with existing warnings and no new creation-dialog warnings;
+changed C++ formatting and whitespace checks pass. Package-built native Wayland
+permission checks pass **6/6**. The new production creation check verifies actual
+viewport focus, keyboard scrolling, live permission changes and offline clearing.
+Inspected **720×460/150%** dark/light captures include pixel checks proving the
+palette differs. Existing permission review also covers compact/wide dark/light.
+The extracted package client launches and captures its startup surface under
+Wayland; that smoke check alone does not demonstrate connected workflows.
+
+The keyboard regression initially failed: ScrollView's focus scope retained the
+name text field as its focus leaf. Explicit focus handoff when opening the review
+fixes this, and the retained GTest assertion verifies both leaf focus and scroll
+movement. Loading a test palette after QML creation requires emitting the theme
+change signal; capture assertions compare RGB values at 8-bit precision.
+
+Fresh main/debug **0.2.2-1** packages are installed locally. All **126 regular
+files/symlinks** match extracted artifacts, and package integrity reports **zero
+alterations**. The running client and daemon executables match the installed
+binaries; the daemon is active/connected and the native client mapped/visible.
+Voice and streaming were idle and zero transfers were active before the upgrade.
+No server change, deployment, commit, push, public release or AUR publication
+occurs in this slice. Source remains uncommitted based on `d35634a`.
+
+Evidence: `build/desktop-access-review/` contains the reviewed incremental diff,
+build/failure/regression/full-suite/lint/native/install logs and inspected captures.
+`install/source-manifest.json` records the 414-file snapshot; its SHA-256 is
+`7b58c4aab6b26f1663a0a2b29a34d4c6261e40dfe07e01ab535cfdaa03a36766`.
+`evidence/installation-checkpoint.json` records package hashes, runtime and file
+verification. Application files match the snapshot; subsequent changes are handoff
+and roadmap documentation plus test formatting only. Preserve previous edits and
+the ignored session transcript. Full creation source/member access review,
+restricted duplication, artwork/placement conflicts, focal metadata/variants,
+voice-room banners and encrypted restart-persistent recovery remain open.
 
 ### Previous installed foundation
 
@@ -118,6 +849,78 @@ metadata/variants, permission-source/other-member previews, atomic restricted
 channel duplication, artwork/placement conflict contracts and encrypted
 restart-persistent send recovery. Android physical audio and MLS/SFrame remain
 independent gates; desktop voice/streaming acceptance remains user-confirmed.
+
+## Desktop continuation — 2026-10-07
+
+Three parallel implementation lanes continue the installed desktop foundation.
+Parent owns controller declarations/context invalidation, aggregate creation
+completion, CMake wiring, production long-list checks, integration and packaging.
+
+- Initial channel icon/banner pickers use the existing async crop review.
+  Approved pixels are canonical metadata-free PNGs held in private temporary
+  files. The form receives opaque tokens bound to account, server, access
+  generation and image kind. Discard, replacement and context changes release
+  unused owners; upload callbacks retain owners through daemon completion.
+  Failed creation retains the approved crops for deliberate retry. Partial
+  success reports that the channel exists, disables repeat Create and directs
+  artwork recovery through Channel settings. Dirty creation drafts ask before
+  discard; pending creation cannot close or repeat.
+- Sidebar placement scrolls at an in-bounds top/bottom edge at bounded 30 ms
+  intervals and at most 12 scaled pixels per tick. It recomputes the destination
+  under a stationary pointer. One source delegate is retained through the grab,
+  with no full-list cache expansion. Bounds, release, Escape, off-list movement,
+  center movement and context/authorization changes stop scrolling. The bottom
+  strip supports explicit end placement; server order remains authoritative.
+- Quick-switcher text/voice results show lazy visible-row channel artwork with
+  fixed type-icon fallbacks. Names/details remain plain text and elide, and the
+  result viewport fits the compact window. Existing joined-voice controls show
+  channel artwork/fallback without re-requesting it on routine voice telemetry.
+  No separate voice-room view exists; a room banner remains future work.
+
+Validation: a fresh warnings-as-errors Release configure/build and independent
+read-only review pass. The final Arch source snapshot builds fresh main/debug
+**0.2.2-1** packages; **291/291 CTest** pass from that package build, including all
+GUI tests. Both QML lint targets pass with existing warnings; changed C++
+formatting and whitespace checks pass. Package-built native Wayland checks pass
+**13/13**: six creation/crop cases, four artwork identity cases and three
+production crop/pointer cases. Crop captures are compact **720×460/150%** and wide
+**1440×900/100%** (one-pixel compositor rounding permitted), dark/light. Switcher
+and joined-voice captures are **720×460/150%**, dark/light; controls and labels
+are inspected. The extracted package GUI also launches/captures under Wayland.
+Automated checks remain distinct from human acceptance.
+
+Test reliability corrections: production mock signal listeners must target the
+same mock as its action/property references. Asynchronous checks inside GTest
+use GTest-compatible event-loop assertions; Qt-only QTRY macros can return
+without recording a GTest failure. Native shortcuts require both internal focus
+and an active compositor window. Crop closure restores form focus after its
+transition, and fixtures assert this handoff before Escape.
+
+Local installation: both fresh main/debug packages are installed. All **126
+regular files/symlinks** match extracted artifacts; `pacman -Qkk` reports **zero
+altered paths** for both packages (39 main/160 debug total paths). The daemon is
+active/connected and `/usr/bin/omachat` mapped/visible. Voice had become joined
+before upgrade; the announced service restart disconnected it. No streaming or
+transfers were active; voice is currently disconnected and requires user rejoin.
+The existing nonfatal portal app-ID registration warning remains.
+
+Source provenance is `build/desktop-oct7-install/source-manifest.json`, with its
+SHA-256 and base revision in
+`build/desktop-oct7-validation/evidence/source-checkpoint.json`. Package artifacts,
+build/full-suite/lint/install logs are in `build/desktop-oct7-install/`; native
+logs, inspected captures and installation proof are in
+`build/desktop-oct7-validation/evidence/installation-checkpoint.json` and its
+sibling evidence files. The application source remains uncommitted on
+`feature/desktop-accessibility`. No commit, push, hosted deployment, public release
+or AUR publication occurs in this continuation. Preserve all edits and the
+ignored session transcript.
+
+Next desktop scopes: full creation inherited-access review, permission-source
+and other-member previews, atomic restricted-channel duplication, artwork and
+placement conflict contracts, persisted focal metadata/variants, a distinct
+voice-room/banner surface, and encrypted restart-persistent failed-send recovery.
+Android physical audio and MLS/SFrame remain independent gates; existing desktop
+voice/streaming acceptance remains user-confirmed.
 
 ## Channel foundation continuation — 2026-10-05
 
@@ -508,7 +1311,7 @@ where they do not delay integration or require unavailable hardware.
 1. Read this handoff, the current UI plan, channel customization plan, security
    roadmap and latest Android handoff sections. Recheck git status/branches,
    existing uncommitted work, installed state and available tools/hardware.
-   Older dated sections record history; the October 6 installed state and standing
+   Older dated sections record history; the latest October 7 installed state and standing
    installation/publication workflow supersede earlier session-specific limits. Do not repeat accepted desktop voice/
    streaming baseline tests without a change that makes them relevant.
 2. Use the available agent capacity: currently four total slots, so the parent
@@ -593,6 +1396,8 @@ independent task instead of keeping it idle.
 
 The full desktop UI plan is `docs/ui-ux-improvement-plan.md`; additional queues
 are `docs/channel-customization-plan.md`, `docs/security-roadmap.md` and
-`docs/android-session-handoff.md`. The latest local installation/checkpoint is
-recorded in build/desktop-install-647fc1e/checkpoint.json (implementation97f3b43,
-packaging647fc1e).
+`docs/android-session-handoff.md`. The latest local installation checkpoint is recorded in
+`build/desktop-permission-sources/evidence/installation-checkpoint.json`; the exact
+uncommitted source snapshot is `install/source-manifest.json` in that directory.
+The hosted server now runs the deployed permission contract from `16e3ed8`;
+see the latest deployment checkpoint and recheck volatile state before acting.

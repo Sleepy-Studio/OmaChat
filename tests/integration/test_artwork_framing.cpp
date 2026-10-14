@@ -12,6 +12,41 @@
 using namespace omachat;
 using namespace omachat::test;
 namespace {
+// Hold preparation in the worker queue while protocol/control requests proceed.
+class PreparationGate {
+public:
+    PreparationGate()
+    {
+        pool->waitForDone();
+        previous = pool->maxThreadCount();
+        pool->setMaxThreadCount(1);
+        pool->start([this] {
+            entered.release();
+            release.acquire();
+        });
+    }
+    ~PreparationGate()
+    {
+        unblock();
+        pool->waitForDone();
+        pool->setMaxThreadCount(previous);
+    }
+    bool ready() { return entered.tryAcquire(1, 5000); }
+    void unblock()
+    {
+        if (!released) {
+            released = true;
+            release.release();
+        }
+    }
+
+private:
+    QThreadPool* pool = QThreadPool::globalInstance();
+    int previous = 0;
+    bool released = false;
+    QSemaphore entered, release;
+};
+
 class ArtworkFraming : public ::testing::Test {
 protected:
     TestServer server;
@@ -58,8 +93,144 @@ protected:
         return daemon.call(
             "attachment.download", {{"attachment", id}, {"artwork_variant", variant}, {"to", files.filePath(name)}});
     }
+    std::uint64_t beginRawUpload(RawClient& raw)
+    {
+        QFile image(files.filePath("image.png"));
+        if (!image.open(QIODevice::ReadOnly))
+            return 0;
+        const auto bytes = image.readAll();
+        proto::Envelope request;
+        auto* begin = request.mutable_begin_upload();
+        begin->set_channel_id(cid.toULongLong());
+        begin->set_channel_artwork(true);
+        begin->set_filename("image.png");
+        begin->set_size(static_cast<uint64_t>(bytes.size()));
+        auto* f = begin->mutable_artwork_framing();
+        f->set_kind(proto::ArtworkFraming::ICON);
+        f->set_source_width(100);
+        f->set_source_height(50);
+        f->set_x(50);
+        f->set_width(50);
+        f->set_height(50);
+        auto reply = raw.call(request);
+        if (!reply || !reply->has_upload_ticket())
+            return 0;
+        const auto id = reply->upload_ticket().attachment_id();
+        request.Clear();
+        request.mutable_upload_chunk()->set_attachment_id(id);
+        request.mutable_upload_chunk()->set_data(bytes.toStdString());
+        reply = raw.call(request);
+        return reply && reply->has_ok() ? id : 0;
+    }
 };
 } // namespace
+TEST_F(ArtworkFraming, CancelDuringPreparationCannotPublishLateVariants)
+{
+    RawClient raw(server);
+    ASSERT_TRUE(raw.connect());
+    ASSERT_TRUE(raw.hello());
+    ASSERT_TRUE(raw.login("framing-owner", "test-password"));
+    const auto id = beginRawUpload(raw);
+    ASSERT_NE(id, 0u);
+    PreparationGate gate;
+    ASSERT_TRUE(gate.ready());
+    QTimer::singleShot(30, [&] {
+        proto::Envelope request;
+        request.mutable_finish_upload()->set_attachment_id(id);
+        const auto busy = raw.call(request);
+        EXPECT_TRUE(busy && busy->has_error() && busy->error().code() == proto::ERROR_RATE_LIMITED);
+        request.Clear();
+        request.mutable_cancel_upload()->set_attachment_id(id);
+        const auto cancelled = raw.call(request);
+        EXPECT_TRUE(cancelled && cancelled->has_ok());
+        gate.unblock();
+    });
+    proto::Envelope request;
+    request.mutable_finish_upload()->set_attachment_id(id);
+    EXPECT_FALSE(raw.call(request, 300));
+    QThreadPool::globalInstance()->waitForDone();
+    for (const QString& variant : {QString("full"), QString("small"), QString("source")})
+        EXPECT_FALSE(download(owner, QString::number(id), variant, "cancelled-" + variant).ok);
+    const auto retry = raw.call(request);
+    ASSERT_TRUE(retry && retry->has_error());
+    EXPECT_EQ(retry->error().code(), proto::ERROR_NOT_FOUND);
+}
+
+TEST_F(ArtworkFraming, ReconnectDuringPreparationRequiresExplicitFinishOnNewConnection)
+{
+    RawClient raw(server), resumed(server);
+    ASSERT_TRUE(raw.connect());
+    ASSERT_TRUE(raw.hello());
+    ASSERT_TRUE(raw.login("framing-owner", "test-password"));
+    ASSERT_TRUE(resumed.connect());
+    ASSERT_TRUE(resumed.hello());
+    ASSERT_TRUE(resumed.login("framing-owner", "test-password"));
+    const auto id = beginRawUpload(raw);
+    ASSERT_NE(id, 0u);
+    PreparationGate gate;
+    ASSERT_TRUE(gate.ready());
+    QTimer::singleShot(30, [&] {
+        proto::Envelope request;
+        request.mutable_finish_upload()->set_attachment_id(id);
+        const auto busy = raw.call(request);
+        EXPECT_TRUE(busy && busy->has_error() && busy->error().code() == proto::ERROR_RATE_LIMITED);
+        raw.abort();
+        request.Clear();
+        request.mutable_resume_upload()->set_attachment_id(id);
+        const auto ticket = resumed.call(request);
+        EXPECT_TRUE(ticket && ticket->has_upload_ticket());
+        gate.unblock();
+    });
+    proto::Envelope request;
+    request.mutable_finish_upload()->set_attachment_id(id);
+    EXPECT_FALSE(raw.call(request, 1000));
+    QThreadPool::globalInstance()->waitForDone();
+    // Download pumps the completion callback: it must not publish for the old session.
+    EXPECT_FALSE(download(owner, QString::number(id), "source", "before-explicit-finish").ok);
+    const auto finished = resumed.call(request);
+    ASSERT_TRUE(finished && finished->has_attachment());
+    EXPECT_EQ(finished->attachment().id(), id);
+    EXPECT_TRUE(download(owner, QString::number(id), "source", "resumed-source").ok);
+}
+
+TEST_F(ArtworkFraming, RevocationDuringPreparationAbortsPublication)
+{
+    const auto self = member.call("state.snapshot").result.value("self").toObject().value("id");
+    ASSERT_TRUE(owner
+            .call("override.set",
+                {{"channel", cid}, {"user", self}, {"allow", QJsonArray{"MANAGE_CHANNEL"}}, {"deny", QJsonArray{}}})
+            .ok);
+    RawClient raw(server);
+    ASSERT_TRUE(raw.connect());
+    ASSERT_TRUE(raw.hello());
+    ASSERT_TRUE(raw.login("framing-member", "test-password"));
+    const auto id = beginRawUpload(raw);
+    ASSERT_NE(id, 0u);
+    PreparationGate gate;
+    ASSERT_TRUE(gate.ready());
+    QTimer::singleShot(30, [&] {
+        proto::Envelope request;
+        request.mutable_finish_upload()->set_attachment_id(id);
+        const auto busy = raw.call(request);
+        EXPECT_TRUE(busy && busy->has_error() && busy->error().code() == proto::ERROR_RATE_LIMITED);
+        EXPECT_TRUE(owner
+                .call("override.set",
+                    {{"channel", cid}, {"user", self}, {"allow", QJsonArray{}}, {"deny", QJsonArray{"MANAGE_CHANNEL"}}})
+                .ok);
+        gate.unblock();
+    });
+    proto::Envelope request;
+    request.mutable_finish_upload()->set_attachment_id(id);
+    const auto denied = raw.call(request);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_PERMISSION_DENIED);
+    for (const QString& variant : {QString("full"), QString("small"), QString("source")})
+        EXPECT_FALSE(download(owner, QString::number(id), variant, "revoked-preparation-" + variant).ok);
+    const auto retry = raw.call(request);
+    ASSERT_TRUE(retry && retry->has_error());
+    EXPECT_EQ(retry->error().code(), proto::ERROR_NOT_FOUND);
+}
+
 TEST_F(ArtworkFraming, DownloadsVariantsPersistsSourceAcrossServerRestartAndRestrictsManagers)
 {
     const auto updated = upload(framing());

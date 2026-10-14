@@ -32,6 +32,7 @@ add_executable(omachat_unit_tests
 if(OMACHAT_BUILD_CLIENT)
     target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp
         unit/test_artwork_crop.cpp ../client/src/platform/ArtworkCrop.cpp
+        unit/test_artwork_crop_memory.cpp ../client/src/platform/ArtworkCropMemory.cpp
         unit/test_artwork_cache.cpp ../client/src/platform/ArtworkCache.cpp
         unit/test_audio_levels.cpp unit/test_message_list_model.cpp
         ../client/src/views/AudioLevels.cpp ../client/src/models/MessageListModel.cpp)
@@ -118,12 +119,31 @@ if(OMACHAT_BUILD_CLIENT)
     omachat_set_warnings(omachat_channel_drag_tests)
     gtest_discover_tests(omachat_channel_drag_tests DISCOVERY_TIMEOUT 30
         PROPERTIES LABELS gui TIMEOUT 120)
+    qt_add_executable(omachat_channel_edge_scroll_tests gui/test_channel_edge_scroll.cpp)
+    target_compile_definitions(omachat_channel_edge_scroll_tests PRIVATE OMACHAT_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(omachat_channel_edge_scroll_tests PRIVATE GTest::gtest Qt6::Quick Qt6::Test)
+    omachat_set_warnings(omachat_channel_edge_scroll_tests)
+    gtest_discover_tests(omachat_channel_edge_scroll_tests DISCOVERY_TIMEOUT 30
+        PROPERTIES LABELS gui TIMEOUT 120)
+    qt_add_executable(omachat_creation_crop_tests gui/test_creation_crop.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_channel_details_view_tests gui/test_channel_details_view.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_channel_settings_navigation_tests gui/test_channel_settings_navigation.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_placement_conflicts_tests gui/test_placement_conflicts.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_channel_duplication_tests gui/test_channel_duplication.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_artwork_conflicts_tests gui/test_artwork_conflicts.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_send_recovery_view_tests gui/test_send_recovery_view.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_artwork_identity_tests gui/test_artwork_identity.cpp integration/Harness.cpp)
     qt_add_executable(omachat_operation_tests gui/test_operations.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_permission_sources_tests gui/test_permission_sources.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_permission_targets_tests gui/test_permission_targets.cpp integration/Harness.cpp)
     qt_add_executable(omachat_permission_review_tests gui/test_permission_review.cpp integration/Harness.cpp)
     qt_add_executable(omachat_server_crop_tests gui/test_server_crop.cpp integration/Harness.cpp)
-    foreach(operation_target omachat_operation_tests omachat_permission_review_tests omachat_server_crop_tests)
+    foreach(operation_target omachat_operation_tests omachat_permission_sources_tests omachat_permission_targets_tests omachat_permission_review_tests omachat_server_crop_tests
+            omachat_creation_crop_tests omachat_artwork_identity_tests omachat_channel_details_view_tests
+            omachat_channel_settings_navigation_tests omachat_placement_conflicts_tests omachat_channel_duplication_tests
+            omachat_artwork_conflicts_tests omachat_send_recovery_view_tests)
         target_sources(${operation_target} PRIVATE ../client/src/platform/ArtworkCache.cpp)
-        target_sources(${operation_target} PRIVATE ../client/src/platform/ArtworkCrop.cpp)
+        target_sources(${operation_target} PRIVATE ../client/src/platform/ArtworkCrop.cpp ../client/src/platform/ArtworkCropMemory.cpp)
         file(GLOB operation_icons "${CMAKE_SOURCE_DIR}/client/icons/*.svg")
         qt_add_resources(${operation_target} operation_icons
             PREFIX "/qt/qml/OmaChat" BASE "${CMAKE_SOURCE_DIR}/client" FILES ${operation_icons}

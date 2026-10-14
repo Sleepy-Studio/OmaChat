@@ -35,6 +35,14 @@ Dialog {
             flick.contentY = Math.min(flick.contentHeight - flick.height, point.y + item.height - flick.height)
     }
 
+    function revealOverviewControl(item) {
+        const flick = overviewScroll.contentItem
+        const point = item.mapToItem(flick.contentItem, 0, 0)
+        if (point.y < flick.contentY) flick.contentY = Math.max(0, point.y)
+        else if (point.y + item.height > flick.contentY + flick.height)
+            flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, point.y + item.height - flick.height))
+    }
+
     function requestRole(r) {
         if (roleSaving || (r && r.id === roleId)) return
         if (dirty) { nextRole = r; discardConfirm.open() }
@@ -240,6 +248,7 @@ Dialog {
 
             // ---------------------------------------------------- overview
             ScrollView {
+                id: overviewScroll
                 clip: true
                 enabled: !dialog.serverSaving
                 ColumnLayout {
@@ -307,7 +316,16 @@ Dialog {
                             onClicked: { serverImagePicker.kind = "icon"; serverImagePicker.open() }
                         }
                         FlatButton {
-                            text: qsTr("Remove icon")
+                            id: serverReframeIcon
+                            objectName: "serverReframeIcon"
+                            onActiveFocusChanged: if (activeFocus) dialog.revealOverviewControl(serverReframeIcon)
+                            text: qsTr("Reframe")
+                            visible: App.capabilities.indexOf("artwork.framing.v1") >= 0
+                            enabled: !!dialog.serverDetails.icon_attachment_id && dialog.serverDetails.icon_attachment_id !== "0"
+                            onClicked: serverArtworkCrop.openExisting(dialog.serverId, "icon", dialog.serverDetails.icon_attachment_id)
+                        }
+                        FlatButton {
+                            text: qsTr("Remove")
                             enabled: !!dialog.serverDetails.icon_attachment_id
                                      && dialog.serverDetails.icon_attachment_id !== "0"
                             onClicked: App.setServerArtwork(dialog.serverId, "icon", "")
@@ -331,7 +349,16 @@ Dialog {
                             onClicked: { serverImagePicker.kind = "banner"; serverImagePicker.open() }
                         }
                         FlatButton {
-                            text: qsTr("Remove banner")
+                            id: serverReframeBanner
+                            objectName: "serverReframeBanner"
+                            onActiveFocusChanged: if (activeFocus) dialog.revealOverviewControl(serverReframeBanner)
+                            text: qsTr("Reframe")
+                            visible: App.capabilities.indexOf("artwork.framing.v1") >= 0
+                            enabled: !!dialog.serverDetails.banner_attachment_id && dialog.serverDetails.banner_attachment_id !== "0"
+                            onClicked: serverArtworkCrop.openExisting(dialog.serverId, "banner", dialog.serverDetails.banner_attachment_id)
+                        }
+                        FlatButton {
+                            text: qsTr("Remove")
                             enabled: !!dialog.serverDetails.banner_attachment_id
                                      && dialog.serverDetails.banner_attachment_id !== "0"
                             onClicked: App.setServerArtwork(dialog.serverId, "banner", "")

@@ -31,6 +31,19 @@ QString initials(const QString& name)
 
 } // namespace
 
+void AppController::refreshCreationContext()
+{
+    if (m_creationAccount == accountId() && m_creationServer == m_selectedServer
+        && m_creationArtworkGeneration == artworkGeneration())
+        return;
+    m_creationAccount = accountId();
+    m_creationServer = m_selectedServer;
+    m_creationArtworkGeneration = artworkGeneration();
+    ++m_stagedCropOperation;
+    ++m_channelCreateGeneration;
+    m_stagedArtwork.clear();
+}
+
 AppController::AppController(const config::ClientConfig& config, QObject* parent)
     : QObject(parent)
     , m_config(config)
@@ -46,6 +59,23 @@ AppController::AppController(const config::ClientConfig& config, QObject* parent
     , m_searchResults({"key", "itemId", "channelId", "channel", "author", "preview", "time"})
 {
     g_app = this;
+    connect(this, &AppController::selectionChanged, this, &AppController::refreshCreationContext);
+    connect(this, &AppController::statusChanged, this, &AppController::refreshCreationContext);
+    connect(this, &AppController::artworkGenerationChanged, this, &AppController::refreshCreationContext);
+    connect(this, &AppController::statusChanged, this, &AppController::invalidatePermissionPreview);
+    connect(this, &AppController::selectionChanged, this, &AppController::invalidatePermissionPreview);
+    connect(this, &AppController::rolesChanged, this, &AppController::invalidatePermissionPreview);
+    connect(this, &AppController::channelDataChanged, this, [this](const QString& id) {
+        const QString reviewed = m_permissionPreview.value(QStringLiteral("channelId")).toString();
+        if (id == reviewed || id == channel(reviewed).value(QStringLiteral("parent_id")).toString()
+            || (m_permissionPreview.value("newChannel").toBool()
+                && id == m_permissionPreview.value("parentId").toString()))
+            invalidatePermissionPreview();
+    });
+    connect(this, &AppController::serverDataChanged, this, [this](const QString& id) {
+        if (id == m_permissionPreviewServer)
+            invalidatePermissionPreview();
+    });
     prunePastedImages();
     connect(&m_link, &DaemonLink::stateChanged, this, &AppController::daemonChanged);
     connect(&m_link, &DaemonLink::connected, this, &AppController::onDaemonConnected);
@@ -195,6 +225,8 @@ void AppController::applyStatus(const QJsonObject& status)
     const bool voiceBefore = voiceJoined();
     const QString voiceChannelBefore = voiceChannelId();
     m_status = status;
+    if (previousAccount != accountId() || state() != u"connected")
+        ++m_sendRecoveryRequest;
     if (state() != u"connected" || previousAccount != accountId()) {
         m_instanceOperator = false;
         m_instanceStatus = {};
@@ -203,6 +235,12 @@ void AppController::applyStatus(const QJsonObject& status)
     const QJsonObject user = status.value(QStringLiteral("user")).toObject();
     if (!user.isEmpty())
         m_self = user;
+    const auto recoveryFingerprint = status.value(QStringLiteral("send_recovery"))
+                                         .toObject()
+                                         .value(QStringLiteral("certificate_fingerprint"))
+                                         .toString();
+    if (!recoveryFingerprint.isEmpty())
+        m_recoveryPeerFingerprints.insert(sendRecoveryEndpoint(), recoveryFingerprint);
     refreshArtworkCache();
     emit statusChanged();
     emit attachmentsChanged();
@@ -286,6 +324,7 @@ void AppController::applySnapshot(const QJsonObject& snap)
     emit attachmentsChanged();
     emit sendOperationsChanged();
     refreshInstanceStatus();
+    refreshSendRecovery();
 }
 
 void AppController::refreshInstanceStatus()
@@ -418,6 +457,11 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         updateTyping();
         return;
     }
+    if (name == u"recovery.changed") {
+        if (data.value(QStringLiteral("account")).toString() == accountId())
+            refreshSendRecovery();
+        return;
+    }
     if (name == u"channel.created" || name == u"channel.updated") {
         m_channelsById.insert(id("id"), data);
         rebuildChannels();
@@ -430,6 +474,7 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         m_channelsById.remove(id("channel_id"));
         ensureSelection();
         rebuildChannels();
+        emit channelDataChanged(id("channel_id"));
         return;
     }
     if (name == u"server.updated") {
@@ -998,7 +1043,7 @@ void AppController::rebuildChannels()
             const QString parent = c.value(QStringLiteral("parent_id")).toString();
             if (c.value(QStringLiteral("type")).toString() == u"category")
                 categories.append(c);
-            else if (parent.isEmpty() || parent == u"0")
+            else if (parent.isEmpty() || parent == u"0" || !m_channelsById.contains(parent))
                 top.append(c);
             else
                 children[parent].append(c);

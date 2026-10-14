@@ -1,4 +1,5 @@
 #include "Harness.hpp"
+#include "NativeWindowHarness.hpp"
 #include "controllers/AppController.hpp"
 #include "platform/ThemeProvider.hpp"
 #include "views/AudioLevels.hpp"
@@ -117,25 +118,8 @@ TEST_F(ServerCrop, ProductionDialogUploadsCanonicalIconAndBanner)
             auto* window = qobject_cast<QQuickWindow*>(object.get());
             ASSERT_TRUE(window);
             window->resize(compact ? 720 : 1440, compact ? 460 : 900);
-            QTest::qWait(150); // Let Wayland map/configure before compositor dispatch.
-            if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
-                const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
-                ASSERT_EQ(
-                    QProcess::execute("hyprctl",
-                        {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
-                    0);
-                ASSERT_EQ(QProcess::execute("hyprctl",
-                              {"eval",
-                                  QString("hl.dispatch(hl.dsp.window.resize({x=%1,y=%2,relative=false,window='%3'}))")
-                                      .arg(compact ? 720 : 1440)
-                                      .arg(compact ? 460 : 900)
-                                      .arg(match)}),
-                    0);
-            }
-            ASSERT_TRUE(waitFor([&] {
-                return std::abs(window->width() - (compact ? 720 : 1440)) <= 1
-                    && window->height() == (compact ? 460 : 900);
-            }));
+            window->resize(compact ? 720 : 1440, compact ? 460 : 900);
+            ASSERT_TRUE(prepareNativeWindow(window, compact ? 720 : 1440, compact ? 460 : 900));
             QTest::qWait(150);
             for (const QString& kind : {QString("icon"), QString("banner")}) {
                 const QString key = kind + "_attachment_id";
@@ -156,6 +140,7 @@ TEST_F(ServerCrop, ProductionDialogUploadsCanonicalIconAndBanner)
                 ASSERT_TRUE(apply);
                 ASSERT_TRUE(apply->isEnabled());
                 apply->forceActiveFocus();
+                ASSERT_TRUE(activateNativeWindow(window));
                 QTest::keyClick(window, Qt::Key_Space);
                 ASSERT_TRUE(waitFor([&] { return !crop->property("uploading").toBool(); }));
                 EXPECT_TRUE(crop->property("error").toString().isEmpty());
@@ -171,6 +156,40 @@ TEST_F(ServerCrop, ProductionDialogUploadsCanonicalIconAndBanner)
             }
         }
     }
+}
+
+TEST_F(ServerCrop, SuccessfulUploadRemembersChoiceButRejectedUploadDoesNotReplaceIt)
+{
+    QString failure;
+    bool finished = false;
+    QObject::connect(app.get(), &client::AppController::administrationFinished,
+        [&](const QString& op, const QString&, const QString& error, const QVariantMap&) {
+            if (op == "server.artwork.crop") {
+                failure = error;
+                finished = true;
+            }
+        });
+    app->setServerArtworkCrop(id, "icon", QUrl::fromLocalFile(path), 1, 0.25, 2, prepare());
+    ASSERT_TRUE(waitFor([&] { return finished; }));
+    ASSERT_TRUE(failure.isEmpty()) << failure.toStdString();
+    QThreadPool::globalInstance()->waitForDone();
+    finished = false;
+    app->setServerArtworkCrop(id, "icon", QUrl::fromLocalFile(path), 0, 0, 1, "obsolete fingerprint");
+    ASSERT_TRUE(waitFor([&] { return finished; }));
+    ASSERT_FALSE(failure.isEmpty());
+    QVariantMap remembered;
+    bool prepared = false;
+    QObject::connect(app.get(), &client::AppController::artworkCropPrepared,
+        [&](int, const QString&, const QString& error, const QString&, int, int, const QVariantMap& choice) {
+            EXPECT_TRUE(error.isEmpty());
+            remembered = choice;
+            prepared = true;
+        });
+    app->prepareArtworkCrop(200, QUrl::fromLocalFile(path), "icon");
+    ASSERT_TRUE(waitFor([&] { return prepared; }));
+    EXPECT_EQ(remembered.value("x").toDouble(), 1);
+    EXPECT_EQ(remembered.value("y").toDouble(), 0.25);
+    EXPECT_EQ(remembered.value("zoom").toDouble(), 2);
 }
 
 TEST_F(ServerCrop, ChangedSourceAndWrongSelectedServerRejectWithoutMutation)
@@ -350,11 +369,110 @@ TEST_F(ServerCrop, PreparedPreviewCannotBeReusedForAnotherSelectedServer)
     EXPECT_EQ(app->serverDetails(other).value("icon_attachment_id").toString(), "0");
 }
 
+TEST_F(ServerCrop, SharedFramingReopensAndCanSelectPreviouslyHiddenPixels)
+{
+    bool saved = false;
+    QString failure;
+    QObject::connect(app.get(), &client::AppController::administrationFinished, app.get(),
+        [&](const QString& operation, const QString&, const QString& error, const QVariantMap&) {
+            if (operation == "server.artwork.crop") {
+                saved = true;
+                failure = error;
+            }
+        });
+    app->setServerArtworkCrop(id, "icon", QUrl::fromLocalFile(path), 1, 0.5, 1, prepare(), true);
+    ASSERT_TRUE(waitFor([&] { return saved; }));
+    ASSERT_TRUE(failure.isEmpty()) << failure.toStdString();
+    ASSERT_TRUE(waitFor([&] { return app->serverDetails(id).value("icon_attachment_id").toString() != "0"; }));
+    QString attachment = app->serverDetails(id).value("icon_attachment_id").toString();
+    for (bool light : {false, true}) {
+        if (light) {
+            QFile colors(files.filePath("reframe-light.toml"));
+            ASSERT_TRUE(colors.open(QIODevice::WriteOnly));
+            colors.write("background = '#fafafa'\nforeground = '#262626'\naccent = '#2563eb'\n");
+            colors.close();
+            ASSERT_TRUE(theme.loadFile(colors.fileName()));
+        }
+        for (bool compact : {true, false}) {
+            theme.setScale(compact ? 1.5 : 1.0);
+            QQmlEngine engine;
+            QQmlComponent component(&engine);
+            component.setData(R"(
+                import QtQuick
+                import QtQuick.Controls
+                import OmaChat
+                ApplicationWindow { width: 720; height: 460; visible: true
+                    ServerSettingsDialog { objectName: "settings" }
+                })",
+                QUrl());
+            std::unique_ptr<QObject> object(component.create());
+            ASSERT_TRUE(object) << component.errorString().toStdString();
+            auto* settings = object->findChild<QObject*>("settings");
+            ASSERT_TRUE(QMetaObject::invokeMethod(settings, "open"));
+            auto* window = qobject_cast<QQuickWindow*>(object.get());
+            ASSERT_TRUE(window);
+            window->resize(compact ? 720 : 1440, compact ? 460 : 900);
+            ASSERT_TRUE(prepareNativeWindow(window, compact ? 720 : 1440, compact ? 460 : 900));
+            auto* crop = object->findChild<QObject*>("serverArtworkCropDialog");
+            ASSERT_TRUE(crop);
+            auto* entry = namedControl(window->contentItem(), "serverReframeIcon");
+            ASSERT_TRUE(entry);
+            ASSERT_TRUE(waitFor([&] { return entry->isEnabled(); }));
+            entry->forceActiveFocus();
+            ASSERT_TRUE(activateNativeWindow(window));
+            QTest::keyClick(window, Qt::Key_Space);
+            ASSERT_TRUE(waitFor([&] { return !crop->property("fingerprint").toString().isEmpty(); }));
+            EXPECT_FALSE(crop->property("fetchingSource").toBool());
+            EXPECT_TRUE(crop->property("keepSource").toBool());
+            EXPECT_NEAR(crop->property("focalX").toDouble(), 1, 0.0001);
+            EXPECT_NEAR(crop->property("zoom").toDouble(), 1, 0.0001);
+            EXPECT_EQ(crop->property("sourceWidth").toInt(), 256);
+            EXPECT_EQ(crop->property("sourceHeight").toInt(), 128);
+            auto* apply = namedControl(window->contentItem(), "artworkCropApply");
+            ASSERT_TRUE(apply && apply->isEnabled());
+            const auto bounds = apply->mapRectToItem(window->contentItem(), apply->boundingRect());
+            EXPECT_GE(bounds.top(), -1);
+            EXPECT_LE(bounds.bottom(), window->height() + 1);
+            QTest::qWait(150);
+            const QString captureDir = qEnvironmentVariable("OMACHAT_CAPTURE_DIR");
+            if (!captureDir.isEmpty()) {
+                ASSERT_TRUE(QDir().mkpath(captureDir));
+                ASSERT_TRUE(window->grabWindow().save(captureDir
+                    + QString("/shared-reframe-%1-%2.png")
+                        .arg(light ? "light" : "dark", compact ? "compact" : "wide")));
+            }
+            if (light && !compact) {
+                crop->setProperty("focalX", 0.0); // Pixels excluded from the earlier icon.
+                saved = false;
+                apply->forceActiveFocus();
+                ASSERT_TRUE(activateNativeWindow(window));
+                QTest::keyClick(window, Qt::Key_Space);
+                ASSERT_TRUE(waitFor([&] { return saved; }));
+                ASSERT_TRUE(failure.isEmpty()) << failure.toStdString();
+                ASSERT_TRUE(waitFor(
+                    [&] { return app->serverDetails(id).value("icon_attachment_id").toString() != attachment; }));
+                const auto next = app->serverDetails(id).value("icon_attachment_id").toString();
+                const auto download = daemon.call(
+                    "attachment.download", {{"attachment", next}, {"to", files.filePath("reframed.png")}});
+                ASSERT_TRUE(download.ok);
+                const QImage image(download.result.value("path").toString());
+                EXPECT_EQ(image.size(), QSize(512, 512));
+                EXPECT_GT(image.pixelColor(256, 256).red(), 200);
+                EXPECT_LT(image.pixelColor(256, 256).blue(), 40);
+            }
+            window->close();
+            QTest::qWait(100);
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (!qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     qputenv("OMACHAT_THEME", "builtin");
+    QTemporaryDir dataHome;
+    qputenv("XDG_DATA_HOME", dataHome.path().toUtf8());
     QGuiApplication app(argc, argv);
     qmlRegisterSingletonType<client::AppController>("OmaChat", 1, 0, "App", &client::AppController::create);
     qmlRegisterSingletonType<client::ThemeProvider>("OmaChat", 1, 0, "Theme", &client::ThemeProvider::create);
