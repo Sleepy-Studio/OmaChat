@@ -90,6 +90,10 @@ add_executable(omachat_integration_tests
 )
 omachat_set_warnings(omachat_integration_tests)
 target_include_directories(omachat_integration_tests PRIVATE integration)
+# Integration checks launch the CLI; targeted builds must refresh it too.
+if(TARGET omachatctl)
+    add_dependencies(omachat_integration_tests omachatctl)
+endif()
 target_link_libraries(omachat_integration_tests PRIVATE
     omachat_shared omachat_daemon_core omachat_server_core GTest::gtest Qt6::Test)
 gtest_discover_tests(omachat_integration_tests DISCOVERY_TIMEOUT 30
