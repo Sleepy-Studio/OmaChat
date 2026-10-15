@@ -81,7 +81,7 @@ public:
     explicit TestDaemon(const QString& name);
     ~TestDaemon();
 
-    bool start();
+    bool start(const std::function<void(daemon::DaemonOptions&)>& configure = {});
     ipc::Reply call(const QString& method, const QJsonObject& params = {}, int timeoutMs = 15000);
     std::optional<QJsonObject> waitEvent(
         const QString& name, const std::function<bool(const QJsonObject&)>& pred = {}, int timeoutMs = 5000);

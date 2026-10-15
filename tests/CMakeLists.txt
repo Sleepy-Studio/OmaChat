@@ -24,6 +24,8 @@ add_executable(omachat_unit_tests
     unit/test_server_state.cpp
     unit/test_server_config_env.cpp
     unit/test_store.cpp
+    unit/test_channel_preferences.cpp
+    unit/test_notification_policy.cpp
     unit/test_artwork_images.cpp
     unit/test_send_recovery.cpp
     unit/test_video.cpp
@@ -42,6 +44,11 @@ endif()
 omachat_set_warnings(omachat_unit_tests)
 target_link_libraries(omachat_unit_tests PRIVATE
     omachat_shared omachat_daemon_core omachat_server_core GTest::gtest Qt6::Test)
+pkg_check_modules(TEST_LIBSECRET QUIET IMPORTED_TARGET libsecret-1)
+if(TEST_LIBSECRET_FOUND)
+    target_sources(omachat_unit_tests PRIVATE unit/test_credential_session.cpp)
+    target_link_libraries(omachat_unit_tests PRIVATE PkgConfig::TEST_LIBSECRET)
+endif()
 gtest_discover_tests(omachat_unit_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS unit)
 
 # The real QML singleton factory must reuse the instance configured by main().
@@ -77,6 +84,7 @@ add_executable(omachat_integration_tests
     integration/Harness.cpp
     integration/test_protocol.cpp
     integration/test_daemon.cpp
+    integration/test_channel_preferences.cpp
     integration/test_voice.cpp
     integration/test_channel_details.cpp
     integration/test_artwork_framing.cpp

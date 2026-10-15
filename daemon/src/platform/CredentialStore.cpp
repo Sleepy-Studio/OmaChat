@@ -2,26 +2,41 @@
 
 #include "omachat/core/Version.hpp"
 
+#include <QLibrary>
 #include <qt6keychain/keychain.h>
 
 namespace omachat::daemon {
 
 namespace {
 
-class KeychainStore final : public ICredentialStore {
-public:
-    explicit KeychainStore(QObject* parent)
-        : m_parent(parent)
-    {
-    }
+bool resetSecretService(QKeychain::Job* job)
+{
+    // QtKeychain folds an expired Secret Service session into OtherError.
+    // A new job alone reuses libsecret's stale process-wide cached session.
+    // AccessDenied and EntryNotFound must retain their existing semantics.
+    if (job->error() != QKeychain::OtherError)
+        return false;
+    static QLibrary library(QStringLiteral("secret-1"), 0);
+    using Disconnect = void (*)();
+    auto disconnect = reinterpret_cast<Disconnect>(library.resolve("secret_service_disconnect"));
+    if (!disconnect)
+        return false;
+    disconnect();
+    return true;
+}
 
-    void read(const QString& key, ReadCallback cb) override
-    {
-        auto* job = new QKeychain::ReadPasswordJob(QString::fromLatin1(kAppId), m_parent);
-        job->setAutoDelete(true);
-        job->setInsecureFallback(false);
-        job->setKey(key);
-        QObject::connect(job, &QKeychain::Job::finished, m_parent, [cb = std::move(cb)](QKeychain::Job* j) {
+void readKeychain(QObject* parent, const QString& key, ICredentialStore::ReadCallback cb, bool retried = false)
+{
+    auto* job = new QKeychain::ReadPasswordJob(QString::fromLatin1(kAppId), parent);
+    job->setAutoDelete(true);
+    job->setInsecureFallback(false);
+    job->setKey(key);
+    QObject::connect(
+        job, &QKeychain::Job::finished, parent, [parent, key, retried, cb = std::move(cb)](QKeychain::Job* j) mutable {
+            if (!retried && resetSecretService(j)) {
+                readKeychain(parent, key, std::move(cb), true);
+                return;
+            }
             auto* rj = static_cast<QKeychain::ReadPasswordJob*>(j);
             if (rj->error() == QKeychain::NoError)
                 cb(true, rj->textData(), QString());
@@ -30,21 +45,42 @@ public:
             else
                 cb(false, QString(), rj->errorString());
         });
-        job->start();
-    }
+    job->start();
+}
 
-    void write(const QString& key, const QString& secret, WriteCallback cb) override
-    {
-        auto* job = new QKeychain::WritePasswordJob(QString::fromLatin1(kAppId), m_parent);
-        job->setAutoDelete(true);
-        job->setInsecureFallback(false);
-        job->setKey(key);
-        job->setTextData(secret);
-        QObject::connect(job, &QKeychain::Job::finished, m_parent, [cb = std::move(cb)](QKeychain::Job* j) {
+void writeKeychain(QObject* parent, const QString& key, const QString& secret, ICredentialStore::WriteCallback cb,
+    bool retried = false)
+{
+    auto* job = new QKeychain::WritePasswordJob(QString::fromLatin1(kAppId), parent);
+    job->setAutoDelete(true);
+    job->setInsecureFallback(false);
+    job->setKey(key);
+    job->setTextData(secret);
+    QObject::connect(job, &QKeychain::Job::finished, parent,
+        [parent, key, secret, retried, cb = std::move(cb)](QKeychain::Job* j) mutable {
+            // Setting the same key to the same value is safe to repeat once.
+            if (!retried && resetSecretService(j)) {
+                writeKeychain(parent, key, secret, std::move(cb), true);
+                return;
+            }
             if (cb)
                 cb(j->error() == QKeychain::NoError, j->errorString());
         });
-        job->start();
+    job->start();
+}
+
+class KeychainStore final : public ICredentialStore {
+public:
+    explicit KeychainStore(QObject* parent)
+        : m_parent(parent)
+    {
+    }
+
+    void read(const QString& key, ReadCallback cb) override { readKeychain(m_parent, key, std::move(cb)); }
+
+    void write(const QString& key, const QString& secret, WriteCallback cb) override
+    {
+        writeKeychain(m_parent, key, secret, std::move(cb));
     }
 
     void remove(const QString& key, WriteCallback cb) override

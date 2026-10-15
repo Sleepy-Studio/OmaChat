@@ -804,6 +804,11 @@ Rectangle {
         }
     }
 
+    ChannelNotificationsDialog {
+        id: notificationsDialog
+        onClosed: list.forceActiveFocus()
+    }
+
     MenuPopup {
         id: channelMenu
         onAboutToShow: sidebar.cancelPlacementGesture()
@@ -832,9 +837,9 @@ Rectangle {
             onTriggered: Qt.callLater(() => sidebar.openChannelDetails(channelMenu.channelId))
         }
         MenuAction {
-            text: App.channelMuted(channelMenu.channelId) ? qsTr("Unmute notifications") : qsTr("Mute notifications")
-            enabled: !channelMenu.isVoice
-            onTriggered: App.setChannelMuted(channelMenu.channelId, !App.channelMuted(channelMenu.channelId))
+            text: qsTr("Notifications…")
+            enabled: !channelMenu.isVoice && App.ready
+            onTriggered: Qt.callLater(() => notificationsDialog.openFor(channelMenu.channelId))
         }
         MenuAction {
             text: qsTr("Add people")

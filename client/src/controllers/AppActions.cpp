@@ -1525,9 +1525,36 @@ void AppController::moveChannelRelative(const QString& id, int delta)
     }
 }
 
+QVariantMap AppController::channelNotificationPreferences(const QString& id) const
+{
+    return m_channelPreferences.value(id, QJsonObject{{"notification_level", "default"}, {"muted", false}})
+        .toVariantMap();
+}
+
+void AppController::setChannelNotificationLevel(const QString& id, const QString& level)
+{
+    const auto account = accountId();
+    call(
+        QStringLiteral("channel.preferences.set"),
+        {{"account", account}, {"channel", id}, {"notification_level", level}},
+        [this, account, id](const QJsonObject&) { emit channelPreferencesWriteFinished(account, id, true, {}); }, {},
+        [this, account, id](const QString& error) { emit channelPreferencesWriteFinished(account, id, false, error); });
+}
+
+void AppController::muteChannelFor(const QString& id, const QString& duration)
+{
+    const auto account = accountId();
+    call(
+        QStringLiteral("channel.preferences.set"),
+        {{"account", account}, {"channel", id},
+            {"mute_for", duration.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(duration)}},
+        [this, account, id](const QJsonObject&) { emit channelPreferencesWriteFinished(account, id, true, {}); }, {},
+        [this, account, id](const QString& error) { emit channelPreferencesWriteFinished(account, id, false, error); });
+}
+
 void AppController::setChannelMuted(const QString& id, bool muted)
 {
-    call(QStringLiteral("channel.mute"), {{"channel", id}, {"muted", muted}});
+    muteChannelFor(id, muted ? QStringLiteral("forever") : QString());
 }
 
 void AppController::openDm(const QString& userId)

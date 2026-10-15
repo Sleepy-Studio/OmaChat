@@ -402,7 +402,7 @@ Dialog {
                     onToggled: App.setNotification("messages", checked)
                 }
                 Toggle {
-                    text: qsTr("Mentions (@you)")
+                    text: qsTr("Community notifications")
                     checked: App.notificationSettings.mentions === true
                     onToggled: App.setNotification("mentions", checked)
                 }
@@ -416,8 +416,9 @@ Dialog {
                     wrapMode: Text.Wrap
                     color: Theme.textMuted
                     font.pixelSize: Metrics.px(11)
-                    text: qsTr("Notifications are silenced while your status is Do not disturb, for muted channels, "
-                               + "and for the channel you are currently reading.")
+                    text: qsTr("Community notifications include mentions and channels set to All messages. "
+                               + "Direct messages and community notifications are master switches. "
+                               + "Do not disturb, channel mutes, and the conversation you are reading silence notifications.")
                 }
                 Item { Layout.fillHeight: true }
             }

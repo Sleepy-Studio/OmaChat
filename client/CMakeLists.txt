@@ -92,6 +92,7 @@ qt_add_qml_module(omachat
         qml/dialogs/ChannelPlacementDialog.qml
         qml/dialogs/ArtworkCropDialog.qml
         qml/dialogs/ChannelSettingsDialog.qml
+        qml/dialogs/ChannelNotificationsDialog.qml
         qml/dialogs/ChannelDetailsDialog.qml
     RESOURCES
         icons/app.svg

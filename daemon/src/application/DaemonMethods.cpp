@@ -667,7 +667,18 @@ void Daemon::registerMethods()
             {"protocol_major", int(kProtocolMajor)}});
     };
     m[QStringLiteral("state.snapshot")] = [this, model](const QJsonObject&, const Responder& r) {
+        const auto accountId = m_active;
+        if (!reloadChannelPreferences(accountId)) {
+            r.error(e::StorageError, QStringLiteral("cannot load channel preferences"));
+            return;
+        }
+        refreshMuteExpiry();
         QJsonObject snap = model->snapshotJson();
+        snap.insert(QStringLiteral("account"), QString::number(accountId));
+        QJsonArray preferences;
+        for (const auto& [channelId, preference] : m_links.at(accountId).preferences)
+            preferences.append(channelPreferencesJson(accountId, channelId, preference));
+        snap.insert(QStringLiteral("channel_preferences"), preferences);
         QJsonArray muted;
         for (auto id : m_mutedChannels)
             muted.append(idString(id));
@@ -1926,18 +1937,96 @@ void Daemon::registerMethods()
         env.mutable_delete_channel()->set_channel_id(cid);
         forward(std::move(env), r);
     };
+    m[QStringLiteral("channel.preferences.get")] = [this](const QJsonObject& p, const Responder& r) {
+        for (auto it = p.begin(); it != p.end(); ++it) {
+            if (it.key() != u"channel" && it.key() != u"account") {
+                r.error(e::BadRequest, QStringLiteral("unknown preference field"));
+                return;
+            }
+        }
+        if (p.contains("account")
+            && (!p.value("account").isString() || p.value("account").toString() != QString::number(m_active))) {
+            r.error(e::Conflict, QStringLiteral("active account changed"));
+            return;
+        }
+        const Id cid = channelParam(p, r);
+        if (!cid)
+            return;
+        const auto preference = m_store.channelPreferences(m_active, cid);
+        if (!preference) {
+            r.error(e::StorageError, QStringLiteral("cannot load channel preferences"));
+            return;
+        }
+        r.ok(channelPreferencesJson(m_active, cid, *preference));
+    };
+    m[QStringLiteral("channel.preferences.set")] = [this](const QJsonObject& p, const Responder& r) {
+        for (auto it = p.begin(); it != p.end(); ++it) {
+            if (it.key() != u"channel" && it.key() != u"account" && it.key() != u"notification_level"
+                && it.key() != u"mute_for") {
+                r.error(e::BadRequest, QStringLiteral("unknown preference field"));
+                return;
+            }
+        }
+        if (p.contains("account")
+            && (!p.value("account").isString() || p.value("account").toString() != QString::number(m_active))) {
+            r.error(e::Conflict, QStringLiteral("active account changed"));
+            return;
+        }
+        const Id cid = channelParam(p, r);
+        if (!cid)
+            return;
+        auto preference = m_store.channelPreferences(m_active, cid);
+        if (!preference) {
+            r.error(e::StorageError, QStringLiteral("cannot load channel preferences"));
+            return;
+        }
+        if (!p.contains("notification_level") && !p.contains("mute_for")) {
+            r.error(e::BadRequest, QStringLiteral("provide notification_level or mute_for"));
+            return;
+        }
+        if (p.contains("notification_level")) {
+            const auto level = p.value("notification_level").isString()
+                ? parseNotificationLevel(p.value("notification_level").toString().toStdString())
+                : std::nullopt;
+            if (!level) {
+                r.error(e::BadRequest, QStringLiteral("invalid notification level"));
+                return;
+            }
+            preference->notificationLevel = *level;
+        }
+        if (p.contains("mute_for")) {
+            const auto value = p.value("mute_for");
+            if (value.isNull()) {
+                preference->muteUntilMs.reset();
+            } else if (value.isString() && value.toString() == u"forever") {
+                preference->muteUntilMs = 0;
+            } else {
+                const auto duration = value.toString();
+                const int hours = duration == u"1h" ? 1 : duration == u"8h" ? 8 : duration == u"24h" ? 24 : 0;
+                if (!value.isString() || !hours) {
+                    r.error(e::BadRequest, QStringLiteral("mute_for must be null, 1h, 8h, 24h or forever"));
+                    return;
+                }
+                preference->muteUntilMs = QDateTime::currentMSecsSinceEpoch() + std::int64_t(hours) * 3600000;
+            }
+        }
+        saveChannelPreferences(cid, *preference, r);
+    };
     m[QStringLiteral("channel.mute")] = [this](const QJsonObject& p, const Responder& r) {
         const Id cid = channelParam(p, r);
-        if (!cid || !m_conn->hasAccount())
+        if (!cid)
             return;
-        const bool muted = p.value(QStringLiteral("muted")).toBool(true);
-        m_store.setChannelMuted(m_conn->account().id, cid, muted);
-        if (muted)
-            m_mutedChannels.insert(cid);
-        else
-            m_mutedChannels.erase(cid);
-        m_ipc.broadcast(QStringLiteral("channel.muted"), {{"channel_id", idString(cid)}, {"muted", muted}});
-        r.ok({{"channel_id", idString(cid)}, {"muted", muted}});
+        if (p.contains("muted") && !p.value("muted").isBool()) {
+            r.error(e::BadRequest, QStringLiteral("muted must be boolean"));
+            return;
+        }
+        auto preference = m_store.channelPreferences(m_active, cid);
+        if (!preference) {
+            r.error(e::StorageError, QStringLiteral("cannot load channel preferences"));
+            return;
+        }
+        preference->muteUntilMs = p.value("muted").toBool(true) ? std::optional<std::int64_t>(0) : std::nullopt;
+        saveChannelPreferences(cid, *preference, r);
     };
     m[QStringLiteral("dm.open")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id uid = userParam(p, r);

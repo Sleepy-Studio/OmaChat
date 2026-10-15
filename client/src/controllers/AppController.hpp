@@ -434,6 +434,9 @@ public:
     Q_INVOKABLE void placeChannel(
         const QString& id, const QString& parentId, const QString& beforeId, const QVariantMap& original = {});
     Q_INVOKABLE QString renderChannelDescription(const QString& content) const { return renderMarkdown(content); }
+    Q_INVOKABLE QVariantMap channelNotificationPreferences(const QString& id) const;
+    Q_INVOKABLE void setChannelNotificationLevel(const QString& id, const QString& level);
+    Q_INVOKABLE void muteChannelFor(const QString& id, const QString& duration);
     Q_INVOKABLE void setChannelMuted(const QString& id, bool muted);
     Q_INVOKABLE bool channelMuted(const QString& id) const { return m_mutedChannels.contains(id); }
     Q_INVOKABLE void openDm(const QString& userId);
@@ -526,6 +529,8 @@ signals:
         int sourceWidth, int sourceHeight, const QVariantMap& remembered = {});
     void daemonChanged();
     void statusChanged();
+    void channelPreferencesChanged();
+    void channelPreferencesWriteFinished(const QString& account, const QString& channel, bool ok, const QString& error);
     void instanceStatusChanged();
     void profilesChanged();
     void authChanged();
@@ -604,6 +609,7 @@ private:
     bool m_discordImportBusy = false;
     QString m_discordImportStatus;
     DaemonLink m_link;
+    quint64 m_snapshotRequest = 0;
     MarkdownRenderer m_markdown;
 
     QJsonObject m_status;
@@ -632,6 +638,7 @@ private:
     QHash<QString, int> m_unread;
     QHash<QString, int> m_mentions;
     QSet<QString> m_mutedChannels;
+    QHash<QString, QJsonObject> m_channelPreferences;
     mutable QVariantList m_emojiCatalog; // lazily loaded from the bundled resource, then cached
     QStringList m_recentEmoji; // most-recently-used first, session-local only
     QSet<QString> m_collapsed;

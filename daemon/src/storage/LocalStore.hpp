@@ -1,5 +1,7 @@
 #pragma once
 
+#include "notifications/NotificationPolicy.hpp"
+
 #include <QByteArray>
 #include <QSqlDatabase>
 #include <QString>
@@ -45,7 +47,13 @@ public:
     bool setUserVolume(std::int64_t accountId, std::uint64_t userId, double gain);
 
     std::set<std::uint64_t> mutedChannels(std::int64_t accountId);
+    std::set<std::uint64_t> mutedChannels(std::int64_t accountId, std::int64_t nowMs);
     bool setChannelMuted(std::int64_t accountId, std::uint64_t channelId, bool muted);
+
+    // nullopt reports a read failure; an absent row has default preferences.
+    std::optional<std::map<std::uint64_t, ChannelPreferences>> channelPreferences(std::int64_t accountId);
+    std::optional<ChannelPreferences> channelPreferences(std::int64_t accountId, std::uint64_t channelId);
+    bool setChannelPreferences(std::int64_t accountId, std::uint64_t channelId, const ChannelPreferences& preferences);
 
     // End-to-end encryption: the device keys pinned for a contact.
     struct KnownKeys {

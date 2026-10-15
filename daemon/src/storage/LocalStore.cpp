@@ -10,7 +10,7 @@
 namespace omachat::daemon {
 
 namespace {
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 }
 
 LocalStore::LocalStore()
@@ -44,18 +44,39 @@ bool LocalStore::open(const QString& path, QString* error)
             *error = m_db.lastError().text();
         return false;
     }
-    exec(QStringLiteral("PRAGMA journal_mode=WAL"));
-    exec(QStringLiteral("PRAGMA foreign_keys=ON"));
+    if (!exec(QStringLiteral("PRAGMA journal_mode=WAL")) || !exec(QStringLiteral("PRAGMA foreign_keys=ON"))) {
+        if (error)
+            *error = QStringLiteral("cannot configure local database");
+        return false;
+    }
 
     QSqlQuery v(m_db);
     int version = 0;
-    if (v.exec(QStringLiteral("PRAGMA user_version")) && v.next())
-        version = v.value(0).toInt();
+    if (!v.exec(QStringLiteral("PRAGMA user_version")) || !v.next()) {
+        if (error)
+            *error = QStringLiteral("cannot read local database version");
+        return false;
+    }
+    version = v.value(0).toInt();
+    v.finish();
     if (version > kSchemaVersion) {
         if (error)
             *error = QStringLiteral("local database is from a newer OmaChat");
         return false;
     }
+    if (version == kSchemaVersion)
+        return true;
+    if (!m_db.transaction()) {
+        if (error)
+            *error = QStringLiteral("cannot begin local database migration");
+        return false;
+    }
+    const auto failed = [this, error] {
+        m_db.rollback();
+        if (error)
+            *error = QStringLiteral("cannot migrate local database");
+        return false;
+    };
     if (version < 1) {
         const bool ok
             = exec(QStringLiteral("CREATE TABLE accounts(id INTEGER PRIMARY KEY AUTOINCREMENT, host TEXT NOT NULL, "
@@ -68,11 +89,8 @@ bool LocalStore::open(const QString& path, QString* error)
                 QStringLiteral("CREATE TABLE muted_channels(account_id INTEGER NOT NULL REFERENCES accounts(id) "
                                "ON DELETE CASCADE, channel_id INTEGER NOT NULL, PRIMARY KEY(account_id, channel_id))"))
             && exec(QStringLiteral("CREATE TABLE kv(key TEXT PRIMARY KEY, value TEXT NOT NULL)"));
-        if (!ok) {
-            if (error)
-                *error = QStringLiteral("cannot initialize local database");
-            return false;
-        }
+        if (!ok)
+            return failed();
     }
     if (version < 2) {
         // Device keys seen per contact (trust on first use) and whether the
@@ -81,13 +99,25 @@ bool LocalStore::open(const QString& path, QString* error)
             "CREATE TABLE known_keys(account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, "
             "user_id INTEGER NOT NULL, public_key BLOB NOT NULL, verified INTEGER NOT NULL DEFAULT 0, "
             "PRIMARY KEY(account_id, user_id, public_key))"));
-        if (!ok) {
-            if (error)
-                *error = QStringLiteral("cannot upgrade local database");
-            return false;
-        }
+        if (!ok)
+            return failed();
     }
-    exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
+    if (version < 3) {
+        const bool ok
+            = exec(QStringLiteral("CREATE TABLE channel_preferences(account_id INTEGER NOT NULL REFERENCES "
+                                  "accounts(id) ON DELETE CASCADE, "
+                                  "channel_id INTEGER NOT NULL, notification_level TEXT NOT NULL DEFAULT 'default' "
+                                  "CHECK(notification_level IN ('default','all','mentions','none')), "
+                                  "mute_until_ms INTEGER CHECK(mute_until_ms IS NULL OR mute_until_ms >= 0), "
+                                  "PRIMARY KEY(account_id, channel_id))"))
+            && exec(QStringLiteral("INSERT INTO channel_preferences(account_id,channel_id,mute_until_ms) "
+                                   "SELECT account_id,channel_id,0 FROM muted_channels"))
+            && exec(QStringLiteral("DROP TABLE muted_channels"));
+        if (!ok)
+            return failed();
+    }
+    if (!exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion)) || !m_db.commit())
+        return failed();
     return true;
 }
 
@@ -245,26 +275,79 @@ bool LocalStore::setUserVolume(std::int64_t accountId, std::uint64_t userId, dou
 
 std::set<std::uint64_t> LocalStore::mutedChannels(std::int64_t accountId)
 {
+    return mutedChannels(accountId, QDateTime::currentMSecsSinceEpoch());
+}
+
+std::set<std::uint64_t> LocalStore::mutedChannels(std::int64_t accountId, std::int64_t nowMs)
+{
     std::set<std::uint64_t> out;
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT channel_id FROM muted_channels WHERE account_id = ?"));
-    q.addBindValue(qint64(accountId));
-    q.exec();
-    while (q.next())
-        out.insert(static_cast<std::uint64_t>(q.value(0).toLongLong()));
+    if (const auto preferences = channelPreferences(accountId)) {
+        for (const auto& [id, preference] : *preferences) {
+            if (preference.muted(nowMs))
+                out.insert(id);
+        }
+    }
     return out;
+}
+
+std::optional<std::map<std::uint64_t, ChannelPreferences>> LocalStore::channelPreferences(std::int64_t accountId)
+{
+    std::map<std::uint64_t, ChannelPreferences> out;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "SELECT channel_id,notification_level,mute_until_ms FROM channel_preferences WHERE account_id=?"));
+    q.addBindValue(qint64(accountId));
+    if (!q.exec())
+        return std::nullopt;
+    while (q.next()) {
+        const auto level = parseNotificationLevel(q.value(1).toString().toStdString());
+        if (!level)
+            return std::nullopt;
+        ChannelPreferences preference;
+        preference.notificationLevel = *level;
+        if (!q.value(2).isNull())
+            preference.muteUntilMs = q.value(2).toLongLong();
+        out.emplace(static_cast<std::uint64_t>(q.value(0).toLongLong()), preference);
+    }
+    if (q.lastError().isValid())
+        return std::nullopt;
+    return out;
+}
+
+std::optional<ChannelPreferences> LocalStore::channelPreferences(std::int64_t accountId, std::uint64_t channelId)
+{
+    const auto preferences = channelPreferences(accountId);
+    if (!preferences)
+        return std::nullopt;
+    const auto it = preferences->find(channelId);
+    return it == preferences->end() ? ChannelPreferences{} : it->second;
+}
+
+bool LocalStore::setChannelPreferences(
+    std::int64_t accountId, std::uint64_t channelId, const ChannelPreferences& preferences)
+{
+    const auto name = notificationLevelName(preferences.notificationLevel);
+    if (name.empty() || (preferences.muteUntilMs && *preferences.muteUntilMs < 0))
+        return false;
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("INSERT INTO channel_preferences(account_id,channel_id,notification_level,mute_until_ms) "
+                             "VALUES(?,?,?,?) ON CONFLICT(account_id,channel_id) DO UPDATE SET "
+                             "notification_level=excluded.notification_level,mute_until_ms=excluded.mute_until_ms"));
+    q.addBindValue(qint64(accountId));
+    q.addBindValue(qint64(channelId));
+    q.addBindValue(QString::fromLatin1(name.data(), static_cast<qsizetype>(name.size())));
+    q.addBindValue(
+        preferences.muteUntilMs ? QVariant(qint64(*preferences.muteUntilMs)) : QVariant(QMetaType::fromType<qint64>()));
+    return q.exec();
 }
 
 bool LocalStore::setChannelMuted(std::int64_t accountId, std::uint64_t channelId, bool muted)
 {
-    QSqlQuery q(m_db);
-    if (muted)
-        q.prepare(QStringLiteral("INSERT OR IGNORE INTO muted_channels(account_id, channel_id) VALUES(?,?)"));
-    else
-        q.prepare(QStringLiteral("DELETE FROM muted_channels WHERE account_id = ? AND channel_id = ?"));
-    q.addBindValue(qint64(accountId));
-    q.addBindValue(qint64(channelId));
-    return q.exec();
+    auto preferences = channelPreferences(accountId, channelId);
+    if (!preferences)
+        return false;
+    preferences->muteUntilMs = muted ? std::optional<std::int64_t>(0) : std::nullopt;
+    return setChannelPreferences(accountId, channelId, *preferences);
 }
 
 QString LocalStore::value(const QString& key, const QString& fallback)

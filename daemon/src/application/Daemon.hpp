@@ -35,6 +35,8 @@ struct DaemonOptions {
     bool nullAudio = false;
     bool syntheticScreen = false; // share a test pattern instead of using the portal
     bool notifications = true;
+    // In-process notification test sink; production uses desktop D-Bus.
+    std::function<void(std::int64_t accountId, Id channelId)> notificationSink;
 };
 
 // omachatd: owns the server sessions, voice engine and local IPC. The GUI,
@@ -102,7 +104,9 @@ private:
         std::unique_ptr<ServerConnection> conn;
         std::unique_ptr<FileTransfers> transfers;
         std::unique_ptr<E2EManager> e2e;
-        std::set<std::uint64_t> muted; // background notifications only
+        bool preferencesLoaded = false;
+        std::map<std::uint64_t, ChannelPreferences> preferences;
+        std::set<std::uint64_t> muted; // effective legacy projection / unread presentation
         int unread = 0; // messages while in the background
         int mentions = 0;
     };
@@ -119,7 +123,13 @@ private:
     std::optional<SendRecoveryStore::Binding> recoveryBinding() const;
     void purgeRecovery(std::int64_t accountId, SendRecoveryStore::Completion callback);
     void onModelEvent(const QString& name, const QJsonObject& data);
-    void maybeNotify(const ServerConnection& conn, const std::set<std::uint64_t>& muted, const QJsonObject& message);
+    void maybeNotify(const ServerConnection& conn, const QJsonObject& message);
+    bool reloadChannelPreferences(std::int64_t accountId);
+    void refreshMuteExpiry();
+    QJsonObject channelPreferencesJson(
+        std::int64_t accountId, Id channelId, const ChannelPreferences& preferences) const;
+    void broadcastChannelPreferences(std::int64_t accountId, Id channelId, const ChannelPreferences& preferences);
+    bool saveChannelPreferences(Id channelId, const ChannelPreferences& preferences, const Responder& responder);
     void scheduleStatus();
 
     void applyConfig();
@@ -159,6 +169,7 @@ private:
     std::set<std::uint64_t> m_mutedChannels;
 
     QTimer m_statusTimer;
+    QTimer m_muteExpiryTimer;
 };
 
 } // namespace omachat::daemon

@@ -212,8 +212,10 @@ void AppController::onDaemonConnected()
 
 void AppController::loadSnapshot()
 {
-    m_link.request(QStringLiteral("state.snapshot"), {}, [this](const ipc::Reply& r) {
-        if (r.ok)
+    const auto request = ++m_snapshotRequest;
+    const auto requestedAccount = accountId();
+    m_link.request(QStringLiteral("state.snapshot"), {}, [this, request, requestedAccount](const ipc::Reply& r) {
+        if (r.ok && request == m_snapshotRequest && requestedAccount == accountId())
             applySnapshot(r.result);
     });
 }
@@ -225,6 +227,11 @@ void AppController::applyStatus(const QJsonObject& status)
     const bool voiceBefore = voiceJoined();
     const QString voiceChannelBefore = voiceChannelId();
     m_status = status;
+    if (previousAccount != accountId()) {
+        m_mutedChannels.clear();
+        m_channelPreferences.clear();
+        emit channelPreferencesChanged();
+    }
     if (previousAccount != accountId() || state() != u"connected")
         ++m_sendRecoveryRequest;
     if (state() != u"connected" || previousAccount != accountId()) {
@@ -250,13 +257,28 @@ void AppController::applyStatus(const QJsonObject& status)
         rebuildServers();
     if (previousAccount != accountId())
         refreshTransfers();
-    if (previousState != state() && state() == u"connected")
+    // Account identity also arrives when reopening against an offline daemon.
+    // Refresh its cached snapshot even though no server connection is available.
+    if (previousAccount != accountId() || (previousState != state() && state() == u"connected"))
         loadSnapshot();
 }
 
 void AppController::applySnapshot(const QJsonObject& snap)
 {
+    const auto snapshotAccount = snap.value(QStringLiteral("account")).toString();
+    const auto statusAccount = snap.value(QStringLiteral("status"))
+                                   .toObject()
+                                   .value(QStringLiteral("account"))
+                                   .toObject()
+                                   .value(QStringLiteral("id"))
+                                   .toString();
+    if (!snapshotAccount.isEmpty()
+        && snapshotAccount != (statusAccount.isEmpty() ? QStringLiteral("0") : statusAccount))
+        return;
     if (!snap.value(QStringLiteral("valid")).toBool()) {
+        m_mutedChannels.clear();
+        m_channelPreferences.clear();
+        emit channelPreferencesChanged();
         m_serversById.clear();
         m_channelsById.clear();
         m_usersById.clear();
@@ -298,6 +320,15 @@ void AppController::applySnapshot(const QJsonObject& snap)
         const QJsonObject vs = v.toObject();
         m_voiceByUser.insert(vs.value(QStringLiteral("user_id")).toString(), vs);
     }
+    if (snap.contains(QStringLiteral("status")))
+        applyStatus(snap.value(QStringLiteral("status")).toObject());
+    m_channelPreferences.clear();
+    for (const auto& value : snap.value(QStringLiteral("channel_preferences")).toArray()) {
+        const auto preference = value.toObject();
+        if (preference.value(QStringLiteral("account")).toString() == accountId())
+            m_channelPreferences.insert(preference.value(QStringLiteral("channel_id")).toString(), preference);
+    }
+    emit channelPreferencesChanged();
     m_mutedChannels.clear();
     for (const auto& v : snap.value(QStringLiteral("muted_channels")).toArray())
         m_mutedChannels.insert(v.toString());
@@ -594,7 +625,16 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         showNotice(data.value(QStringLiteral("message")).toString(), true);
         return;
     }
+    if (name == u"channel.preferences_changed") {
+        if (data.value(QStringLiteral("account")).toString() != accountId())
+            return;
+        m_channelPreferences.insert(id("channel_id"), data);
+        emit channelPreferencesChanged();
+        return;
+    }
     if (name == u"channel.muted") {
+        if (data.contains(QStringLiteral("account")) && data.value(QStringLiteral("account")).toString() != accountId())
+            return;
         if (data.value(QStringLiteral("muted")).toBool())
             m_mutedChannels.insert(id("channel_id"));
         else

@@ -75,7 +75,8 @@ Servers and channels
   channel icon CHANNEL FILE | banner CHANNEL FILE | clear-icon CHANNEL | clear-banner CHANNEL
   channel move CHANNEL CATEGORY_ID | position CHANNEL INDEX
   channel place CHANNEL CATEGORY_ID [BEFORE_CHANNEL_ID]  omitted/0 appends
-  channel delete CHANNEL | mute CHANNEL | unmute CHANNEL
+  channel delete CHANNEL | mute CHANNEL [--for 1h|8h|24h|forever] | unmute CHANNEL
+  channel notifications CHANNEL default|all|mentions|none
 
 Messages
   message send CHANNEL [TEXT...] [--attach FILE]...
@@ -476,9 +477,32 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.method = QStringLiteral("channel.delete");
             inv.params = {{"channel", args.at(2)}};
             inv.print = simpleOk(QStringLiteral("channel deleted"));
+        } else if (sub == u"notifications" && need(4)) {
+            const auto level = args.at(3);
+            if (args.size() != 4
+                || (level != u"default" && level != u"all" && level != u"mentions" && level != u"none")) {
+                usageError = QStringLiteral("notification level must be default, all, mentions or none");
+                return std::nullopt;
+            }
+            inv.method = QStringLiteral("channel.preferences.set");
+            inv.params = {{"channel", args.at(2)}, {"notification_level", level}};
+            inv.print = simpleOk(QStringLiteral("notification level saved on this device"));
         } else if ((sub == u"mute" || sub == u"unmute") && need(3)) {
+            const auto duration = optionValue(args, QStringLiteral("--for"));
+            if (args.size() != 3
+                || (duration
+                    && (sub != u"mute"
+                        || (*duration != u"1h" && *duration != u"8h" && *duration != u"24h"
+                            && *duration != u"forever")))) {
+                usageError = QStringLiteral("mute duration must be 1h, 8h, 24h or forever");
+                return std::nullopt;
+            }
             inv.method = QStringLiteral("channel.mute");
             inv.params = {{"channel", args.at(2)}, {"muted", sub == u"mute"}};
+            if (duration) {
+                inv.method = QStringLiteral("channel.preferences.set");
+                inv.params = {{"channel", args.at(2)}, {"mute_for", *duration}};
+            }
             inv.print = simpleOk(
                 sub == u"mute" ? QStringLiteral("notifications muted") : QStringLiteral("notifications unmuted"));
         } else {

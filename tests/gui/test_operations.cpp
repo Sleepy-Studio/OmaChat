@@ -3,6 +3,7 @@
 #include "platform/ThemeProvider.hpp"
 #include "views/AudioLevels.hpp"
 #include "views/VideoFrameItem.hpp"
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
@@ -15,8 +16,11 @@
 #include <QQuickWindow>
 #include <QScopeGuard>
 #include <QSemaphore>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTest>
 #include <QThreadPool>
+#include <QUuid>
 #include <gtest/gtest.h>
 
 using namespace omachat;
@@ -2257,6 +2261,153 @@ ApplicationWindow {
     ASSERT_TRUE(daemon->call("channel.delete", {{"channel", room}}).ok);
     ASSERT_TRUE(waitFor([&] { return !details->property("visible").toBool(); }));
     EXPECT_TRUE(details->property("details").toMap().isEmpty());
+}
+
+TEST_F(Operations, ChannelNotificationsPersistWithKeyboardAndPointerInCompactAndWideLayouts)
+{
+    const auto channel = app->selectedChannelId();
+    for (bool compact : {true, false}) {
+        theme.setScale(compact ? 1.5 : 1.0);
+        for (bool light : {false, true}) {
+            QFile colors(files.filePath("notification-colors.toml"));
+            ASSERT_TRUE(colors.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            colors.write(light ? "background = '#ffffff'\nforeground = '#101010'\naccent = '#1166bb'\n"
+                               : "background = '#111318'\nforeground = '#eeeeee'\naccent = '#7aa2f7'\n");
+            colors.close();
+            ASSERT_TRUE(theme.loadFile(colors.fileName()));
+            ASSERT_TRUE(daemon
+                    ->call("channel.preferences.set",
+                        {{"channel", channel}, {"notification_level", "default"},
+                            {"mute_for", QJsonValue(QJsonValue::Null)}})
+                    .ok);
+            ASSERT_TRUE(waitFor(
+                [&] { return app->channelNotificationPreferences(channel).value("notification_level") == "default"; }));
+            QQmlEngine engine;
+            auto object = editorWindow(engine, "ChannelNotificationsDialog");
+            ASSERT_TRUE(object);
+            auto* window = qobject_cast<QQuickWindow*>(object.get());
+            ASSERT_TRUE(window);
+            window->resize(compact ? 720 : 1440, compact ? 460 : 900);
+            QTest::qWait(100);
+            if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+                const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+                ASSERT_EQ(
+                    QProcess::execute("hyprctl",
+                        {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+                    0);
+                ASSERT_EQ(QProcess::execute("hyprctl",
+                              {"eval",
+                                  QString("hl.dispatch(hl.dsp.window.resize({x=%1,y=%2,relative=false,window='%3'}))")
+                                      .arg(compact ? 720 : 1440)
+                                      .arg(compact ? 460 : 900)
+                                      .arg(match)}),
+                    0);
+                ASSERT_TRUE(waitFor([&] {
+                    return qAbs(window->width() - (compact ? 720 : 1440)) <= 1
+                        && qAbs(window->height() - (compact ? 460 : 900)) <= 1;
+                }));
+            }
+            auto* dialog = object->findChild<QObject*>("editor");
+            ASSERT_TRUE(dialog);
+            ASSERT_TRUE(QMetaObject::invokeMethod(dialog, "openFor", Q_ARG(QVariant, channel)));
+            ASSERT_TRUE(waitFor([&] { return dialog->property("opened").toBool(); }));
+            auto* level = namedControl(window->contentItem(), "notificationLevelPicker");
+            auto* duration = namedControl(window->contentItem(), "notificationMuteDuration");
+            auto* mute = namedControl(window->contentItem(), "notificationMuteButton");
+            auto* unmute = namedControl(window->contentItem(), "notificationUnmuteButton");
+            auto* close = namedControl(window->contentItem(), "notificationCloseButton");
+            ASSERT_TRUE(level && duration && mute && unmute && close);
+            level->forceActiveFocus();
+            QTest::keyClick(window, Qt::Key_Down);
+            ASSERT_TRUE(waitFor(
+                [&] { return app->channelNotificationPreferences(channel).value("notification_level") == "all"; }));
+            ASSERT_TRUE(waitFor([&] { return !dialog->property("saving").toBool(); }));
+            // Keyboard focus scrolls the controls into view at 150%.
+            duration->forceActiveFocus();
+            QTest::keyClick(window, Qt::Key_Down);
+            EXPECT_EQ(duration->property("currentIndex").toInt(), 1);
+            mute->forceActiveFocus();
+            QTest::keyClick(window, Qt::Key_Space);
+            ASSERT_TRUE(waitFor([&] { return app->channelMuted(channel) && !dialog->property("saving").toBool(); }));
+            EXPECT_EQ(app->channelNotificationPreferences(channel).value("notification_level"), "all");
+            auto* state = namedControl(window->contentItem(), "notificationMuteState");
+            ASSERT_TRUE(state);
+            EXPECT_TRUE(state->property("text").toString().startsWith("Muted until "));
+            EXPECT_FALSE(state->property("text").toString().contains("Invalid"));
+            EXPECT_TRUE(window->grabWindow().save(QString("/tmp/omachat-notifications-%1-%2.png")
+                    .arg(compact ? "compact" : "wide", light ? "light" : "dark")));
+            unmute->forceActiveFocus();
+            QTest::qWait(40);
+            const auto point = unmute->mapToScene(QPointF(unmute->width() / 2, unmute->height() / 2));
+            ASSERT_GE(point.y(), 0);
+            ASSERT_LT(point.y(), window->height());
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point.toPoint());
+            ASSERT_TRUE(waitFor([&] { return !app->channelMuted(channel) && !dialog->property("saving").toBool(); }));
+            EXPECT_EQ(app->channelNotificationPreferences(channel).value("notification_level"), "all");
+            close->forceActiveFocus();
+            QTest::keyClick(window, Qt::Key_Return);
+            ASSERT_TRUE(waitFor([&] { return !dialog->property("visible").toBool(); }));
+            ASSERT_TRUE(QMetaObject::invokeMethod(dialog, "openFor", Q_ARG(QVariant, channel)));
+            ASSERT_TRUE(waitFor([&] { return dialog->property("opened").toBool(); }));
+            EXPECT_EQ(level->property("currentIndex").toInt(), 1);
+            QTest::keyClick(window, Qt::Key_Escape);
+            ASSERT_TRUE(waitFor([&] { return !dialog->property("visible").toBool(); }));
+        }
+    }
+}
+
+TEST_F(Operations, BackgroundMuteExpiryCannotChangeActiveAccountWithCollidingChannelId)
+{
+    const auto channel = app->selectedChannelId();
+    const auto firstAccount = app->accountId();
+    auto saved = daemon->call(
+        "channel.preferences.set", {{"channel", channel}, {"notification_level", "none"}, {"mute_for", "1h"}});
+    ASSERT_TRUE(saved.ok);
+    const auto invitation = daemon->call("invite.create", {{"server", app->selectedServerId()}});
+    ASSERT_TRUE(invitation.ok);
+    ASSERT_TRUE(daemon->registerOn(server, "preference-second", "test-password"));
+    ASSERT_TRUE(daemon->call("server.join", {{"invite", invitation.result.value("uri")}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return app->accountId() != firstAccount && app->ready() && app->channelDetails(channel).value("id") == channel;
+    }));
+    const auto secondAccount = app->accountId();
+    ASSERT_TRUE(daemon->call("channel.preferences.set", {{"channel", channel}, {"notification_level", "all"}}).ok);
+    ASSERT_TRUE(
+        waitFor([&] { return app->channelNotificationPreferences(channel).value("notification_level") == "all"; }));
+    EXPECT_FALSE(app->channelMuted(channel));
+    // Returning to the first account reloads a short fixture-only deadline.
+    const auto config = daemon->call("config.get").result.value("path").toString();
+    const auto connection = QUuid::createUuid().toString();
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", connection);
+        db.setDatabaseName(QFileInfo(config).dir().filePath("local.db"));
+        ASSERT_TRUE(db.open());
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec(QString("UPDATE channel_preferences SET mute_until_ms=%1 WHERE account_id=%2")
+                .arg(QDateTime::currentMSecsSinceEpoch() + 500)
+                .arg(firstAccount)));
+    }
+    QSqlDatabase::removeDatabase(connection);
+    ASSERT_TRUE(daemon->call("account.switch", {{"account", firstAccount}}).ok);
+    ASSERT_TRUE(daemon->call("account.switch", {{"account", secondAccount}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return app->accountId() == secondAccount
+            && app->channelNotificationPreferences(channel).value("notification_level") == "all";
+    }));
+    auto expired = daemon->waitEvent("channel.preferences_changed", [&](const QJsonObject& event) {
+        return event.value("account") == firstAccount && !event.value("muted").toBool();
+    });
+    ASSERT_TRUE(expired);
+    QTest::qWait(80);
+    EXPECT_EQ(app->accountId(), secondAccount);
+    EXPECT_EQ(app->channelNotificationPreferences(channel).value("notification_level"), "all");
+    EXPECT_FALSE(app->channelMuted(channel));
+    ASSERT_TRUE(daemon->call("account.switch", {{"account", firstAccount}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return app->accountId() == firstAccount
+            && app->channelNotificationPreferences(channel).value("notification_level") == "none";
+    }));
+    EXPECT_FALSE(app->channelMuted(channel));
 }
 
 int main(int argc, char** argv)

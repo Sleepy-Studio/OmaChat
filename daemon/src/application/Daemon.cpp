@@ -3,6 +3,7 @@
 #include "audio/PipeWireBackend.hpp"
 #include "omachat/core/Log.hpp"
 #include "omachat/core/Paths.hpp"
+#include "omachat/core/Permissions.hpp"
 #include "omachat/core/Version.hpp"
 
 #include <QDateTime>
@@ -16,6 +17,8 @@ Daemon::Daemon(DaemonOptions options, QObject* parent)
     : QObject(parent)
     , m_options(std::move(options))
 {
+    m_muteExpiryTimer.setSingleShot(true);
+    connect(&m_muteExpiryTimer, &QTimer::timeout, this, &Daemon::refreshMuteExpiry);
     // Coalesce bursts of changes into a single "status" event.
     m_statusTimer.setSingleShot(true);
     m_statusTimer.setInterval(0);
@@ -153,6 +156,7 @@ Daemon::Link& Daemon::linkFor(std::int64_t accountId)
     if (auto it = m_links.find(accountId); it != m_links.end())
         return it->second;
     Link& link = m_links[accountId];
+    reloadChannelPreferences(accountId);
     link.conn = std::make_unique<ServerConnection>(*m_credentials, this);
     link.transfers = std::make_unique<FileTransfers>(*link.conn, this);
     link.e2e = std::make_unique<E2EManager>(*link.conn, *m_credentials, m_store, this);
@@ -209,13 +213,12 @@ Daemon::Link& Daemon::linkFor(std::int64_t accountId)
     });
     connect(conn, &ServerConnection::synchronized, this, [this, accountId, conn, e2e] {
         e2e->onSynchronized();
+        reloadChannelPreferences(accountId);
         if (conn != m_conn) {
-            if (auto it = m_links.find(accountId); it != m_links.end())
-                it->second.muted = m_store.mutedChannels(accountId);
             scheduleStatus();
             return;
         }
-        m_mutedChannels = m_store.mutedChannels(conn->account().id);
+        refreshMuteExpiry();
         for (const auto& [uid, gain] : m_store.userVolumes(conn->account().id))
             m_voice->setUserGain(uid, gain);
         m_ipc.broadcast(QStringLiteral("state.reset"), {});
@@ -246,7 +249,9 @@ void Daemon::activate(std::int64_t accountId)
     link.mentions = 0;
     m_focusedChannel = 0;
     m_focusedServer = 0;
-    m_mutedChannels = accountId ? m_store.mutedChannels(accountId) : std::set<std::uint64_t>{};
+    reloadChannelPreferences(accountId);
+    m_mutedChannels = link.muted;
+    refreshMuteExpiry();
     if (accountId) {
         m_store.touchAccount(accountId);
         for (const auto& [uid, gain] : m_store.userVolumes(accountId))
@@ -264,6 +269,7 @@ void Daemon::onBackgroundEvent(Link& link, const QString& name, const QJsonObjec
         return;
     const Id author = idFromJson(data.value(QStringLiteral("author_id")));
     const Id channel = idFromJson(data.value(QStringLiteral("channel_id")));
+    refreshMuteExpiry();
     if (author == link.conn->model().self().id() || link.muted.contains(channel))
         return;
     link.unread += 1;
@@ -272,7 +278,7 @@ void Daemon::onBackgroundEvent(Link& link, const QString& name, const QJsonObjec
     const bool dm = c && (c->type() == proto::CHANNEL_TYPE_DM || c->type() == proto::CHANNEL_TYPE_GROUP_DM);
     if (mentioned || dm)
         link.mentions += 1;
-    maybeNotify(*link.conn, link.muted, data);
+    maybeNotify(*link.conn, data);
     m_ipc.broadcast(QStringLiteral("account.activity"),
         {{"account", QString::number(link.conn->account().id)}, {"unread", link.unread}, {"mentions", link.mentions}});
     scheduleStatus();
@@ -295,6 +301,7 @@ QJsonArray Daemon::accountsJson() const
 
 void Daemon::shutdown()
 {
+    m_muteExpiryTimer.stop();
     if (m_voice)
         stopVoiceEngine();
     for (auto& [id, link] : m_links)
@@ -489,7 +496,7 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
     m_ipc.broadcast(name, data);
 
     if (name == u"message.created") {
-        maybeNotify(*m_conn, m_mutedChannels, data);
+        maybeNotify(*m_conn, data);
         return;
     }
     if (name == u"voice.state") {
@@ -558,28 +565,114 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
         scheduleStatus();
 }
 
-void Daemon::maybeNotify(const ServerConnection& conn, const std::set<std::uint64_t>& muted, const QJsonObject& msg)
+bool Daemon::reloadChannelPreferences(std::int64_t accountId)
 {
-    if (!m_options.notifications)
-        return;
+    const auto preferences = m_store.channelPreferences(accountId);
+    if (!preferences) {
+        m_links.at(accountId).preferencesLoaded = false;
+        OMA_ERROR("storage", "cannot load channel preferences", {"account", accountId});
+        return false;
+    }
+    auto& link = m_links.at(accountId);
+    link.preferencesLoaded = true;
+    link.preferences = *preferences;
+    refreshMuteExpiry();
+    return true;
+}
+
+QJsonObject Daemon::channelPreferencesJson(
+    std::int64_t accountId, Id channelId, const ChannelPreferences& preference) const
+{
+    const auto level = notificationLevelName(preference.notificationLevel);
+    return {{"account", QString::number(accountId)}, {"channel_id", idString(channelId)},
+        {"notification_level", QString::fromLatin1(level.data(), static_cast<qsizetype>(level.size()))},
+        {"mute_until_ms",
+            preference.muteUntilMs ? QJsonValue(QString::number(*preference.muteUntilMs))
+                                   : QJsonValue(QJsonValue::Null)},
+        {"muted", preference.muted(QDateTime::currentMSecsSinceEpoch())}, {"scope", "device"}};
+}
+
+void Daemon::broadcastChannelPreferences(std::int64_t accountId, Id channelId, const ChannelPreferences& preference)
+{
+    const auto value = channelPreferencesJson(accountId, channelId, preference);
+    m_ipc.broadcast(QStringLiteral("channel.preferences_changed"), value);
+    // Old GUIs ignore unknown fields, including account tags. Their legacy
+    // projection must therefore remain limited to the active account.
+    if (accountId == m_active)
+        m_ipc.broadcast(QStringLiteral("channel.muted"),
+            {{"account", QString::number(accountId)}, {"channel_id", idString(channelId)},
+                {"muted", value.value("muted")}});
+}
+
+void Daemon::refreshMuteExpiry()
+{
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+    std::int64_t delay = 60000; // bounded recheck after clock changes / resume
+    for (auto& [accountId, link] : m_links) {
+        for (const auto& [channelId, preference] : link.preferences) {
+            const bool muted = preference.muted(now);
+            const bool wasMuted = link.muted.contains(channelId);
+            if (muted)
+                link.muted.insert(channelId);
+            else
+                link.muted.erase(channelId);
+            if (muted != wasMuted)
+                broadcastChannelPreferences(accountId, channelId, preference);
+            if (preference.muteUntilMs && *preference.muteUntilMs > now)
+                delay = std::min<std::int64_t>(delay, *preference.muteUntilMs - now);
+        }
+        if (accountId == m_active)
+            m_mutedChannels = link.muted;
+    }
+    m_muteExpiryTimer.start(static_cast<int>(std::max<std::int64_t>(1, delay)));
+}
+
+bool Daemon::saveChannelPreferences(Id channelId, const ChannelPreferences& preference, const Responder& r)
+{
+    const auto accountId = m_conn->account().id;
+    if (!m_store.setChannelPreferences(accountId, channelId, preference)) {
+        r.error(ipc::errors::StorageError, QStringLiteral("cannot save channel preferences"));
+        return false;
+    }
+    auto& link = m_links.at(accountId);
+    link.preferences[channelId] = preference;
+    // Set the projection before refreshing to emit exactly one change for this write.
+    if (preference.muted(QDateTime::currentMSecsSinceEpoch()))
+        link.muted.insert(channelId);
+    else
+        link.muted.erase(channelId);
+    refreshMuteExpiry();
+    broadcastChannelPreferences(accountId, channelId, preference);
+    r.ok(channelPreferencesJson(accountId, channelId, preference));
+    return true;
+}
+
+void Daemon::maybeNotify(const ServerConnection& conn, const QJsonObject& msg)
+{
     const bool active = &conn == m_conn;
     const ClientState& model = conn.model();
     const Id author = idFromJson(msg.value(QStringLiteral("author_id")));
     const Id channelId = idFromJson(msg.value(QStringLiteral("channel_id")));
-    if (author == model.self().id())
-        return;
-    if (model.self().status() == proto::USER_STATUS_DO_NOT_DISTURB)
-        return;
-    if (muted.contains(channelId))
-        return;
-    if (active && m_windowFocused && m_focusedChannel == channelId)
-        return;
     const proto::Channel* channel = model.channel(channelId);
-    if (!channel)
-        return;
-    const bool dm = channel->type() == proto::CHANNEL_TYPE_DM || channel->type() == proto::CHANNEL_TYPE_GROUP_DM;
+    const bool dm
+        = channel && (channel->type() == proto::CHANNEL_TYPE_DM || channel->type() == proto::CHANNEL_TYPE_GROUP_DM);
     const bool mention = msg.value(QStringLiteral("mentions_me")).toBool();
-    if (!(dm && m_config.notifications.messages) && !(mention && m_config.notifications.mentions))
+    NotificationContext context;
+    context.enabled = m_options.notifications;
+    context.channelAccessible = channel && permissions::has(channel->effective_permissions(), permissions::ViewChannel);
+    context.selfAuthored = author == model.self().id();
+    context.doNotDisturb = model.self().status() == proto::USER_STATUS_DO_NOT_DISTURB;
+    context.focusedConversation = active && m_windowFocused && m_focusedChannel == channelId;
+    context.directMessage = dm;
+    context.individualMention = mention;
+    context.directMessagesEnabled = m_config.notifications.messages;
+    context.communityEnabled = m_config.notifications.mentions;
+    const auto& link = m_links.at(conn.account().id);
+    context.channelAccessible = context.channelAccessible && link.preferencesLoaded;
+    const auto& preferences = link.preferences;
+    const auto it = preferences.find(channelId);
+    if (!shouldNotify(
+            it == preferences.end() ? ChannelPreferences{} : it->second, context, QDateTime::currentMSecsSinceEpoch()))
         return;
     const proto::User* u = model.user(author);
     const QString who = u ? QString::fromStdString(u->display_name()) : QStringLiteral("Someone");
@@ -594,7 +687,11 @@ void Daemon::maybeNotify(const ServerConnection& conn, const std::set<std::uint6
     }
     if (!active) // say which account it came to
         summary += QStringLiteral(" · %1@%2").arg(conn.account().username, conn.account().host);
-    m_notifier.notify(summary, msg.value(QStringLiteral("content")).toString(), QStringLiteral("im.received"), mention);
+    if (m_options.notificationSink)
+        m_options.notificationSink(conn.account().id, channelId);
+    else
+        m_notifier.notify(
+            summary, msg.value(QStringLiteral("content")).toString(), QStringLiteral("im.received"), mention);
 }
 
 // ------------------------------------------------------------------- voice

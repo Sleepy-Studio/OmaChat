@@ -222,7 +222,7 @@ TestDaemon::~TestDaemon()
         m_daemon->shutdown();
 }
 
-bool TestDaemon::start()
+bool TestDaemon::start(const std::function<void(daemon::DaemonOptions&)>& configure)
 {
     daemon::DaemonOptions opt;
     opt.socketPath = m_socket;
@@ -232,6 +232,8 @@ bool TestDaemon::start()
     opt.nullAudio = true;
     opt.syntheticScreen = true;
     opt.notifications = false;
+    if (configure)
+        configure(opt);
     m_daemon = std::make_unique<daemon::Daemon>(opt);
     QString error;
     if (!m_daemon->start(&error)) {

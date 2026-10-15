@@ -178,6 +178,28 @@ omachatctl events voice      # stream events as JSON lines
 
 Exit codes: `0` ok, `1` command failed, `2` usage error, `3` daemon not running.
 
+### Channel notifications on this device
+
+Open a channel's context menu → **Notifications…** to choose Default, All
+messages, Mentions only, or None. Mute for 1, 8, or 24 hours, or until changed.
+Unmute and expiry restore the selected notification level. Preferences belong
+to the local account on this device; they do not sync to other devices.
+
+The Direct messages and Community notifications settings are master switches.
+Community notifications includes mentions and channels set to All messages.
+Do not disturb, self-authored messages, and the focused conversation suppress
+notifications. Expiry does not replay messages received while muted.
+
+```bash
+omachatctl --json channel notifications general all
+omachatctl --json channel mute general --for 1h
+omachatctl --json channel unmute general
+```
+
+The daemon upgrades its local SQLite database transactionally to schema 3,
+preserving old mutes as indefinite overlays. Older daemons cannot open schema 3;
+keep a pre-upgrade database backup if you need to roll back the application.
+
 ### Global push-to-talk (Hyprland / Omarchy)
 
 Wayland does not let applications grab keys globally, so bind them in the
