@@ -265,6 +265,11 @@ void Daemon::activate(std::int64_t accountId)
 
 void Daemon::onBackgroundEvent(Link& link, const QString& name, const QJsonObject& data)
 {
+    if (name == u"channel.deleted") {
+        if (!m_store.clearChannelPreferences(link.conn->account().id, idFromJson(data.value("channel_id"))))
+            OMA_ERROR("storage", "cannot clear deleted channel preferences");
+        reloadChannelPreferences(link.conn->account().id);
+    }
     if (name != u"message.created")
         return;
     const Id author = idFromJson(data.value(QStringLiteral("author_id")));
@@ -544,6 +549,9 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
         return;
     }
     if (name == u"channel.deleted") {
+        if (!m_store.clearChannelPreferences(m_active, idFromJson(data.value("channel_id"))))
+            OMA_ERROR("storage", "cannot clear deleted channel preferences");
+        reloadChannelPreferences(m_active);
         // Only the deletion of our own voice channel ends the session.
         if (m_voiceChannel && idFromJson(data.value(QStringLiteral("channel_id"))) == m_voiceChannel) {
             OMA_INFO("voice", "voice channel deleted");
@@ -563,6 +571,23 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
     }
     if (name == u"presence" || name == u"user.updated")
         scheduleStatus();
+}
+
+std::optional<QJsonObject> Daemon::sidebarPreferencesJson(std::int64_t accountId)
+{
+    const auto preferences = m_store.sidebarPreferences(accountId);
+    if (!preferences)
+        return std::nullopt;
+    QJsonArray channels;
+    for (const auto& [id, preference] : preferences->channels) {
+        channels.append(QJsonObject{{"channel_id", idString(id)},
+            {"favorite_rank",
+                preference.favoriteRank ? QJsonValue(QString::number(*preference.favoriteRank))
+                                        : QJsonValue(QJsonValue::Null)},
+            {"hidden", preference.hidden}, {"collapsed", preference.collapsed}});
+    }
+    return QJsonObject{{"account", QString::number(accountId)}, {"scope", "device"}, {"channels", channels},
+        {"show_voice_participants", preferences->showVoiceParticipants}, {"compact", preferences->compact}};
 }
 
 bool Daemon::reloadChannelPreferences(std::int64_t accountId)

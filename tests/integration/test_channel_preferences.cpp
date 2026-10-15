@@ -313,4 +313,118 @@ TEST_F(ChannelPreferencesIpc, CliKeepsLegacyCommandsAndAddsValidatedDurationsAnd
     run({"channel", "mute", channel, "--for"}, false);
     run({"channel", "unmute", channel, "--for", "1h"}, false);
     run({"channel", "notifications", channel, "invalid"}, false);
+    EXPECT_EQ(run({"channel", "favorite", channel}, true).value("account"), account);
+    EXPECT_EQ(run({"channel", "hide", channel}, true).value("scope"), "device");
+    EXPECT_EQ(run({"sidebar", "get"}, true).value("channels").toArray().size(), 1);
+    EXPECT_TRUE(run({"sidebar", "compact", "on"}, true).value("compact").toBool());
+    EXPECT_FALSE(run({"sidebar", "participants", "off"}, true).value("show_voice_participants").toBool());
+    run({"channel", "unhide", channel}, true);
+    run({"channel", "favorite", channel, "up"}, true);
+    run({"channel", "favorite", channel, "remove"}, true);
+    run({"channel", "favorite", channel, "sideways"}, false);
+    run({"sidebar", "compact", "invalid"}, false);
+}
+
+TEST_F(ChannelPreferencesIpc, SidebarOrderingPersistenceAndCheckedFailures)
+{
+    auto sidebar = daemon.call("sidebar.get");
+    ASSERT_TRUE(sidebar.ok);
+    EXPECT_EQ(sidebar.result.value("scope"), "device");
+    const auto other = daemon.call("channel.create", {{"server", "Preferences"}, {"name", "second"}, {"type", "text"}});
+    ASSERT_TRUE(other.ok) << other.errorMessage.toStdString();
+    const auto second = other.result.value("id").toString();
+    ASSERT_FALSE(second.isEmpty());
+    auto save = [&](const QString& id, QJsonObject p) {
+        p.insert("account", account);
+        p.insert("channel", id);
+        return daemon.call("sidebar.set", p);
+    };
+    ASSERT_TRUE(save(channel, {{"favorite", true}, {"hidden", true}}).ok);
+    ASSERT_TRUE(save(second, {{"favorite", true}}).ok);
+    ASSERT_TRUE(save(channel, {{"hidden", false}, {"move", "down"}}).ok);
+    auto channels = daemon.call("sidebar.get").result.value("channels").toArray();
+    QHash<QString, QJsonObject> byId;
+    for (const auto& value : channels)
+        byId.insert(value.toObject().value("channel_id").toString(), value.toObject());
+    EXPECT_EQ(byId.value(second).value("favorite_rank"), "0");
+    EXPECT_EQ(byId.value(channel).value("favorite_rank"), "1");
+    EXPECT_FALSE(byId.value(channel).value("hidden").toBool());
+    ASSERT_TRUE(daemon.call("sidebar.set", {{"compact", true}, {"show_voice_participants", false}}).ok);
+    const auto before = daemon.call("sidebar.get").result;
+    EXPECT_EQ(daemon.call("state.snapshot").result.value("sidebar_preferences"), before);
+    EXPECT_EQ(save(channel, {{"hidden", "true"}}).errorCode, "BadRequest");
+    EXPECT_EQ(save(channel, {{"move", "sideways"}}).errorCode, "BadRequest");
+    EXPECT_EQ(save(channel, {{"collapsed", true}}).errorCode, "BadRequest");
+    EXPECT_EQ(daemon.call("sidebar.set", {{"compact", true}, {"account", "999"}}).errorCode, "Conflict");
+    EXPECT_EQ(daemon.call("sidebar.set", {{"unknown", true}}).errorCode, "BadRequest");
+    EXPECT_EQ(daemon.call("sidebar.get").result, before);
+    sql("CREATE TRIGGER fail_sidebar BEFORE UPDATE ON sidebar_views BEGIN SELECT RAISE(ABORT,'fixture'); END");
+    EXPECT_EQ(save(channel, {{"hidden", true}}).errorCode, "StorageError");
+    EXPECT_EQ(daemon.call("sidebar.get").result, before);
+    sql("DROP TRIGGER fail_sidebar");
+    ASSERT_TRUE(daemon.call("channel.delete", {{"channel", second}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        for (const auto& value : daemon.call("sidebar.get").result.value("channels").toArray())
+            if (value.toObject().value("channel_id") == second)
+                return false;
+        return true;
+    }));
+    // Hiding/favoriting must never alter the notification setting.
+    EXPECT_EQ(get().result.value("notification_level"), "default");
+    EXPECT_FALSE(get().result.value("muted").toBool());
+}
+
+TEST_F(ChannelPreferencesIpc, SidebarMovesPastHiddenSelectedAndActiveVoiceFavorites)
+{
+    const auto created
+        = daemon.call("channel.create", {{"server", "Preferences"}, {"name", "second"}, {"type", "text"}});
+    ASSERT_TRUE(created.ok);
+    const auto second = created.result.value("id").toString();
+    auto save = [&](const QString& id, QJsonObject changes) {
+        changes.insert("account", account);
+        changes.insert("channel", id);
+        return daemon.call("sidebar.set", changes);
+    };
+    auto rank = [&](const QString& id) {
+        for (const auto& value : daemon.call("sidebar.get").result.value("channels").toArray()) {
+            const auto item = value.toObject();
+            if (item.value("channel_id") == id)
+                return item.value("favorite_rank").toString();
+        }
+        return QString();
+    };
+    ASSERT_TRUE(save(channel, {{"favorite", true}, {"hidden", true}}).ok);
+    ASSERT_TRUE(save(second, {{"favorite", true}}).ok);
+    ASSERT_TRUE(save(second, {{"move", "up"}, {"selected_channel", channel}}).ok);
+    EXPECT_EQ(rank(second), "0");
+    EXPECT_EQ(rank(channel), "1");
+    ASSERT_TRUE(save(second, {{"move", "down"}, {"selected_channel", channel}}).ok);
+    EXPECT_EQ(rank(channel), "0");
+    EXPECT_EQ(rank(second), "1");
+
+    const auto voiceCreated
+        = daemon.call("channel.create", {{"server", "Preferences"}, {"name", "favorite-call"}, {"type", "voice"}});
+    ASSERT_TRUE(voiceCreated.ok);
+    const auto voice = voiceCreated.result.value("id").toString();
+    ASSERT_TRUE(save(voice, {{"favorite", true}, {"hidden", true}}).ok);
+    ASSERT_TRUE(save(second, {{"move", "down"}, {"selected_channel", channel}}).ok);
+    EXPECT_EQ(rank(second), "1") << "inactive hidden favorite is excluded";
+    ASSERT_TRUE(daemon.call("voice.join", {{"channel", voice}}).ok);
+    ASSERT_TRUE(save(second, {{"move", "down"}, {"selected_channel", channel}}).ok);
+    EXPECT_EQ(rank(voice), "1");
+    EXPECT_EQ(rank(second), "2");
+    ASSERT_TRUE(daemon.call("voice.leave").ok);
+
+    ASSERT_TRUE(daemon.call("server.create", {{"name", "Other section"}}).ok);
+    const auto otherCreated
+        = daemon.call("channel.create", {{"server", "Other section"}, {"name", "other"}, {"type", "text"}});
+    ASSERT_TRUE(otherCreated.ok);
+    const auto before = daemon.call("sidebar.get").result;
+    for (const auto& hint : {QJsonValue(42), QJsonValue(""), QJsonValue("general"), QJsonValue("999999999"),
+             QJsonValue(otherCreated.result.value("id"))}) {
+        EXPECT_EQ(save(second, {{"move", "up"}, {"selected_channel", hint}}).errorCode, "BadRequest");
+        EXPECT_EQ(daemon.call("sidebar.get").result, before);
+    }
+    EXPECT_EQ(save(second, {{"hidden", false}, {"selected_channel", channel}}).errorCode, "BadRequest");
+    EXPECT_EQ(daemon.call("sidebar.get").result, before);
 }

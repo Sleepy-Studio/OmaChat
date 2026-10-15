@@ -97,7 +97,7 @@ TEST(ChannelPreferencesStore, LegacyVersionsMigrateAndReopenWithAccountIsolation
             }
         }
         DatabaseFixture fixture(path);
-        EXPECT_EQ(fixture.number("PRAGMA user_version"), 3);
+        EXPECT_EQ(fixture.number("PRAGMA user_version"), 4);
         EXPECT_EQ(fixture.number("SELECT count(*) FROM sqlite_master WHERE name='muted_channels'"), 0);
     }
 }
@@ -215,7 +215,7 @@ TEST(ChannelPreferencesStore, RejectsNewerSchemaWithoutChangingIt)
     const auto path = dir.filePath("local.db");
     {
         DatabaseFixture fixture(path);
-        fixture.exec("PRAGMA user_version=4");
+        fixture.exec("PRAGMA user_version=5");
     }
     {
         LocalStore store;
@@ -224,6 +224,87 @@ TEST(ChannelPreferencesStore, RejectsNewerSchemaWithoutChangingIt)
         EXPECT_FALSE(error.isEmpty());
     }
     DatabaseFixture fixture(path);
-    EXPECT_EQ(fixture.number("PRAGMA user_version"), 4);
+    EXPECT_EQ(fixture.number("PRAGMA user_version"), 5);
     EXPECT_EQ(fixture.number("SELECT count(*) FROM sqlite_master"), 0);
+}
+
+TEST(SidebarStore, VersionThreeMigrationPreservesDataAndRollsBackConflictingSchema)
+{
+    QTemporaryDir dir;
+    const auto path = dir.filePath("local.db");
+    {
+        DatabaseFixture fixture(path);
+        fixture.legacy(2);
+    }
+    {
+        LocalStore store;
+        QString error;
+        ASSERT_TRUE(store.open(path, &error));
+        ASSERT_TRUE(store.setChannelPreferences(1, 7, {NotificationLevel::All, 123456}));
+    }
+    {
+        DatabaseFixture fixture(path);
+        fixture.exec("DROP TABLE sidebar_channels");
+        fixture.exec("DROP TABLE sidebar_views");
+        fixture.exec("PRAGMA user_version=3");
+        fixture.exec("CREATE TABLE sidebar_views(blocker INTEGER)");
+    }
+    {
+        LocalStore store;
+        QString error;
+        EXPECT_FALSE(store.open(path, &error));
+    }
+    {
+        DatabaseFixture fixture(path);
+        EXPECT_EQ(fixture.number("PRAGMA user_version"), 3);
+        EXPECT_EQ(fixture.number("SELECT count(*) FROM sqlite_master WHERE name='sidebar_channels'"), 0);
+        fixture.exec("DROP TABLE sidebar_views");
+    }
+    LocalStore store;
+    QString error;
+    ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
+    EXPECT_EQ(store.channelPreferences(1, 7), (ChannelPreferences{NotificationLevel::All, 123456}));
+    EXPECT_EQ(store.account(1)->trustedFingerprint, "pinned");
+    EXPECT_DOUBLE_EQ(store.userVolumes(1).at(42), 1.5);
+    EXPECT_EQ(store.sidebarPreferences(1), SidebarPreferences{});
+}
+
+TEST(SidebarStore, ReopenIsolationCascadeAndTransactionalFailure)
+{
+    QTemporaryDir dir;
+    const auto path = dir.filePath("local.db");
+    SidebarPreferences preferences;
+    preferences.channels[7] = {0, true, false};
+    preferences.channels[8] = {1, false, false};
+    preferences.channels[9] = {{}, false, true};
+    preferences.compact = true;
+    preferences.showVoiceParticipants = false;
+    {
+        LocalStore store;
+        QString error;
+        ASSERT_TRUE(store.open(path, &error));
+        ASSERT_EQ(store.addAccount({0, "host", 6473, "alice", {}, 0}), 1);
+        ASSERT_EQ(store.addAccount({0, "host", 6473, "bob", {}, 0}), 2);
+        ASSERT_TRUE(store.setSidebarPreferences(1, preferences));
+    }
+    LocalStore store;
+    QString error;
+    ASSERT_TRUE(store.open(path, &error));
+    EXPECT_EQ(store.sidebarPreferences(1), preferences);
+    EXPECT_EQ(store.sidebarPreferences(2), SidebarPreferences{});
+    DatabaseFixture fixture(path);
+    fixture.exec("CREATE TRIGGER fail_sidebar BEFORE UPDATE ON sidebar_views BEGIN SELECT RAISE(ABORT,'fixture'); END");
+    auto changed = preferences;
+    changed.channels.clear();
+    EXPECT_FALSE(store.setSidebarPreferences(1, changed));
+    EXPECT_EQ(store.sidebarPreferences(1), preferences);
+    EXPECT_FALSE(store.setSidebarPreferences(999, preferences));
+    fixture.exec("DROP TRIGGER fail_sidebar");
+    ASSERT_TRUE(store.setChannelPreferences(1, 7, {NotificationLevel::None, {}}));
+    ASSERT_TRUE(store.clearChannelPreferences(1, 7));
+    preferences.channels.erase(7);
+    EXPECT_EQ(store.sidebarPreferences(1), preferences);
+    EXPECT_EQ(store.channelPreferences(1, 7), ChannelPreferences{});
+    ASSERT_TRUE(store.removeAccount(1));
+    EXPECT_EQ(store.sidebarPreferences(1), SidebarPreferences{});
 }

@@ -295,9 +295,59 @@ void AppController::selectRelativeChannel(int delta)
 
 void AppController::toggleCategory(const QString& id)
 {
-    if (!m_collapsed.remove(id))
-        m_collapsed.insert(id);
-    rebuildChannels();
+    setSidebarPreferences({{"channel", id}, {"collapsed", !m_collapsed.contains(id)}});
+}
+
+QVariantMap AppController::channelSidebarPreferences(const QString& id) const
+{
+    return m_sidebarChannels.value(id).toVariantMap();
+}
+
+QVariantList AppController::hiddenChannels(const QString& query) const
+{
+    QVariantList result;
+    for (const auto& c : m_channelsById) {
+        const auto id = c.value("id").toString();
+        if (!m_sidebarChannels.value(id).value("hidden").toBool())
+            continue;
+        const auto name = c.value("name").toString();
+        const auto server = m_serversById.value(c.value("server_id").toString()).value("name").toString();
+        if (!name.contains(query, Qt::CaseInsensitive) && !server.contains(query, Qt::CaseInsensitive))
+            continue;
+        result.append(QVariantMap{{"id", id}, {"name", name}, {"server", server}});
+    }
+    std::sort(result.begin(), result.end(), [](const QVariant& a, const QVariant& b) {
+        const auto aa = a.toMap(), bb = b.toMap();
+        const auto an = aa.value("server").toString() + u'/' + aa.value("name").toString();
+        const auto bn = bb.value("server").toString() + u'/' + bb.value("name").toString();
+        return an != bn ? an < bn : aa.value("id").toString().toULongLong() < bb.value("id").toString().toULongLong();
+    });
+    return result;
+}
+
+void AppController::setSidebarPreferences(const QVariantMap& changes)
+{
+    if (m_sidebarSaving)
+        return;
+    const auto account = accountId();
+    const auto request = ++m_sidebarRequest;
+    auto parameters = QJsonObject::fromVariantMap(changes);
+    parameters.insert("account", account);
+    if (parameters.contains("move") && !m_selectedChannel.isEmpty())
+        parameters.insert("selected_channel", m_selectedChannel);
+    m_sidebarSaving = true;
+    m_sidebarError.clear();
+    emit sidebarChanged();
+    m_link.request(QStringLiteral("sidebar.set"), parameters, [this, account, request](const ipc::Reply& reply) {
+        if (account != accountId() || request != m_sidebarRequest)
+            return;
+        m_sidebarSaving = false;
+        if (reply.ok)
+            applySidebarPreferences(reply.result);
+        else
+            m_sidebarError = reply.errorMessage;
+        emit sidebarChanged();
+    });
 }
 
 // -------------------------------------------------------------- messages
@@ -1739,6 +1789,8 @@ void AppController::switcherQuery(const QString& text)
                     label = userName(r.toString());
             detail = tr("Direct message");
         }
+        if (m_sidebarChannels.value(c.value("id").toString()).value("hidden").toBool())
+            detail += tr(" · Hidden on this device");
         const int s = score(label) + (c.value(QStringLiteral("id")).toString() == m_selectedChannel ? -5 : 0)
             + (m_unread.contains(c.value(QStringLiteral("id")).toString()) ? 5 : 0);
         if (s > 0)

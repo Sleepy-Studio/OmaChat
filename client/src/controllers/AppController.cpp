@@ -52,7 +52,7 @@ AppController::AppController(const config::ClientConfig& config, QObject* parent
           "description", "iconAttachmentId", "bannerAttachmentId"})
     , m_channels({"key", "itemId", "rowType", "name", "depth", "unread", "mentions", "muted", "locked", "selected",
           "collapsed", "speaking", "userMuted", "userDeafened", "userId", "presence", "voiceCount", "topic",
-          "streaming"})
+          "streaming", "favorite", "hidden", "section", "iconAttachmentId"})
     , m_members({"key", "userId", "name", "username", "avatarUrl", "status", "nameColor", "section", "isOwner",
           "inVoice", "speaking"})
     , m_switcher({"key", "kind", "itemId", "label", "detail"})
@@ -230,6 +230,11 @@ void AppController::applyStatus(const QJsonObject& status)
     if (previousAccount != accountId()) {
         m_mutedChannels.clear();
         m_channelPreferences.clear();
+        applySidebarPreferences({});
+        ++m_sidebarRequest;
+        m_sidebarSaving = false;
+        m_sidebarError.clear();
+        emit sidebarChanged();
         emit channelPreferencesChanged();
     }
     if (previousAccount != accountId() || state() != u"connected")
@@ -253,8 +258,10 @@ void AppController::applyStatus(const QJsonObject& status)
     emit attachmentsChanged();
     emit sendOperationsChanged();
     emit voiceChanged();
-    if (voiceBefore != voiceJoined() || voiceChannelBefore != voiceChannelId())
+    if (voiceBefore != voiceJoined() || voiceChannelBefore != voiceChannelId()) {
         rebuildServers();
+        rebuildChannels();
+    }
     if (previousAccount != accountId())
         refreshTransfers();
     // Account identity also arrives when reopening against an offline daemon.
@@ -278,6 +285,11 @@ void AppController::applySnapshot(const QJsonObject& snap)
     if (!snap.value(QStringLiteral("valid")).toBool()) {
         m_mutedChannels.clear();
         m_channelPreferences.clear();
+        applySidebarPreferences({});
+        ++m_sidebarRequest;
+        m_sidebarSaving = false;
+        m_sidebarError.clear();
+        emit sidebarChanged();
         emit channelPreferencesChanged();
         m_serversById.clear();
         m_channelsById.clear();
@@ -329,6 +341,7 @@ void AppController::applySnapshot(const QJsonObject& snap)
             m_channelPreferences.insert(preference.value(QStringLiteral("channel_id")).toString(), preference);
     }
     emit channelPreferencesChanged();
+    applySidebarPreferences(snap.value("sidebar_preferences").toObject());
     m_mutedChannels.clear();
     for (const auto& v : snap.value(QStringLiteral("muted_channels")).toArray())
         m_mutedChannels.insert(v.toString());
@@ -503,6 +516,9 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
     }
     if (name == u"channel.deleted") {
         m_channelsById.remove(id("channel_id"));
+        m_sidebarChannels.remove(id("channel_id"));
+        m_collapsed.remove(id("channel_id"));
+        emit sidebarChanged();
         ensureSelection();
         rebuildChannels();
         emit channelDataChanged(id("channel_id"));
@@ -623,6 +639,13 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
     }
     if (name == u"voice.error") {
         showNotice(data.value(QStringLiteral("message")).toString(), true);
+        return;
+    }
+    if (name == u"sidebar.changed") {
+        if (data.value("account").toString() == accountId()) {
+            applySidebarPreferences(data);
+            rebuildChannels();
+        }
         return;
     }
     if (name == u"channel.preferences_changed") {
@@ -1001,10 +1024,36 @@ void AppController::rebuildServers()
     m_servers.setRows(std::move(rows));
 }
 
+void AppController::applySidebarPreferences(const QJsonObject& preferences)
+{
+    if (!preferences.isEmpty() && preferences.value("account").toString() != accountId())
+        return;
+    m_sidebarChannels.clear();
+    m_collapsed.clear();
+    m_sidebarCompact = preferences.value("compact").toBool();
+    m_showVoiceParticipants = preferences.value("show_voice_participants").toBool(true);
+    if (preferences.value("account").toString() == accountId()) {
+        for (const auto& value : preferences.value("channels").toArray()) {
+            const auto item = value.toObject();
+            const auto id = item.value("channel_id").toString();
+            m_sidebarChannels.insert(id, item);
+            if (item.value("collapsed").toBool())
+                m_collapsed.insert(id);
+        }
+    }
+    emit sidebarChanged();
+}
+
 void AppController::rebuildChannels()
 {
     refreshArtworkCache();
     QList<QVariantMap> rows;
+    QSet<QString> favorites;
+    auto visible = [&](const QJsonObject& c) {
+        const auto id = c.value("id").toString();
+        return !m_sidebarChannels.value(id).value("hidden").toBool() || id == m_selectedChannel
+            || (voiceJoined() && id == voiceChannelId());
+    };
     auto channelRow = [&](const QJsonObject& c, int depth) {
         const QString id = c.value(QStringLiteral("id")).toString();
         const QString type = c.value(QStringLiteral("type")).toString();
@@ -1015,6 +1064,9 @@ void AppController::rebuildChannels()
             {"selected", id == m_selectedChannel}, {"collapsed", m_collapsed.contains(id)}, {"speaking", false},
             {"userMuted", false}, {"userDeafened", false}, {"userId", QString()}, {"presence", QString()},
             {"voiceCount", 0}, {"topic", c.value(QStringLiteral("topic")).toString()}, {"streaming", false}};
+        row.insert("favorite", favorites.contains(id));
+        row.insert("hidden", m_sidebarChannels.value(id).value("hidden").toBool());
+        row.insert("section", favorites.contains(id) ? tr("Favorites") : QString());
         row.insert(QStringLiteral("iconAttachmentId"), c.value(QStringLiteral("icon_attachment_id")).toString());
         if (type == u"dm") {
             for (const auto& r : c.value(QStringLiteral("recipients")).toArray()) {
@@ -1038,6 +1090,8 @@ void AppController::rebuildChannels()
                            .localeAwareCompare(userName(b.value(QStringLiteral("user_id")).toString()))
                     < 0;
             });
+            if (!m_showVoiceParticipants)
+                return;
             for (const auto& v : participants) {
                 const QString uid = v.value(QStringLiteral("user_id")).toString();
                 rows.append(
@@ -1051,7 +1105,8 @@ void AppController::rebuildChannels()
                             v.value(QStringLiteral("self_deaf")).toBool()
                                 || v.value(QStringLiteral("server_deaf")).toBool()},
                         {"userId", uid}, {"presence", userStatus(uid)}, {"voiceCount", 0}, {"topic", QString()},
-                        {"streaming", v.value(QStringLiteral("streaming")).toBool()}});
+                        {"streaming", v.value(QStringLiteral("streaming")).toBool()},
+                        {"section", favorites.contains(id) ? tr("Favorites") : QString()}});
             }
         }
     };
@@ -1062,6 +1117,24 @@ void AppController::rebuildChannels()
                 < b.value(QStringLiteral("id")).toString().toULongLong();
     };
 
+    QList<QJsonObject> favoriteChannels;
+    for (const auto& c : m_channelsById) {
+        const auto id = c.value("id").toString();
+        const auto server = c.value("server_id").toString();
+        if ((homeSelected() ? server == u"0" : server == m_selectedServer) && c.value("type").toString() != u"category"
+            && m_sidebarChannels.value(id).value("favorite_rank").isString() && visible(c)) {
+            favorites.insert(id);
+            favoriteChannels.append(c);
+        }
+    }
+    std::sort(favoriteChannels.begin(), favoriteChannels.end(), [&](const QJsonObject& a, const QJsonObject& b) {
+        const auto aid = a.value("id").toString(), bid = b.value("id").toString();
+        const auto ar = m_sidebarChannels.value(aid).value("favorite_rank").toString().toLongLong();
+        const auto br = m_sidebarChannels.value(bid).value("favorite_rank").toString().toLongLong();
+        return ar != br ? ar < br : aid.toULongLong() < bid.toULongLong();
+    });
+    for (const auto& c : favoriteChannels)
+        channelRow(c, 0);
     if (homeSelected()) {
         QList<QJsonObject> dms;
         for (const auto& c : m_channelsById) {
@@ -1073,7 +1146,8 @@ void AppController::rebuildChannels()
                 > b.value(QStringLiteral("id")).toString().toULongLong();
         });
         for (const auto& c : dms)
-            channelRow(c, 0);
+            if (!favorites.contains(c.value("id").toString()) && visible(c))
+                channelRow(c, 0);
     } else {
         QList<QJsonObject> top, categories;
         QHash<QString, QList<QJsonObject>> children;
@@ -1091,18 +1165,18 @@ void AppController::rebuildChannels()
         std::sort(top.begin(), top.end(), byPosition);
         std::sort(categories.begin(), categories.end(), byPosition);
         for (const auto& c : top)
-            channelRow(c, 0);
+            if (!favorites.contains(c.value("id").toString()) && visible(c))
+                channelRow(c, 0);
         for (const auto& cat : categories) {
             const QString cid = cat.value(QStringLiteral("id")).toString();
             auto kids = children.value(cid);
             std::sort(kids.begin(), kids.end(), byPosition);
             channelRow(cat, 0);
             for (const auto& c : kids) {
-                // Collapsed categories still show the selected channel and
-                // voice channels that have people in them.
-                const bool keep
-                    = !m_collapsed.contains(cid) || c.value(QStringLiteral("id")).toString() == m_selectedChannel;
-                if (keep)
+                const auto id = c.value("id").toString();
+                const bool keep = !m_collapsed.contains(cid) || id == m_selectedChannel
+                    || (voiceJoined() && id == voiceChannelId());
+                if (keep && !favorites.contains(id) && visible(c))
                     channelRow(c, 1);
             }
         }

@@ -124,6 +124,7 @@ private:
     void purgeRecovery(std::int64_t accountId, SendRecoveryStore::Completion callback);
     void onModelEvent(const QString& name, const QJsonObject& data);
     void maybeNotify(const ServerConnection& conn, const QJsonObject& message);
+    std::optional<QJsonObject> sidebarPreferencesJson(std::int64_t accountId);
     bool reloadChannelPreferences(std::int64_t accountId);
     void refreshMuteExpiry();
     QJsonObject channelPreferencesJson(

@@ -162,6 +162,11 @@ class AppController : public QObject {
     Q_PROPERTY(QString searchError READ searchError NOTIFY searchStateChanged)
     Q_PROPERTY(omachat::client::MessageListModel* messages READ messages CONSTANT)
 
+    Q_PROPERTY(bool sidebarCompact READ sidebarCompact NOTIFY sidebarChanged)
+    Q_PROPERTY(bool showVoiceParticipants READ showVoiceParticipants NOTIFY sidebarChanged)
+    Q_PROPERTY(bool sidebarSaving READ sidebarSaving NOTIFY sidebarChanged)
+    Q_PROPERTY(QString sidebarError READ sidebarError NOTIFY sidebarChanged)
+
     // settings
     Q_PROPERTY(QVariantMap shortcuts READ shortcuts NOTIFY configChanged)
     Q_PROPERTY(bool compactMode READ compactMode NOTIFY configChanged)
@@ -354,6 +359,13 @@ public:
     Q_INVOKABLE void selectChannel(const QString& id);
     Q_INVOKABLE void selectRelativeChannel(int delta);
     Q_INVOKABLE void toggleCategory(const QString& id);
+    Q_INVOKABLE QVariantMap channelSidebarPreferences(const QString& id) const;
+    Q_INVOKABLE QVariantList hiddenChannels(const QString& query = {}) const;
+    Q_INVOKABLE void setSidebarPreferences(const QVariantMap& changes);
+    bool sidebarCompact() const { return m_sidebarCompact; }
+    bool showVoiceParticipants() const { return m_showVoiceParticipants; }
+    bool sidebarSaving() const { return m_sidebarSaving; }
+    QString sidebarError() const { return m_sidebarError; }
 
     Q_INVOKABLE bool sendComposer(const QString& text);
     Q_INVOKABLE void retrySend(const QString& id);
@@ -529,6 +541,7 @@ signals:
         int sourceWidth, int sourceHeight, const QVariantMap& remembered = {});
     void daemonChanged();
     void statusChanged();
+    void sidebarChanged();
     void channelPreferencesChanged();
     void channelPreferencesWriteFinished(const QString& account, const QString& channel, bool ok, const QString& error);
     void instanceStatusChanged();
@@ -641,6 +654,13 @@ private:
     QHash<QString, QJsonObject> m_channelPreferences;
     mutable QVariantList m_emojiCatalog; // lazily loaded from the bundled resource, then cached
     QStringList m_recentEmoji; // most-recently-used first, session-local only
+    void applySidebarPreferences(const QJsonObject& preferences);
+    QHash<QString, QJsonObject> m_sidebarChannels;
+    bool m_sidebarCompact = false;
+    bool m_showVoiceParticipants = true;
+    bool m_sidebarSaving = false;
+    quint64 m_sidebarRequest = 0;
+    QString m_sidebarError;
     QSet<QString> m_collapsed;
     QHash<QString, double> m_userVolumes;
     QHash<QString, QString> m_lastChannelForServer;

@@ -3,6 +3,75 @@
 Updated: 2026-10-15. Resume desktop development from this file.
 
 
+## Phase 2B installed and verified — 2026-10-15, 08:48 UTC
+
+Favorites, hiding, persistent category collapse, compact channel rows and optional
+voice participants are implemented with device-local account scope. Transactional
+local **schema 4** preserves notification settings and other account data. Older
+daemons cannot open schema 4. `sidebar.get/set`, snapshots and account-tagged events
+serve the GUI and CLI; write failures do not publish successful state.
+
+Favorites appear once in a deterministic section and have keyboard move actions.
+Reordering keeps keyboard focus on channel identity, includes hidden selected and
+active-voice favorites, and leaves server placement unchanged. Hidden channels
+remain discoverable in the quick switcher and **Sidebar — On this device** /
+**Hidden channels** management. Selected channels and active voice survive hiding
+or collapse; notification eligibility is unchanged. Permission resync removes
+channel/artwork presentation while retaining preferences. Confirmed channel
+removal clears preferences for active/background accounts.
+
+Both final main/debug **0.2.2-1** packages are installed. All **129 installed regular
+files/symlinks** match extracted packages; `pacman -Qkk omachat omachat-debug`
+reports zero alterations. Running daemon/client binaries match, the relaunched
+client is visible, and both saved accounts reconnect without new login. Live schema
+4 integrity passes and preserves both accounts/pins, 14 known-key rows, one volume
+row and the existing notification-preference row. Fresh private schema-3 backup:
+`~/.local/share/omachat/backups/omachat-before-phase2-sidebar-install-20261015T084740Z.db`
+(0600; integrity checked).
+
+Installed CLI acceptance on existing disposable channel `236109384625688576`
+passes favorite → hide → new-connection read → unhide → remove favorite, plus both
+view toggles. Original preferences are restored exactly, including removal of the
+default rows created only for acceptance. No hosted content changes are needed.
+Voice is restored to its previous channel with microphone muted; sharing is off.
+These are dated live observations; recheck before later disruptive work.
+
+Validation: **469/469 final package CTest checks** (459 non-voice with real keyring
+enabled and CI's platform theme/fonts, then 10 serial voice checks with compilation
+idle); **3/3 package-built native Wayland checks**, including the settings dialog's
+dark/light 720×460/150% and 1440×900/100% keyboard/pointer matrix, favorite keyboard
+focus and notification-dialog regression. Four settings captures are inspected.
+The additional favorite capture changes native window size after closing the menu;
+it demonstrates focus/order, not a final 720×460 capture. The extracted production
+executable also renders on Wayland with isolated paths and no daemon connection.
+QML lint, changed C++ formatting, whitespace and desktop-entry validation pass;
+existing QML type warnings and generated-Protobuf LTO warnings remain. Independent
+source review approves the final changes.
+
+Phase 2A exact-SHA desktop CI at `daf7830` fails only the notification Close test's
+platform-dependent Enter activation; Android passes. The failure reproduces with
+CI's empty platform theme. The test now uses portable Space activation and passes
+three repeats in each targeted configuration. An independent review also catches
+and resolves hidden selected/voice favorite movement. Superseded package runs
+expose a stale harness object: copying refreshed files with old mtimes lets Ninja
+skip a later-built test controller. Force-refreshed source mtimes rebuild every
+affected target; the complete final package suite then passes. Failed/superseded
+logs and artifacts are retained; only packages directly under `install/` are final.
+An initial live restore helper uses the wrong CLI spelling (`voice mute`); it is
+corrected to `mute` before rejoining, with the microphone muted throughout the
+restored call.
+
+Evidence: `build/desktop-phase2-sidebar/checkpoint.json`, `evidence/`,
+`native-captures/`, and `install/source-manifest.json` (451-file snapshot). Package
+application source matches this checkpoint; subsequent changes are documentation
+only. Commit/push and fresh exact-SHA CI outcomes are recorded in local evidence
+and shared memory. No main merge, hosted rollout, public release/AUR or vault Git
+commit is included.
+
+**Next:** check exact-SHA CI after push, then implement **2C unread recovery and
+controls** from the Phase 2 plan. 2D mention kinds, human usability, physical Android
+and MLS/SFrame gates remain separate. The checkpoints below are historical.
+
 ## Phase 2A installed and verified — 2026-10-15, 05:36 UTC
 
 The user authorizes installation during active voice, followed by commit and push.

@@ -38,6 +38,7 @@ Rectangle {
     property string pendingPlacementId: ""
     property string placementFeedback: ""
     property bool placementFailed: false
+    property string keyboardRowKey: ""
 
     function cancelPlacementGesture() {
         const hadGesture = dragId.length > 0
@@ -137,7 +138,7 @@ Rectangle {
         }
         const row = list.model.get(index)
         const item = list.itemAtIndex(index)
-        if (!item || row.rowType === "participant" || row.rowType === "dm" || row.rowType === "group_dm" || row.itemId === dragId) return
+        if (!item || row.favorite || row.rowType === "participant" || row.rowType === "dm" || row.rowType === "group_dm" || row.itemId === dragId) return
         const localY = point.y + list.contentY - item.y
         if (dragType === "category") {
             if (row.rowType !== "category") return
@@ -256,6 +257,21 @@ Rectangle {
         }
     }
 
+    Connections {
+        target: App.channels
+        function onModelAboutToBeReset() {
+            sidebar.keyboardRowKey = list.currentIndex >= 0 && list.currentIndex < list.count
+                ? list.model.get(list.currentIndex).key : ""
+        }
+        function onCountChanged() {
+            // RowListModel emits this after reset handlers finish, including reorders.
+            if (!sidebar.keyboardRowKey.length) return
+            const index = App.channels.indexOf("key", sidebar.keyboardRowKey)
+            list.currentIndex = index >= 0 ? index : Math.min(list.currentIndex, list.count - 1)
+            sidebar.keyboardRowKey = ""
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -279,6 +295,12 @@ Rectangle {
                     elide: Text.ElideRight
                     Accessible.role: Accessible.Heading
                     Accessible.name: text
+                }
+                IconButton {
+                    objectName: "sidebarSettingsButton"
+                    iconName: "settings"
+                    tip: qsTr("Sidebar and hidden channels — On this device")
+                    onClicked: sidebarSettings.open()
                 }
                 IconButton {
                     visible: App.canCreateInvites
@@ -337,6 +359,20 @@ Rectangle {
             model: App.channels
             boundsBehavior: Flickable.StopAtBounds
             keyNavigationEnabled: true
+            section.property: "section"
+            section.criteria: ViewSection.FullString
+            section.delegate: Text {
+                required property string section
+                text: section
+                width: list.width
+                height: section.length ? Metrics.px(26) : 0
+                leftPadding: Metrics.px(14)
+                verticalAlignment: Text.AlignVCenter
+                font.pixelSize: Metrics.px(11)
+                font.bold: true
+                color: Theme.textMuted
+                Accessible.role: Accessible.Heading
+            }
             highlightFollowsCurrentItem: false
             activeFocusOnTab: true
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -423,10 +459,10 @@ Rectangle {
             Layout.rightMargin: Metrics.px(8)
             Layout.bottomMargin: Metrics.px(6)
             visible: text.length > 0
-            text: sidebar.placementFeedback
+            text: App.sidebarSaving ? qsTr("Saving sidebar…") : (App.sidebarError || sidebar.placementFeedback)
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
-            color: sidebar.placementFailed ? Theme.danger : Theme.textMuted
+            color: sidebar.placementFailed || App.sidebarError.length ? Theme.danger : Theme.textMuted
             font.pixelSize: Metrics.px(12)
             Accessible.name: text
         }
@@ -496,7 +532,7 @@ Rectangle {
                 anchors.fill: parent
                 preventStealing: sidebar.dragId.length > 0
                 onPressed: mouse => {
-                    if (mouse.button === Qt.LeftButton)
+                    if (mouse.button === Qt.LeftButton && !m.favorite)
                         sidebar.beginPlacement(m.itemId, m.rowType, mapToItem(list, mouse.x, mouse.y))
                     else sidebar.cancelPlacementGesture()
                 }
@@ -538,7 +574,7 @@ Rectangle {
             readonly property string iconId: m && m.iconAttachmentId ? m.iconAttachmentId : ""
             Component.onCompleted: if (iconId.length > 0 && iconId !== "0")
                                        App.requestPreview(iconId, "channel-icon.png", 0)
-            implicitHeight: isDm ? Metrics.px(40) : Metrics.px(30)
+            implicitHeight: Metrics.px(App.sidebarCompact ? 26 : (isDm ? 40 : 30))
             anchors.left: parent ? parent.left : undefined
             anchors.right: parent ? parent.right : undefined
             anchors.leftMargin: Metrics.px(8) + (m ? m.depth : 0) * Metrics.px(6)
@@ -554,6 +590,8 @@ Rectangle {
                                               : qsTr("Text channel %1").arg(m ? m.name : "")))
                              + (m && m.mentions > 0 ? qsTr(", %n mention(s)", "", m.mentions) : (m && m.unread ? qsTr(", unread") : ""))
                              + (m && m.locked ? qsTr(", locked") : "")
+                             + (m && m.favorite ? qsTr(", favorite") : "")
+                             + (m && m.hidden ? qsTr(", hidden on this device") : "")
             Accessible.selected: m ? m.selected : false
 
             Rectangle {
@@ -623,7 +661,7 @@ Rectangle {
                 anchors.fill: parent
                 preventStealing: sidebar.dragId.length > 0
                 onPressed: mouse => {
-                    if (mouse.button === Qt.LeftButton)
+                    if (mouse.button === Qt.LeftButton && !m.favorite)
                         sidebar.beginPlacement(m.itemId, m.rowType, mapToItem(list, mouse.x, mouse.y))
                     else sidebar.cancelPlacementGesture()
                 }
@@ -804,6 +842,11 @@ Rectangle {
         }
     }
 
+    SidebarSettingsDialog {
+        id: sidebarSettings
+        onClosed: list.forceActiveFocus()
+    }
+
     ChannelNotificationsDialog {
         id: notificationsDialog
         onClosed: list.forceActiveFocus()
@@ -820,6 +863,38 @@ Rectangle {
         property bool isVoice
         property bool isGroup
         property string userId
+        property bool favorite: false
+        property bool hidden: false
+        function refreshPreferences() {
+            const value = App.channelSidebarPreferences(channelId)
+            favorite = value.favorite_rank !== null && value.favorite_rank !== undefined
+            hidden = !!value.hidden
+        }
+        onChannelIdChanged: refreshPreferences()
+        Connections {
+            target: App
+            function onSidebarChanged() { channelMenu.refreshPreferences() }
+        }
+        MenuAction {
+            text: channelMenu.favorite ? qsTr("Remove favorite") : qsTr("Favorite — On this device")
+            enabled: App.ready && !App.sidebarSaving
+            onTriggered: App.setSidebarPreferences({channel: channelMenu.channelId, favorite: !channelMenu.favorite})
+        }
+        MenuAction {
+            text: qsTr("Move favorite up")
+            enabled: channelMenu.favorite && App.ready && !App.sidebarSaving
+            onTriggered: App.setSidebarPreferences({channel: channelMenu.channelId, move: "up"})
+        }
+        MenuAction {
+            text: qsTr("Move favorite down")
+            enabled: channelMenu.favorite && App.ready && !App.sidebarSaving
+            onTriggered: App.setSidebarPreferences({channel: channelMenu.channelId, move: "down"})
+        }
+        MenuAction {
+            text: channelMenu.hidden ? qsTr("Unhide — On this device") : qsTr("Hide — On this device")
+            enabled: App.ready && !App.sidebarSaving
+            onTriggered: App.setSidebarPreferences({channel: channelMenu.channelId, hidden: !channelMenu.hidden})
+        }
         MenuAction {
             text: qsTr("Duplicate channel…")
             enabled: App.state === "connected" && App.canManageChannels

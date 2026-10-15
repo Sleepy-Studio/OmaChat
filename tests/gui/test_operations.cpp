@@ -16,6 +16,7 @@
 #include <QQuickWindow>
 #include <QScopeGuard>
 #include <QSemaphore>
+#include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTest>
@@ -2345,7 +2346,8 @@ TEST_F(Operations, ChannelNotificationsPersistWithKeyboardAndPointerInCompactAnd
             ASSERT_TRUE(waitFor([&] { return !app->channelMuted(channel) && !dialog->property("saving").toBool(); }));
             EXPECT_EQ(app->channelNotificationPreferences(channel).value("notification_level"), "all");
             close->forceActiveFocus();
-            QTest::keyClick(window, Qt::Key_Return);
+            // Space activates a Button with both the desktop and Qt Basic styles.
+            QTest::keyClick(window, Qt::Key_Space);
             ASSERT_TRUE(waitFor([&] { return !dialog->property("visible").toBool(); }));
             ASSERT_TRUE(QMetaObject::invokeMethod(dialog, "openFor", Q_ARG(QVariant, channel)));
             ASSERT_TRUE(waitFor([&] { return dialog->property("opened").toBool(); }));
@@ -2408,6 +2410,270 @@ TEST_F(Operations, BackgroundMuteExpiryCannotChangeActiveAccountWithCollidingCha
             && app->channelNotificationPreferences(channel).value("notification_level") == "none";
     }));
     EXPECT_FALSE(app->channelMuted(channel));
+}
+
+TEST_F(Operations, SidebarFavoritesHiddenDiscoveryCollapseVoiceAndGuiReopen)
+{
+    const auto first = app->selectedChannelId();
+    const auto sid = app->selectedServerId();
+    auto created
+        = daemon->call("channel.create", {{"server", sid}, {"name", "organized-category"}, {"type", "category"}});
+    ASSERT_TRUE(created.ok);
+    const auto category = created.result.value("id").toString();
+    created = daemon->call(
+        "channel.create", {{"server", sid}, {"name", "organized-second"}, {"type", "text"}, {"parent", category}});
+    ASSERT_TRUE(created.ok);
+    const auto second = created.result.value("id").toString();
+    created = daemon->call(
+        "channel.create", {{"server", sid}, {"name", "organized-call"}, {"type", "voice"}, {"parent", category}});
+    ASSERT_TRUE(created.ok);
+    const auto voice = created.result.value("id").toString();
+    ASSERT_TRUE(waitFor([&] { return !app->channelDetails(voice).isEmpty(); }));
+    const auto placement = app->channelDetails(second).value("position");
+    auto save = [&](QVariantMap changes) {
+        app->setSidebarPreferences(changes);
+        EXPECT_TRUE(waitFor([&] { return !app->sidebarSaving(); }));
+        EXPECT_TRUE(app->sidebarError().isEmpty()) << app->sidebarError().toStdString();
+    };
+    save({{"channel", first}, {"favorite", true}});
+    save({{"channel", second}, {"favorite", true}});
+    EXPECT_EQ(app->channels()->get(0).value("itemId"), first);
+    EXPECT_EQ(app->channels()->get(1).value("itemId"), second);
+    save({{"channel", second}, {"move", "up"}});
+    EXPECT_EQ(app->channels()->get(0).value("itemId"), second);
+    int copies = 0;
+    for (const auto& row : app->channels()->rows())
+        copies += row.value("itemId") == second;
+    EXPECT_EQ(copies, 1);
+    EXPECT_EQ(app->channelDetails(second).value("position"), placement);
+    save({{"channel", second}, {"hidden", true}});
+    EXPECT_LT(app->channels()->indexOf("itemId", second), 0);
+    ASSERT_EQ(app->hiddenChannels("organized-second").size(), 1);
+    app->switcherQuery("organized-second");
+    const auto index = app->switcher()->indexOf("itemId", second);
+    ASSERT_GE(index, 0);
+    app->switcherActivate(index);
+    ASSERT_TRUE(waitFor([&] { return app->selectedChannelId() == second; }));
+    EXPECT_GE(app->channels()->indexOf("itemId", second), 0);
+    save({{"channel", second}, {"favorite", false}});
+    app->toggleCategory(category);
+    ASSERT_TRUE(waitFor([&] { return !app->sidebarSaving(); }));
+    const auto catRow = app->channels()->indexOf("itemId", category);
+    ASSERT_GE(catRow, 0);
+    EXPECT_TRUE(app->channels()->get(catRow).value("collapsed").toBool());
+    EXPECT_GE(app->channels()->indexOf("itemId", second), 0) << "selected child stays visible";
+    ASSERT_TRUE(daemon->call("voice.join", {{"channel", voice}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->voiceJoined() && app->voiceChannelId() == voice; }));
+    save({{"channel", voice}, {"hidden", true}});
+    EXPECT_GE(app->channels()->indexOf("itemId", voice), 0) << "active call survives hiding/collapse";
+    save({{"channel", voice}, {"favorite", true}});
+    save({{"channel", voice}, {"move", "up"}});
+    EXPECT_EQ(app->channels()->get(0).value("itemId"), voice);
+    save({{"channel", first}, {"move", "up"}});
+    EXPECT_EQ(app->channels()->get(0).value("itemId"), first) << "favorite moves past the hidden active call";
+    save({{"compact", true}, {"show_voice_participants", false}});
+    app.reset();
+    config::ClientConfig config;
+    config.startup.launchDaemon = false;
+    app = std::make_unique<client::AppController>(config);
+    app->start();
+    ASSERT_TRUE(waitFor([&] { return app->ready() && app->sidebarCompact(); }));
+    EXPECT_FALSE(app->showVoiceParticipants());
+    EXPECT_TRUE(app->channelSidebarPreferences(second).value("hidden").toBool());
+    EXPECT_TRUE(app->channelSidebarPreferences(category).value("collapsed").toBool());
+    EXPECT_GE(app->channels()->indexOf("itemId", voice), 0);
+    ASSERT_TRUE(daemon->call("voice.leave").ok);
+    EXPECT_FALSE(app->channelMuted(second));
+}
+
+TEST_F(Operations, SidebarAccountIsolationPermissionRevocationAndRestoration)
+{
+    const auto channel = app->selectedChannelId();
+    const auto ownerAccount = app->accountId();
+    const auto sid = app->selectedServerId();
+    TestDaemon authority("sidebar-authority");
+    ASSERT_TRUE(authority.start());
+    ASSERT_TRUE(authority.loginOn(server, "operations", "test-password"));
+    const auto invitation = authority.call("invite.create", {{"server", sid}});
+    ASSERT_TRUE(invitation.ok);
+    ASSERT_TRUE(daemon->call("sidebar.set", {{"channel", channel}, {"favorite", true}, {"compact", true}}).ok);
+    ASSERT_TRUE(daemon->registerOn(server, "sidebar-member", "test-password"));
+    ASSERT_TRUE(daemon->call("server.join", {{"invite", invitation.result.value("uri")}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->accountId() != ownerAccount && !app->channelDetails(channel).isEmpty(); }));
+    const auto memberAccount = app->accountId();
+    const auto memberUser = app->selfId();
+    EXPECT_FALSE(app->sidebarCompact());
+    EXPECT_TRUE(app->channelSidebarPreferences(channel).isEmpty());
+    ASSERT_TRUE(daemon->call("sidebar.set", {{"channel", channel}, {"hidden", true}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->hiddenChannels().size() == 1; }));
+    ASSERT_TRUE(authority
+            .call("override.set",
+                {{"channel", channel}, {"user", memberUser}, {"allow", QJsonArray{}},
+                    {"deny", QJsonArray{"VIEW_CHANNEL"}}})
+            .ok);
+    ASSERT_TRUE(waitFor([&] { return app->channelDetails(channel).isEmpty(); }));
+    EXPECT_TRUE(app->hiddenChannels().isEmpty());
+    EXPECT_LT(app->channels()->indexOf("itemId", channel), 0);
+    app->switcherQuery("general");
+    EXPECT_LT(app->switcher()->indexOf("itemId", channel), 0);
+    ASSERT_TRUE(authority
+            .call("override.set",
+                {{"channel", channel}, {"user", memberUser}, {"allow", QJsonArray{}}, {"deny", QJsonArray{}},
+                    {"remove", true}})
+            .ok);
+    ASSERT_TRUE(waitFor([&] { return !app->channelDetails(channel).isEmpty() && app->hiddenChannels().size() == 1; }));
+    ASSERT_TRUE(daemon->call("account.switch", {{"account", ownerAccount}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->accountId() == ownerAccount && app->sidebarCompact(); }));
+    EXPECT_TRUE(app->hiddenChannels().isEmpty());
+    EXPECT_EQ(app->channelSidebarPreferences(channel).value("favorite_rank").toString(), "0");
+    ASSERT_TRUE(daemon->call("account.switch", {{"account", memberAccount}}).ok);
+    ASSERT_TRUE(waitFor([&] { return app->accountId() == memberAccount && app->hiddenChannels().size() == 1; }));
+    EXPECT_FALSE(app->sidebarCompact());
+}
+
+TEST_F(Operations, SidebarDialogKeyboardPointerAndHiddenSearchInDarkLightCompactWide)
+{
+    const auto channel = app->selectedChannelId();
+    for (bool compact : {true, false}) {
+        theme.setScale(compact ? 1.5 : 1.0);
+        for (bool light : {false, true}) {
+            QFile colors(files.filePath("sidebar-colors.toml"));
+            ASSERT_TRUE(colors.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            colors.write(light ? "background = '#ffffff'\nforeground = '#101010'\naccent = '#1166bb'\n"
+                               : "background = '#111318'\nforeground = '#eeeeee'\naccent = '#7aa2f7'\n");
+            colors.close();
+            ASSERT_TRUE(theme.loadFile(colors.fileName()));
+            ASSERT_TRUE(daemon->call("sidebar.set", {{"channel", channel}, {"hidden", true}, {"compact", false}}).ok);
+            ASSERT_TRUE(waitFor([&] { return app->hiddenChannels().size() == 1 && !app->sidebarCompact(); }));
+            QQmlEngine engine;
+            auto object = editorWindow(engine, "SidebarSettingsDialog");
+            ASSERT_TRUE(object);
+            auto* window = qobject_cast<QQuickWindow*>(object.get());
+            ASSERT_TRUE(window);
+            window->resize(compact ? 720 : 1440, compact ? 460 : 900);
+            QTest::qWait(100);
+            if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+                const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+                ASSERT_EQ(
+                    QProcess::execute("hyprctl",
+                        {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+                    0);
+                ASSERT_EQ(QProcess::execute("hyprctl",
+                              {"eval",
+                                  QString("hl.dispatch(hl.dsp.window.resize({x=%1,y=%2,relative=false,window='%3'}))")
+                                      .arg(compact ? 720 : 1440)
+                                      .arg(compact ? 460 : 900)
+                                      .arg(match)}),
+                    0);
+                ASSERT_TRUE(waitFor([&] {
+                    return qAbs(window->width() - (compact ? 720 : 1440)) <= 1
+                        && qAbs(window->height() - (compact ? 460 : 900)) <= 1;
+                }));
+            }
+            auto* dialog = object->findChild<QObject*>("editor");
+            ASSERT_TRUE(dialog);
+            ASSERT_TRUE(QMetaObject::invokeMethod(dialog, "open"));
+            ASSERT_TRUE(waitFor([&] { return dialog->property("opened").toBool(); }));
+            auto* toggle = namedControl(window->contentItem(), "sidebarCompactToggle");
+            auto* search = namedControl(window->contentItem(), "hiddenChannelSearch");
+            auto* unhide = namedControl(window->contentItem(), "unhide_" + channel);
+            ASSERT_TRUE(toggle && search && unhide);
+            toggle->forceActiveFocus();
+            QTest::keyClick(window, Qt::Key_Space);
+            ASSERT_TRUE(waitFor([&] { return app->sidebarCompact() && !app->sidebarSaving(); }));
+            const auto input = search->property("input").value<QQuickItem*>();
+            ASSERT_TRUE(input);
+            input->forceActiveFocus();
+            for (char key : QByteArray("general"))
+                QTest::keyClick(window, key);
+            EXPECT_EQ(dialog->property("hidden").toList().size(), 1);
+            unhide = namedControl(window->contentItem(), "unhide_" + channel);
+            ASSERT_TRUE(unhide);
+            unhide->forceActiveFocus();
+            QTest::qWait(100);
+            const auto point = unhide->mapToScene(QPointF(unhide->width() / 2, unhide->height() / 2));
+            ASSERT_GE(point.y(), 0);
+            ASSERT_LT(point.y(), window->height());
+            EXPECT_TRUE(window->grabWindow().save(
+                QString("/tmp/omachat-sidebar-%1-%2.png").arg(light ? "light" : "dark", compact ? "compact" : "wide")));
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, point.toPoint());
+            ASSERT_TRUE(waitFor([&] { return app->hiddenChannels().isEmpty() && !app->sidebarSaving(); }));
+            auto* close = namedControl(window->contentItem(), "sidebarSettingsClose");
+            ASSERT_TRUE(close);
+            close->forceActiveFocus();
+            QTest::keyClick(window, Qt::Key_Space);
+            ASSERT_TRUE(waitFor([&] { return !dialog->property("visible").toBool(); }));
+        }
+    }
+}
+
+TEST_F(Operations, SidebarFavoriteActionsRestoreKeyboardFocusInCompactMenu)
+{
+    theme.setScale(1.5);
+    const auto first = app->selectedChannelId();
+    const auto created = daemon->call(
+        "channel.create", {{"server", app->selectedServerId()}, {"name", "keyboard-favorite"}, {"type", "text"}});
+    ASSERT_TRUE(created.ok);
+    const auto second = created.result.value("id").toString();
+    ASSERT_TRUE(daemon->call("sidebar.set", {{"channel", first}, {"favorite", true}, {"hidden", true}}).ok);
+    ASSERT_TRUE(daemon->call("sidebar.set", {{"channel", second}, {"favorite", true}}).ok);
+    ASSERT_TRUE(waitFor([&] {
+        return app->channels()->get(0).value("itemId") == first && app->channels()->get(1).value("itemId") == second
+            && app->channelSidebarPreferences(first).value("hidden").toBool();
+    }));
+    QQmlEngine engine;
+    QQmlComponent component(&engine);
+    component.setData(R"(
+import QtQuick
+import QtQuick.Controls
+import OmaChat
+ApplicationWindow {
+    width: 720; height: 460; visible: true
+    ChannelSidebar { objectName: "sidebar"; width: 340; anchors.top: parent.top; anchors.bottom: parent.bottom }
+})",
+        QUrl());
+    std::unique_ptr<QObject> object(component.create());
+    ASSERT_TRUE(object) << component.errorString().toStdString();
+    auto* window = qobject_cast<QQuickWindow*>(object.get());
+    auto* sidebar = object->findChild<QObject*>("sidebar");
+    ASSERT_TRUE(window && sidebar);
+    if (qEnvironmentVariableIsSet("OMACHAT_TEST_WAYLAND")) {
+        const QString match = QString("pid:%1").arg(QCoreApplication::applicationPid());
+        ASSERT_EQ(QProcess::execute("hyprctl",
+                      {"eval", QString("hl.dispatch(hl.dsp.window.float({action='set',window='%1'}))").arg(match)}),
+            0);
+        ASSERT_EQ(
+            QProcess::execute("hyprctl",
+                {"eval",
+                    QString("hl.dispatch(hl.dsp.window.resize({x=720,y=460,relative=false,window='%1'}))").arg(match)}),
+            0);
+        ASSERT_TRUE(waitFor([&] { return qAbs(window->width() - 720) <= 1 && qAbs(window->height() - 460) <= 1; }));
+    }
+    QTest::qWait(100);
+    auto* list = namedControl(window->contentItem(), "channelList");
+    ASSERT_TRUE(list);
+    list->setProperty("currentIndex", 1);
+    list->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_F10, Qt::ShiftModifier);
+    auto* menu = object->findChild<QObject*>("channelContextMenu");
+    ASSERT_TRUE(menu);
+    ASSERT_TRUE(waitFor([&] { return menu->property("opened").toBool(); }));
+    EXPECT_LE(menu->property("y").toDouble() + menu->property("height").toDouble(), window->height());
+    auto* move = textControl(window->contentItem(), "Move favorite up");
+    ASSERT_TRUE(move);
+    move->forceActiveFocus();
+    ASSERT_TRUE(move->isEnabled());
+    ASSERT_TRUE(move->hasActiveFocus());
+    QSignalSpy clicked(move, SIGNAL(clicked()));
+    QTest::keyClick(window, Qt::Key_Space);
+    ASSERT_TRUE(waitFor([&] { return app->channels()->get(0).value("itemId") == second && !app->sidebarSaving(); }))
+        << "clicked=" << clicked.count() << " menuVisible=" << menu->property("visible").toBool()
+        << " target=" << menu->property("channelId").toString().toStdString()
+        << " selected=" << app->selectedChannelId().toStdString() << " error=" << app->sidebarError().toStdString();
+    EXPECT_TRUE(list->hasActiveFocus());
+    const auto selected = app->channels()->get(list->property("currentIndex").toInt()).value("itemId");
+    EXPECT_EQ(selected, second) << "focus follows the moved favorite";
+    EXPECT_TRUE(window->grabWindow().save("/tmp/omachat-sidebar-favorites-compact.png"));
 }
 
 int main(int argc, char** argv)

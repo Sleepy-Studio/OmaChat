@@ -679,6 +679,12 @@ void Daemon::registerMethods()
         for (const auto& [channelId, preference] : m_links.at(accountId).preferences)
             preferences.append(channelPreferencesJson(accountId, channelId, preference));
         snap.insert(QStringLiteral("channel_preferences"), preferences);
+        const auto sidebar = sidebarPreferencesJson(accountId);
+        if (!sidebar) {
+            r.error(e::StorageError, QStringLiteral("cannot load sidebar preferences"));
+            return;
+        }
+        snap.insert(QStringLiteral("sidebar_preferences"), *sidebar);
         QJsonArray muted;
         for (auto id : m_mutedChannels)
             muted.append(idString(id));
@@ -1936,6 +1942,156 @@ void Daemon::registerMethods()
         proto::Envelope env;
         env.mutable_delete_channel()->set_channel_id(cid);
         forward(std::move(env), r);
+    };
+    m[QStringLiteral("sidebar.get")] = [this](const QJsonObject&, const Responder& r) {
+        const auto sidebar = sidebarPreferencesJson(m_active);
+        if (sidebar)
+            r.ok(*sidebar);
+        else
+            r.error(e::StorageError, QStringLiteral("cannot load sidebar preferences"));
+    };
+    m[QStringLiteral("sidebar.set")] = [this](const QJsonObject& p, const Responder& r) {
+        // Every GUI write carries its account; CLI callers may target the current account.
+        for (auto it = p.begin(); it != p.end(); ++it) {
+            if (it.key() != u"account" && it.key() != u"channel" && it.key() != u"favorite" && it.key() != u"hidden"
+                && it.key() != u"collapsed" && it.key() != u"move" && it.key() != u"show_voice_participants"
+                && it.key() != u"compact" && it.key() != u"selected_channel") {
+                r.error(e::BadRequest, QStringLiteral("unknown sidebar field"));
+                return;
+            }
+        }
+        if (p.contains("account")
+            && (!p.value("account").isString() || p.value("account").toString() != QString::number(m_active))) {
+            r.error(e::Conflict, QStringLiteral("active account changed"));
+            return;
+        }
+        if (!m_conn->hasAccount()) {
+            r.error(e::NotFound, QStringLiteral("no active account"));
+            return;
+        }
+        auto preferences = m_store.sidebarPreferences(m_active);
+        if (!preferences) {
+            r.error(e::StorageError, QStringLiteral("cannot load sidebar preferences"));
+            return;
+        }
+        bool changed = false;
+        for (const auto* key : {"favorite", "hidden", "collapsed", "show_voice_participants", "compact"}) {
+            if (p.contains(QLatin1StringView(key)) && !p.value(QLatin1StringView(key)).isBool()) {
+                r.error(e::BadRequest, QStringLiteral("sidebar flags must be boolean"));
+                return;
+            }
+        }
+        if (p.contains("selected_channel") && !p.contains("move")) {
+            r.error(e::BadRequest, QStringLiteral("selected_channel requires move"));
+            return;
+        }
+        const bool channelFields
+            = p.contains("favorite") || p.contains("hidden") || p.contains("collapsed") || p.contains("move");
+        if (channelFields != p.contains("channel")) {
+            r.error(e::BadRequest, QStringLiteral("provide channel with a channel preference"));
+            return;
+        }
+        if (channelFields) {
+            const Id cid = channelParam(p, r);
+            if (!cid)
+                return;
+            const auto* channel = m_conn->model().channel(cid);
+            const bool category = channel->type() == proto::CHANNEL_TYPE_CATEGORY;
+            if ((category && (p.contains("favorite") || p.contains("hidden") || p.contains("move")))
+                || (!category && p.contains("collapsed"))) {
+                r.error(e::BadRequest,
+                    QStringLiteral("collapse applies to categories; favorite and hide apply to channels"));
+                return;
+            }
+            Id selectedChannel = 0;
+            if (p.contains("selected_channel")) {
+                const auto hint = p.value("selected_channel");
+                bool validId = false;
+                selectedChannel = hint.toString().toULongLong(&validId);
+                const auto* selected = m_conn->model().channel(selectedChannel);
+                if (!hint.isString() || !validId || !selectedChannel
+                    || hint.toString() != QString::number(selectedChannel) || !selected
+                    || selected->type() == proto::CHANNEL_TYPE_CATEGORY
+                    || selected->server_id() != channel->server_id()) {
+                    r.error(
+                        e::BadRequest, QStringLiteral("selected_channel must be a known channel ID in this section"));
+                    return;
+                }
+            }
+            auto& preference = preferences->channels[cid];
+            if (p.contains("hidden"))
+                preference.hidden = p.value("hidden").toBool();
+            if (p.contains("collapsed"))
+                preference.collapsed = p.value("collapsed").toBool();
+            // Normalize ranks before insertion/reordering. IDs break any historic ties.
+            std::vector<Id> favorites;
+            for (const auto& [id, item] : preferences->channels)
+                if (item.favoriteRank)
+                    favorites.push_back(id);
+            std::sort(favorites.begin(), favorites.end(), [&](Id a, Id b) {
+                const auto ra = *preferences->channels.at(a).favoriteRank;
+                const auto rb = *preferences->channels.at(b).favoriteRank;
+                return ra != rb ? ra < rb : a < b;
+            });
+            if (p.contains("favorite") && !p.value("favorite").toBool()) {
+                std::erase(favorites, cid);
+                preference.favoriteRank.reset();
+            } else if (p.contains("favorite") && !preference.favoriteRank) {
+                favorites.push_back(cid);
+            }
+            if (p.contains("move")) {
+                const auto direction = p.value("move").toString();
+                if (!p.value("move").isString() || (direction != u"up" && direction != u"down")
+                    || !preference.favoriteRank) {
+                    r.error(e::BadRequest, QStringLiteral("move requires an existing favorite and up or down"));
+                    return;
+                }
+                // Reorder within the currently accessible server/home section only.
+                std::vector<size_t> visible;
+                for (size_t i = 0; i < favorites.size(); ++i) {
+                    const auto* item = m_conn->model().channel(favorites[i]);
+                    if (item && item->server_id() == channel->server_id()
+                        && (!preferences->channels.at(favorites[i]).hidden || favorites[i] == cid
+                            || favorites[i] == selectedChannel || favorites[i] == m_voiceChannel))
+                        visible.push_back(i);
+                }
+                for (size_t i = 0; i < visible.size(); ++i) {
+                    if (favorites[visible[i]] != cid)
+                        continue;
+                    if (direction == u"up" && i > 0)
+                        std::swap(favorites[visible[i]], favorites[visible[i - 1]]);
+                    if (direction == u"down" && i + 1 < visible.size())
+                        std::swap(favorites[visible[i]], favorites[visible[i + 1]]);
+                    break;
+                }
+            }
+            for (size_t i = 0; i < favorites.size(); ++i)
+                preferences->channels[favorites[i]].favoriteRank = static_cast<std::int64_t>(i);
+            changed = true;
+        }
+        if (p.contains("show_voice_participants")) {
+            preferences->showVoiceParticipants = p.value("show_voice_participants").toBool();
+            changed = true;
+        }
+        if (p.contains("compact")) {
+            preferences->compact = p.value("compact").toBool();
+            changed = true;
+        }
+        if (!changed) {
+            r.error(e::BadRequest, QStringLiteral("provide a sidebar preference"));
+            return;
+        }
+        if (!m_store.setSidebarPreferences(m_active, *preferences)) {
+            r.error(e::StorageError, QStringLiteral("cannot save sidebar preferences"));
+            return;
+        }
+        const auto saved = sidebarPreferencesJson(m_active);
+        if (!saved) {
+            r.error(e::StorageError, QStringLiteral("cannot reload sidebar preferences"));
+            return;
+        }
+        m_ipc.broadcast(QStringLiteral("sidebar.changed"), *saved);
+        r.ok(*saved);
     };
     m[QStringLiteral("channel.preferences.get")] = [this](const QJsonObject& p, const Responder& r) {
         for (auto it = p.begin(); it != p.end(); ++it) {

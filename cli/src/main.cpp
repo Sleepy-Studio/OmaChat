@@ -76,6 +76,12 @@ Servers and channels
   channel move CHANNEL CATEGORY_ID | position CHANNEL INDEX
   channel place CHANNEL CATEGORY_ID [BEFORE_CHANNEL_ID]  omitted/0 appends
   channel delete CHANNEL | mute CHANNEL [--for 1h|8h|24h|forever] | unmute CHANNEL
+  channel favorite CHANNEL [up|down|remove]
+  channel hide CHANNEL
+  channel unhide CHANNEL
+  sidebar get
+  sidebar compact on|off
+  sidebar participants on|off
   channel notifications CHANNEL default|all|mentions|none
 
 Messages
@@ -396,6 +402,18 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
         if (expires)
             inv.params.insert(QStringLiteral("expires_in"), expires->toInt());
         inv.print = [](const QJsonObject& r) { out() << r.value("uri").toString() << "\n"; };
+    } else if (cmd == u"sidebar") {
+        if (args.size() == 2 && args.at(1) == u"get") {
+            inv.method = QStringLiteral("sidebar.get");
+            inv.print = [](const QJsonObject& r) { out() << QJsonDocument(r).toJson(QJsonDocument::Indented); };
+        } else if (args.size() == 3 && (args.at(1) == u"compact" || args.at(1) == u"participants")
+            && (args.at(2) == u"on" || args.at(2) == u"off")) {
+            inv.method = QStringLiteral("sidebar.set");
+            inv.params = {{args.at(1) == u"compact" ? "compact" : "show_voice_participants", args.at(2) == u"on"}};
+            inv.print = simpleOk(QStringLiteral("sidebar view saved on this device"));
+        } else {
+            return std::nullopt;
+        }
     } else if (cmd == u"channel") {
         if (sub == u"list") {
             inv.method = QStringLiteral("channel.list");
@@ -477,6 +495,21 @@ std::optional<Invocation> parse(QStringList args, QString& usageError)
             inv.method = QStringLiteral("channel.delete");
             inv.params = {{"channel", args.at(2)}};
             inv.print = simpleOk(QStringLiteral("channel deleted"));
+        } else if (sub == u"favorite" && need(3)) {
+            if (args.size() > 4
+                || (args.size() == 4 && args.at(3) != u"up" && args.at(3) != u"down" && args.at(3) != u"remove"))
+                return std::nullopt;
+            inv.method = QStringLiteral("sidebar.set");
+            inv.params = {{"channel", args.at(2)}};
+            if (args.size() == 4 && args.at(3) != u"remove")
+                inv.params.insert("move", args.at(3));
+            else
+                inv.params.insert("favorite", args.size() == 3);
+            inv.print = simpleOk(QStringLiteral("favorite saved on this device"));
+        } else if ((sub == u"hide" || sub == u"unhide") && args.size() == 3) {
+            inv.method = QStringLiteral("sidebar.set");
+            inv.params = {{"channel", args.at(2)}, {"hidden", sub == u"hide"}};
+            inv.print = simpleOk(QStringLiteral("sidebar visibility saved on this device"));
         } else if (sub == u"notifications" && need(4)) {
             const auto level = args.at(3);
             if (args.size() != 4

@@ -23,6 +23,20 @@ struct Account {
     std::int64_t lastUsed = 0;
 };
 
+struct SidebarChannelPreferences {
+    std::optional<std::int64_t> favoriteRank;
+    bool hidden = false;
+    bool collapsed = false;
+    bool operator==(const SidebarChannelPreferences&) const = default;
+};
+
+struct SidebarPreferences {
+    std::map<std::uint64_t, SidebarChannelPreferences> channels;
+    bool showVoiceParticipants = true;
+    bool compact = false;
+    bool operator==(const SidebarPreferences&) const = default;
+};
+
 // $XDG_DATA_HOME/omachat/omachat.db: known accounts, pinned certificates,
 // local per-user volume, muted channels and small UI state. Secrets are
 // never stored here (refresh tokens live in the system keyring).
@@ -54,6 +68,10 @@ public:
     std::optional<std::map<std::uint64_t, ChannelPreferences>> channelPreferences(std::int64_t accountId);
     std::optional<ChannelPreferences> channelPreferences(std::int64_t accountId, std::uint64_t channelId);
     bool setChannelPreferences(std::int64_t accountId, std::uint64_t channelId, const ChannelPreferences& preferences);
+
+    std::optional<SidebarPreferences> sidebarPreferences(std::int64_t accountId);
+    bool setSidebarPreferences(std::int64_t accountId, const SidebarPreferences& preferences);
+    bool clearChannelPreferences(std::int64_t accountId, std::uint64_t channelId);
 
     // End-to-end encryption: the device keys pinned for a contact.
     struct KnownKeys {

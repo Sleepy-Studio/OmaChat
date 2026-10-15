@@ -10,7 +10,7 @@
 namespace omachat::daemon {
 
 namespace {
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 }
 
 LocalStore::LocalStore()
@@ -114,6 +114,19 @@ bool LocalStore::open(const QString& path, QString* error)
                                    "SELECT account_id,channel_id,0 FROM muted_channels"))
             && exec(QStringLiteral("DROP TABLE muted_channels"));
         if (!ok)
+            return failed();
+    }
+    if (version < 4) {
+        if (!exec(QStringLiteral(
+                "CREATE TABLE sidebar_channels(account_id INTEGER NOT NULL REFERENCES accounts(id) "
+                "ON DELETE CASCADE, channel_id INTEGER NOT NULL, "
+                "favorite_rank INTEGER CHECK(favorite_rank IS NULL OR favorite_rank >= 0), "
+                "hidden INTEGER NOT NULL CHECK(hidden IN (0,1)), "
+                "collapsed INTEGER NOT NULL CHECK(collapsed IN (0,1)), PRIMARY KEY(account_id,channel_id))"))
+            || !exec(QStringLiteral(
+                "CREATE TABLE sidebar_views(account_id INTEGER PRIMARY KEY REFERENCES accounts(id) "
+                "ON DELETE CASCADE, show_voice_participants INTEGER NOT NULL "
+                "CHECK(show_voice_participants IN (0,1)), compact INTEGER NOT NULL CHECK(compact IN (0,1)))")))
             return failed();
     }
     if (!exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion)) || !m_db.commit())
@@ -348,6 +361,94 @@ bool LocalStore::setChannelMuted(std::int64_t accountId, std::uint64_t channelId
         return false;
     preferences->muteUntilMs = muted ? std::optional<std::int64_t>(0) : std::nullopt;
     return setChannelPreferences(accountId, channelId, *preferences);
+}
+
+std::optional<SidebarPreferences> LocalStore::sidebarPreferences(std::int64_t accountId)
+{
+    SidebarPreferences out;
+    QSqlQuery q(m_db);
+    q.prepare(
+        QStringLiteral("SELECT channel_id,favorite_rank,hidden,collapsed FROM sidebar_channels WHERE account_id=?"));
+    q.addBindValue(qint64(accountId));
+    if (!q.exec())
+        return std::nullopt;
+    while (q.next()) {
+        SidebarChannelPreferences channel;
+        if (!q.value(1).isNull())
+            channel.favoriteRank = q.value(1).toLongLong();
+        channel.hidden = q.value(2).toBool();
+        channel.collapsed = q.value(3).toBool();
+        out.channels.emplace(static_cast<std::uint64_t>(q.value(0).toLongLong()), channel);
+    }
+    if (q.lastError().isValid())
+        return std::nullopt;
+    q.prepare(QStringLiteral("SELECT show_voice_participants,compact FROM sidebar_views WHERE account_id=?"));
+    q.addBindValue(qint64(accountId));
+    if (!q.exec())
+        return std::nullopt;
+    if (q.next()) {
+        out.showVoiceParticipants = q.value(0).toBool();
+        out.compact = q.value(1).toBool();
+    }
+    if (q.lastError().isValid())
+        return std::nullopt;
+    return out;
+}
+
+bool LocalStore::setSidebarPreferences(std::int64_t accountId, const SidebarPreferences& preferences)
+{
+    if (!m_db.transaction())
+        return false;
+    const auto failed = [this] {
+        m_db.rollback();
+        return false;
+    };
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("DELETE FROM sidebar_channels WHERE account_id=?"));
+    q.addBindValue(qint64(accountId));
+    if (!q.exec())
+        return failed();
+    for (const auto& [id, channel] : preferences.channels) {
+        if (channel.favoriteRank && *channel.favoriteRank < 0)
+            return failed();
+        q.prepare(QStringLiteral("INSERT INTO sidebar_channels VALUES(?,?,?,?,?)"));
+        q.addBindValue(qint64(accountId));
+        q.addBindValue(qint64(id));
+        q.addBindValue(
+            channel.favoriteRank ? QVariant(qint64(*channel.favoriteRank)) : QVariant(QMetaType::fromType<qint64>()));
+        q.addBindValue(channel.hidden);
+        q.addBindValue(channel.collapsed);
+        if (!q.exec())
+            return failed();
+    }
+    q.prepare(QStringLiteral("INSERT INTO sidebar_views VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET "
+                             "show_voice_participants=excluded.show_voice_participants,compact=excluded.compact"));
+    q.addBindValue(qint64(accountId));
+    q.addBindValue(preferences.showVoiceParticipants);
+    q.addBindValue(preferences.compact);
+    if (!q.exec() || !m_db.commit())
+        return failed();
+    return true;
+}
+
+bool LocalStore::clearChannelPreferences(std::int64_t accountId, std::uint64_t channelId)
+{
+    if (!m_db.transaction())
+        return false;
+    for (const auto* table : {"channel_preferences", "sidebar_channels"}) {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("DELETE FROM %1 WHERE account_id=? AND channel_id=?").arg(QLatin1StringView(table)));
+        q.addBindValue(qint64(accountId));
+        q.addBindValue(qint64(channelId));
+        if (!q.exec()) {
+            m_db.rollback();
+            return false;
+        }
+    }
+    if (m_db.commit())
+        return true;
+    m_db.rollback();
+    return false;
 }
 
 QString LocalStore::value(const QString& key, const QString& fallback)

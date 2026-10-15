@@ -43,8 +43,11 @@ assistants, bots or LLM features.
   kick, ban, server mute — all enforced by the server
 - Several accounts (on one or more servers) connected at once, switched
   instantly; background accounts still notify
-- Presence (online, idle, do not disturb, offline) and desktop notifications
-  for DMs and mentions that respect DND and muted channels
+- Presence (online, idle, do not disturb, offline) and device-local channel
+  notification levels with timed mutes that respect DND and global switches
+- Device-local favorites with keyboard reordering, hidden-channel management,
+  persistent category collapse, compact channel rows and optional voice participants;
+  hiding leaves notifications enabled, and hidden channels remain searchable
 - Profiles with editable display name, bio and HTTPS avatar image; view a
   member's profile from the member list
 - `omachatd` keeps your session and voice call alive when the window closes

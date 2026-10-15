@@ -1,11 +1,12 @@
 # Phase 2: personal organization and notifications
 
-Status: 2A installed and validated, 2026-10-15. Notification preferences,
-transactional local schema 3, daemon policy/IPC, CLI and GUI are implemented in
-the desktop source. All 461 package CTest checks and 2 package-built native Wayland checks pass.
-Both packages and running binaries match; local schema 3 and both account reconnections
-are verified. Installed IPC/CLI preference round-trip passes with settings restored.
-See desktop-session-handoff.md for evidence and the remaining gates.
+Status: 2A and 2B installed and validated, 2026-10-15. Device-local notification
+and sidebar preferences use transactional local schema 4, checked daemon IPC,
+CLI and native GUI. All 469 package CTest checks and 3 package-built native Wayland
+checks pass. All 129 installed artifacts and both running binaries match; schema 4
+and both account reconnections are verified. Installed sidebar IPC/CLI round trips
+pass with preferences restored exactly. Next is 2C unread recovery and controls.
+See desktop-session-handoff.md for evidence and remaining gates.
 The source audit below records the pre-implementation baseline. Baseline: `87822ff` plus the installed, uncommitted
 keyring recovery fix. Phase 1 installed/live artwork acceptance is complete;
 independent human usability acceptance remains open.
@@ -140,6 +141,35 @@ hidden-channel discovery, search/notification navigation, permission revocation,
 active voice access and category collapse with a selected child. Keep hiding
 entirely separate from notification mute.
 
+### 2B implementation contract (2026-10-15)
+
+Local schema 4 adds `sidebar_channels` (favorite rank, hidden, collapsed) and
+`sidebar_views` (compact rows, show voice participants), both with account cascade.
+The schema-3 migration is transactional; notification preferences, accounts,
+trust, keys and volumes stay in their existing tables. Older daemons cannot open
+schema 4. Sidebar writes replace the account's sidebar state in one transaction;
+failed writes emit no success and leave the prior state intact.
+
+`sidebar.get`, checked `sidebar.set`, `sidebar_preferences` snapshots and
+account-tagged `sidebar.changed` events expose the same authority to every GUI
+and CLI. Favorites are ordered by rank then channel ID, appear once in a section
+within the current server/home, and keep their channel identity as keyboard focus
+moves. GUI move requests carry a validated `selected_channel` hint so hidden
+selected channels and hidden active voice channels remain reorder candidates.
+Server placement gestures exclude favorite rows; explicit administration actions
+still operate on server placement.
+
+The sidebar settings button opens **Sidebar — On this device**, including a
+searchable Hidden channels list with Open/Unhide and compact/participants toggles.
+Quick switcher discovery includes hidden channels. Selected channels and the
+active call survive hiding/collapse. Permission resync removes channel/artwork
+presentation while preserving preferences; confirmed channel deletion clears
+preferences for active and background accounts. Temporary omission is not deletion.
+
+CLI: `channel favorite CHANNEL [up|down|remove]`, `channel hide|unhide CHANNEL`,
+`sidebar get`, `sidebar compact on|off`, and `sidebar participants on|off` support
+`--json`. Hiding and favorites do not alter notification policy or server markers.
+
 ## Slice 2C: unread controls and recovery
 
 First establish authoritative per-account unread state across GUI closure,
@@ -172,8 +202,8 @@ and compatibility tests; do not bundle it into the local-only 2A package.
 
 ## Execution and completion evidence
 
-Next: implement 2A storage migration and pure policy tests, then daemon/IPC,
-CLI and GUI in that order. Preserve existing keyring edits and ignored evidence.
+Next: implement 2C authoritative unread recovery before unread controls. Keep 2D
+mention semantics separate. Preserve existing source and ignored evidence.
 Run affected tests, format/QML checks and a clean package verification before
 installing. Recheck live voice/sharing immediately before any restart; serialize
 native GUI and installation work. Record installed artifact/runtime parity and
