@@ -1592,3 +1592,117 @@ TEST_F(Fixture, LoginSessionRequestsRequireAuthenticationAndValidateIds)
     revoke.mutable_revoke_login_session()->set_session_id(1);
     EXPECT_EQ(alice->call(revoke)->error().code(), proto::ERROR_NOT_FOUND);
 }
+
+TEST_F(Fixture, UnreadSummaryIsAccessCheckedAndBoundToPersistentEventSequence)
+{
+    auto alice = client("alice");
+    std::optional<proto::AuthResult> bobAuth;
+    auto bob = client("bob", "correct horse", &bobAuth);
+    auto outsider = client("outsider");
+    const auto community = createServer(*alice, "Unread summary");
+    ASSERT_TRUE(join(*bob, invite(*alice, community)).has_server());
+    const auto channel = channelNamed(sync(*alice), "general", proto::CHANNEL_TYPE_TEXT);
+    ASSERT_NE(channel, 0u);
+    auto first = send(*alice, channel, "hello @bob");
+    ASSERT_TRUE(first.has_chat_message());
+    ASSERT_TRUE(send(*bob, channel, "self message").has_chat_message());
+    const auto event = bob->waitEvent([&](const proto::Event& e) {
+        return e.has_message_create() && e.message_create().id() == first.chat_message().id();
+    });
+    ASSERT_TRUE(event);
+    proto::Envelope request;
+    request.mutable_get_unread_summary()->set_channel_id(channel);
+    auto result = bob->call(request);
+    ASSERT_TRUE(result && result->has_unread_summary());
+    const auto before = result->unread_summary();
+    EXPECT_EQ(before.channel_id(), channel);
+    EXPECT_EQ(before.count(), 1u);
+    EXPECT_EQ(before.mentions(), 1u);
+    EXPECT_TRUE(before.mentions_complete());
+    EXPECT_EQ(before.first().message_id(), first.chat_message().id());
+    EXPECT_GT(before.latest().message_id(), before.first().message_id());
+    EXPECT_GE(before.sequence(), event->sequence());
+    auto denied = outsider->call(request);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_NOT_FOUND);
+    // A later mutation is beyond the earlier summary boundary and appears once
+    // in the next snapshot; reads themselves publish no events.
+    auto second = send(*alice, channel, "later");
+    ASSERT_TRUE(second.has_chat_message());
+    const auto later = bob->waitEvent([&](const proto::Event& e) {
+        return e.has_message_create() && e.message_create().id() == second.chat_message().id();
+    });
+    ASSERT_TRUE(later);
+    EXPECT_GT(later->sequence(), before.sequence());
+    result = bob->call(request);
+    ASSERT_TRUE(result && result->has_unread_summary());
+    EXPECT_EQ(result->unread_summary().count(), 2u);
+    EXPECT_GE(result->unread_summary().sequence(), later->sequence());
+    proto::Envelope marker;
+    marker.mutable_set_read_marker()->set_channel_id(channel);
+    marker.mutable_set_read_marker()->set_message_id(first.chat_message().id());
+    ASSERT_TRUE(bob->call(marker)->has_read_marker());
+    result = bob->call(request);
+    ASSERT_TRUE(result && result->has_unread_summary());
+    EXPECT_EQ(result->unread_summary().count(), 1u);
+    EXPECT_EQ(result->unread_summary().mentions(), 0u);
+    EXPECT_EQ(result->unread_summary().marker().message_id(), first.chat_message().id());
+    EXPECT_EQ(result->unread_summary().first().message_id(), second.chat_message().id());
+    // Losing only ReadHistory must revoke the endpoint too.
+    proto::Envelope override;
+    auto* restriction = override.mutable_set_override()->mutable_override();
+    restriction->set_channel_id(channel);
+    restriction->set_target_type(proto::PermissionOverride::TARGET_USER);
+    restriction->set_target_id(bobAuth->user().id());
+    restriction->set_deny(permissions::ReadHistory);
+    const auto changed = alice->call(override);
+    ASSERT_TRUE(changed && !changed->has_error());
+    denied = bob->call(request);
+    ASSERT_TRUE(denied && denied->has_error());
+    EXPECT_EQ(denied->error().code(), proto::ERROR_NOT_FOUND);
+}
+
+TEST_F(Fixture, UnreadSummaryAdvertisesCapabilityAndDefinesEncryptedConversationCounts)
+{
+    auto alice = client("alice");
+    std::optional<proto::AuthResult> bobAuth;
+    auto bob = client("bob", "correct horse", &bobAuth);
+    proto::Envelope hello;
+    hello.mutable_hello()->set_protocol_major(1);
+    RawClient probe(server);
+    ASSERT_TRUE(probe.connect());
+    const auto greeting = probe.call(hello);
+    ASSERT_TRUE(greeting && greeting->has_hello_reply());
+    const auto& capabilities = greeting->hello_reply().capabilities();
+    EXPECT_NE(std::find(capabilities.begin(), capabilities.end(), "read.summary.v1"), capabilities.end());
+    const auto community = createServer(*alice, "Shared DM audience");
+    ASSERT_TRUE(join(*bob, invite(*alice, community)).has_server());
+    proto::Envelope dm;
+    dm.mutable_open_dm()->set_user_id(bobAuth->user().id());
+    const auto opened = alice->call(dm);
+    ASSERT_TRUE(opened && opened->has_channel());
+    const auto channel = opened->channel().id();
+    proto::Envelope encrypted;
+    encrypted.mutable_send_message()->set_channel_id(channel);
+    encrypted.mutable_send_message()->set_encrypted("opaque encrypted payload");
+    const auto sent = alice->call(encrypted);
+    ASSERT_TRUE(sent && sent->has_chat_message());
+    proto::Envelope request;
+    request.mutable_get_unread_summary()->set_channel_id(channel);
+    auto result = bob->call(request);
+    ASSERT_TRUE(result && result->has_unread_summary());
+    EXPECT_EQ(result->unread_summary().count(), 1u);
+    EXPECT_EQ(result->unread_summary().mentions(), 0u);
+    EXPECT_FALSE(result->unread_summary().mentions_complete());
+    EXPECT_EQ(result->unread_summary().first().message_id(), sent->chat_message().id());
+    result = alice->call(request);
+    ASSERT_TRUE(result && result->has_unread_summary());
+    EXPECT_EQ(result->unread_summary().count(), 0u);
+    EXPECT_TRUE(result->unread_summary().mentions_complete());
+    EXPECT_FALSE(result->unread_summary().has_first());
+    EXPECT_EQ(result->unread_summary().latest().message_id(), sent->chat_message().id());
+    request.mutable_get_unread_summary()->set_channel_id(0);
+    result = bob->call(request);
+    ASSERT_TRUE(result && result->has_error());
+    EXPECT_EQ(result->error().code(), proto::ERROR_NOT_FOUND);
+}

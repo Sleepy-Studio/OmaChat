@@ -252,6 +252,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     }
 
     switch (env.payload_case()) {
+    case P::kGetUnreadSummary:
+        handleGetUnreadSummary(s, rid, env.get_unread_summary());
+        break;
     case P::kSetReadMarker:
         handleSetReadMarker(s, rid, env.set_read_marker());
         break;

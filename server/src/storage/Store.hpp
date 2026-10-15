@@ -121,6 +121,8 @@ public:
     std::optional<MessageOperation> messageOperation(Id userId, const QByteArray& operationId);
     bool setReadMarker(Id userId, const MessageRecord& message);
     std::vector<proto::ReadMarker> readMarkers(Id userId);
+    // One SQL snapshot; nullopt on failure, never a fabricated empty result.
+    std::optional<proto::UnreadSummary> unreadSummary(Id userId, Id channelId);
     std::optional<Id> discordImportId(Id serverId, const QString& kind, const QString& discordId);
     bool rememberDiscordImport(Id serverId, const QString& kind, const QString& discordId, Id localId);
     bool rememberDiscordReply(Id serverId, Id messageId, const QString& replyDiscordId);

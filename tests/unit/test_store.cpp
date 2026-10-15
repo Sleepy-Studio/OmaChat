@@ -589,3 +589,118 @@ TEST(ServerStore, FailedArtworkMigrationRollsBackAndRestoresForeignKeys)
         EXPECT_EQ(query.value(0).toInt(), 0);
     }
 }
+
+TEST(ServerStore, UnreadSummaryCountsWholeBacklogAndSurvivesDeletedMarker)
+{
+    QTemporaryDir dir;
+    server::Store store;
+    QString error;
+    ASSERT_TRUE(store.open(dir.filePath("unread.db"), &error));
+    ASSERT_TRUE(store.insertUser({1, "reader", "Reader", {}, "h", 0}));
+    ASSERT_TRUE(store.insertUser({2, "sender", "Sender", {}, "h", 0}));
+    server::ServerRecord community;
+    community.id = 10;
+    community.name = "Unread";
+    community.ownerId = 1;
+    ASSERT_TRUE(store.insertServer(community, 0));
+    ASSERT_TRUE(store.insertChannel({20, 10, "general", server::ChannelKind::Text, 0, 0, {}, {}}, 0));
+    auto empty = store.unreadSummary(1, 20);
+    ASSERT_TRUE(empty);
+    EXPECT_EQ(empty->count(), 0u);
+    EXPECT_TRUE(empty->has_marker());
+    EXPECT_FALSE(empty->has_first());
+    EXPECT_FALSE(empty->has_latest());
+    for (server::Id id = 100; id < 1300; ++id) {
+        server::MessageRecord message;
+        message.id = id;
+        message.channelId = 20;
+        message.authorId = id % 10 == 0 ? 1 : 2;
+        message.content = "fixture";
+        message.createdAt = 1000 + static_cast<std::int64_t>(id / 2);
+        message.mentions = id % 10 == 1 ? std::vector<server::Id>{1} : std::vector<server::Id>{11};
+        ASSERT_TRUE(store.insertMessage(message));
+    }
+    auto summary = store.unreadSummary(1, 20);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->count(), 1080u);
+    EXPECT_EQ(summary->mentions(), 120u) << "whole user-ID tokens, never substring matches";
+    EXPECT_TRUE(summary->mentions_complete());
+    EXPECT_EQ(summary->first().message_id(), 101u);
+    EXPECT_EQ(summary->latest().message_id(), 1299u);
+    const auto marker = store.message(501);
+    ASSERT_TRUE(marker);
+    ASSERT_TRUE(store.setReadMarker(1, *marker));
+    ASSERT_TRUE(store.deleteMessage(501));
+    ASSERT_TRUE(store.deleteMessage(503));
+    summary = store.unreadSummary(1, 20);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->marker().message_id(), 501u);
+    EXPECT_EQ(summary->marker().timestamp(), marker->createdAt);
+    EXPECT_EQ(summary->first().message_id(), 502u);
+    EXPECT_EQ(summary->count(), 718u);
+    EXPECT_EQ(summary->mentions(), 79u);
+    ASSERT_TRUE(store.updateMessage(511, "edited mention away", 9000, {}));
+    ASSERT_TRUE(store.updateMessage(512, {}, 9001, {1}, QByteArray("opaque")));
+    summary = store.unreadSummary(1, 20);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->count(), 718u);
+    EXPECT_EQ(summary->mentions(), 78u);
+    EXPECT_FALSE(summary->mentions_complete()) << "encrypted mention claims are not authoritative";
+    const auto last = store.message(1299);
+    ASSERT_TRUE(last);
+    ASSERT_TRUE(store.setReadMarker(1, *last));
+    summary = store.unreadSummary(1, 20);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->count(), 0u);
+    EXPECT_EQ(summary->mentions(), 0u);
+    EXPECT_TRUE(summary->mentions_complete());
+    EXPECT_FALSE(summary->has_first());
+    EXPECT_EQ(summary->latest().message_id(), 1299u);
+    EXPECT_EQ(store.unreadSummary(2, 20)->marker().message_id(), 0u);
+}
+
+TEST(ServerStore, UnreadSummaryFailsClosedOnStorageError)
+{
+    server::Store store;
+    EXPECT_FALSE(store.unreadSummary(1, 20));
+}
+
+TEST(ServerStore, UnreadSummaryUsesTimestampThenIdIncludingImportedHistory)
+{
+    QTemporaryDir dir;
+    server::Store store;
+    QString error;
+    ASSERT_TRUE(store.open(dir.filePath("ordering.db"), &error));
+    ASSERT_TRUE(store.insertUser({1, "reader", "Reader", {}, "h", 0}));
+    ASSERT_TRUE(store.insertUser({2, "sender", "Sender", {}, "h", 0}));
+    server::ServerRecord community;
+    community.id = 10;
+    community.name = "Ordering";
+    community.ownerId = 1;
+    ASSERT_TRUE(store.insertServer(community, 0));
+    ASSERT_TRUE(store.insertChannel({20, 10, "general", server::ChannelKind::Text, 0, 0, {}, {}}, 0));
+    for (const auto& [id, timestamp] : {std::pair{900u, -1000}, {100u, 1000}, {101u, 1000}, {50u, 1001}}) {
+        server::MessageRecord message;
+        message.id = id;
+        message.channelId = 20;
+        message.authorId = 2;
+        message.content = "imported";
+        message.createdAt = timestamp;
+        ASSERT_TRUE(store.insertMessage(message));
+    }
+    auto summary = store.unreadSummary(1, 20);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->count(), 4u);
+    EXPECT_EQ(summary->first().message_id(), 900u);
+    EXPECT_EQ(summary->first().timestamp(), -1000);
+    EXPECT_EQ(summary->latest().message_id(), 50u);
+    const auto marker = store.message(100);
+    ASSERT_TRUE(marker);
+    ASSERT_TRUE(store.setReadMarker(1, *marker));
+    ASSERT_TRUE(store.deleteMessage(100));
+    summary = store.unreadSummary(1, 20);
+    ASSERT_TRUE(summary);
+    EXPECT_EQ(summary->count(), 2u);
+    EXPECT_EQ(summary->first().message_id(), 101u);
+    EXPECT_EQ(summary->latest().message_id(), 50u);
+}

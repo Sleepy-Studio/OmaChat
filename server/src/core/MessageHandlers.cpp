@@ -443,6 +443,32 @@ void ChatServer::handleSetPresence(Session& s, std::uint64_t rid, const proto::S
     replyOk(s, rid);
 }
 
+void ChatServer::handleGetUnreadSummary(Session& s, std::uint64_t rid, const proto::GetUnreadSummaryRequest& m)
+{
+    if (!limit(s, rid, s.history))
+        return;
+    const auto* channel = m_state.channel(m.channel_id());
+    if (!channel || !m_state.can(channel->id, s.userId, ViewChannel | ReadHistory)) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("channel not found"));
+        return;
+    }
+    if (!isMessageChannel(*channel)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("this channel does not accept messages"));
+        return;
+    }
+    const auto summary = m_store.unreadSummary(s.userId, channel->id);
+    if (!summary) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not read unread state"));
+        return;
+    }
+    // All mutations and persistent event publication run synchronously on this
+    // event-loop thread. No event can interleave the SQL snapshot and boundary.
+    proto::Envelope env;
+    *env.mutable_unread_summary() = *summary;
+    env.mutable_unread_summary()->set_sequence(m_events.lastSequence());
+    reply(s, rid, std::move(env));
+}
+
 void ChatServer::handleSetReadMarker(Session& s, std::uint64_t rid, const proto::SetReadMarkerRequest& m)
 {
     if (!limit(s, rid, s.history))

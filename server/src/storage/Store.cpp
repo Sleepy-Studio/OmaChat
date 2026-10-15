@@ -1216,6 +1216,55 @@ std::vector<proto::ReadMarker> Store::readMarkers(Id userId)
     return result;
 }
 
+std::optional<proto::UnreadSummary> Store::unreadSummary(Id userId, Id channelId)
+{
+    // One statement keeps marker, aggregates and positions on the same SQLite
+    // snapshot. No bodies are selected or decoded, including encrypted bodies.
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(R"(
+        WITH marker AS (
+            SELECT message_id, timestamp FROM read_markers WHERE user_id=:user AND channel_id=:channel
+        ), unread AS (
+            SELECT id, created_at, mentions, encrypted IS NOT NULL AS is_encrypted FROM messages
+            WHERE channel_id=:channel AND author_id<>:user
+              AND (NOT EXISTS(SELECT 1 FROM marker)
+                   OR (created_at,id)>(SELECT timestamp,message_id FROM marker))
+        )
+        SELECT (SELECT message_id FROM marker), (SELECT timestamp FROM marker),
+               COUNT(*), COALESCE(SUM(CASE WHEN NOT is_encrypted AND
+                   instr(' ' || mentions || ' ', :mention)>0 THEN 1 ELSE 0 END),0),
+               COALESCE(SUM(CASE WHEN is_encrypted THEN 1 ELSE 0 END),0),
+               (SELECT id FROM unread ORDER BY created_at,id LIMIT 1),
+               (SELECT created_at FROM unread ORDER BY created_at,id LIMIT 1),
+               (SELECT id FROM messages WHERE channel_id=:channel ORDER BY created_at DESC,id DESC LIMIT 1),
+               (SELECT created_at FROM messages WHERE channel_id=:channel ORDER BY created_at DESC,id DESC LIMIT 1)
+        FROM unread
+    )"));
+    q.bindValue(QStringLiteral(":user"), sid(userId));
+    q.bindValue(QStringLiteral(":channel"), sid(channelId));
+    q.bindValue(QStringLiteral(":mention"), QStringLiteral(" %1 ").arg(userId));
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    proto::UnreadSummary result;
+    result.set_channel_id(channelId);
+    auto* marker = result.mutable_marker();
+    marker->set_channel_id(channelId);
+    marker->set_message_id(uid(q.value(0)));
+    marker->set_timestamp(q.value(1).toLongLong());
+    result.set_count(q.value(2).toULongLong());
+    result.set_mentions(q.value(3).toULongLong());
+    result.set_mentions_complete(q.value(4).toULongLong() == 0);
+    if (!q.value(5).isNull()) {
+        result.mutable_first()->set_message_id(uid(q.value(5)));
+        result.mutable_first()->set_timestamp(q.value(6).toLongLong());
+    }
+    if (!q.value(7).isNull()) {
+        result.mutable_latest()->set_message_id(uid(q.value(7)));
+        result.mutable_latest()->set_timestamp(q.value(8).toLongLong());
+    }
+    return result;
+}
+
 std::optional<MessageRecord> Store::message(Id id)
 {
     QSqlQuery q(m_db);

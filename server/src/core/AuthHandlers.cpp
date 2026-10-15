@@ -85,6 +85,7 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("sessions.manage.v1");
     r->add_capabilities("messages.idempotency.v1");
     r->add_capabilities("read.markers.v1");
+    r->add_capabilities("read.summary.v1");
     r->add_capabilities("voice.ownership.v1");
     const QString instanceId = m_store.instanceId();
     if (!instanceId.isEmpty()) {

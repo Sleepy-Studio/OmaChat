@@ -138,6 +138,7 @@ private:
     proto::UserStatus statusOf(Id userId) const;
 
     // ---- handlers: auth (AuthHandlers.cpp)
+    void handleGetUnreadSummary(Session& s, std::uint64_t rid, const proto::GetUnreadSummaryRequest& m);
     void handleSetReadMarker(Session& s, std::uint64_t rid, const proto::SetReadMarkerRequest& m);
     void handleHello(Session& s, std::uint64_t rid, const proto::Hello& m);
     void handleRegister(Session& s, std::uint64_t rid, const proto::RegisterRequest& m);

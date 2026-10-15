@@ -548,6 +548,23 @@ message SendMessageRequest {
 message ReadMarker { uint64 channel_id = 1; uint64 message_id = 2; int64 timestamp = 3; }
 message SetReadMarkerRequest { uint64 channel_id = 1; uint64 message_id = 2; }
 
+// read.summary.v1: one channel per request, ViewChannel + ReadHistory required.
+message GetUnreadSummaryRequest { uint64 channel_id = 1; }
+message MessagePosition { uint64 message_id = 1; int64 timestamp = 2; }
+message UnreadSummary {
+  uint64 channel_id = 1;
+  ReadMarker marker = 2;          // present even with no saved marker (zero position)
+  uint64 count = 3;               // surviving messages after marker, excluding self
+  uint64 mentions = 4;            // explicit user mentions in unencrypted messages
+  bool mentions_complete = 5;    // false if unread encrypted bodies hide mentions
+  MessagePosition first = 6;      // first unread non-self message, absent when count=0
+  MessagePosition latest = 7;     // latest surviving message, including self
+  // Snapshot includes all persistent events through this boundary. Apply later
+  // events once. Valid only on the requesting authenticated connection; discard
+  // on reconnect/resync (sequences restart with the server process).
+  uint64 sequence = 8;
+}
+
 message EditMessageRequest {
   uint64 message_id = 1;
   string content = 2;
@@ -900,6 +917,8 @@ message Envelope {
     ReactionRequest reaction = 59;
     SetReadMarkerRequest set_read_marker = 157;
     ReadMarker read_marker = 158;
+    GetUnreadSummaryRequest get_unread_summary = 163;
+    UnreadSummary unread_summary = 164;
 
     // attachments
     BeginUploadRequest begin_upload = 60;
