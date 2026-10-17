@@ -48,6 +48,7 @@ public:
 
     // Sends an event to every client subscribed to a matching topic.
     void broadcast(const QString& event, const QJsonObject& data);
+    bool hasSubscribers(const QString& topic) const;
 
     int clientCount() const { return static_cast<int>(m_clients.size()); }
 
@@ -55,6 +56,7 @@ public:
 
 signals:
     void clientDisconnected(QLocalSocket* socket);
+    void subscriptionsChanged();
 
 private:
     friend class Responder;

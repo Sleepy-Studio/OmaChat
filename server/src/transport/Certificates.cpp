@@ -100,7 +100,7 @@ bool generateSelfSigned(
     X509_NAME_add_entry_by_txt(
         subject, "CN", MBSTRING_UTF8, reinterpret_cast<const unsigned char*>(cn.constData()), -1, -1, 0);
     X509_NAME_add_entry_by_txt(
-        subject, "O", MBSTRING_ASC, reinterpret_cast<const unsigned char*>("OmaChat"), -1, -1, 0);
+        subject, "O", MBSTRING_ASC, reinterpret_cast<const unsigned char*>("omachat"), -1, -1, 0);
     X509_set_issuer_name(cert.get(), subject);
 
     QStringList san;

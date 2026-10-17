@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run a LOCAL OmaChat build against the SAME account and hosted server as the
+# Run a LOCAL omachat build against the SAME account and hosted server as the
 # installed package, without touching /usr/bin or pacman's ownership.
 #
 # Why this exists
@@ -77,6 +77,25 @@ packaged_daemons() {
     pgrep -f '^/usr/bin/omachatd' 2>/dev/null
 }
 
+# The packaged GUI has its own single-instance socket and can stay visible
+# after its daemon is stopped. If it remains open, the local build appears to
+# have launched the "wrong" omachat even though the dev client is running.
+# Match only the packaged executable; never touch a client built from this
+# checkout.
+stop_packaged_client() {
+    local pids
+    pids="$(pgrep -f '^/usr/bin/omachat( |$)' 2>/dev/null || true)"
+    [ -n "$pids" ] || return 0
+    say "closing packaged omachat client (pids: $(printf '%s' "$pids" | tr '\n' ' '))"
+    kill $pids 2>/dev/null || true
+    local i
+    for i in $(seq 1 20); do
+        pgrep -f '^/usr/bin/omachat( |$)' >/dev/null 2>&1 || return 0
+        sleep 0.1
+    done
+    say "packaged omachat did not close cleanly; local client may be hidden by the old window" >&2
+}
+
 require_build() {
     [ -x "$CLIENT_BIN" ] || die "no client build at $CLIENT_BIN -- run: cmake --build $BUILD"
     [ -x "$DAEMON_BIN" ] || die "no daemon build at $DAEMON_BIN -- run: cmake --build $BUILD"
@@ -90,6 +109,12 @@ daemon_pid() {
     local pid; pid="$(cat "$DEV_PIDFILE" 2>/dev/null || true)"
     [ -n "$pid" ] || return 1
     kill -0 "$pid" 2>/dev/null || return 1
+    # The development checkout can move while its daemon keeps running. A
+    # stale daemon may still own DEV_SOCKET, so recognize it by its command
+    # line and let start_daemon replace it with this checkout's binary.
+    local cmdline
+    cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+    [[ "$cmdline" == *omachatd*"--socket $DEV_SOCKET"* ]] || return 1
     printf '%s\n' "$pid"
 }
 
@@ -114,8 +139,23 @@ ensure_runtime() {
 start_daemon() {
     require_build
     if pid="$(daemon_pid)"; then
-        say "dev daemon already running (pid $pid)"
-        return 0
+        local running_exe expected_exe
+        running_exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+        expected_exe="$(readlink -f "$DAEMON_BIN")"
+        if [ "$running_exe" = "$expected_exe" ]; then
+            say "dev daemon already running (pid $pid)"
+            return 0
+        fi
+        say "replacing dev daemon from moved checkout: ${running_exe:-unknown}"
+        kill "$pid" 2>/dev/null || true
+        for _ in $(seq 1 25); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.2
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+        rm -f "$DEV_PIDFILE"
     fi
     ensure_runtime
 
@@ -173,11 +213,17 @@ start_client() {
     require_build
     daemon_pid >/dev/null || die "dev daemon is not running -- use: scripts/dev-instance.sh start"
     ensure_runtime
+    stop_packaged_client
 
     # This maps a real window. It is only ever reached from the `start` and
     # `client` subcommands, which exist so the USER looks at their own app.
     say "launching local client (runtime $DEV_RUNTIME)"
+    # UWSM may provide a reduced environment. Carry the omachat-only theme
+    # explicitly so the dev client keeps the user's themed appearance instead
+    # of silently falling back to its built-in palette.
+    local theme_file="${OMACHAT_THEME_FILE:-$HOME/.config/omachat/theme.toml}"
     env XDG_RUNTIME_DIR="$DEV_RUNTIME" OMACHAT_SOCKET="$DEV_SOCKET" \
+        OMACHAT_THEME_FILE="$theme_file" \
         "$CLIENT_BIN" "$@" >"$DEV_ROOT/client.log" 2>&1 &
     local cpid=$!
     sleep 1.5
@@ -196,6 +242,38 @@ start_client() {
     fi
     say "local client running (pid $cpid) -- log: $DEV_ROOT/client.log"
     say "confirm in the window: same account, same server, same channels."
+}
+
+# Keep the launcher process attached to the GUI. Omarchy starts menu actions
+# inside a UWSM scope, which stops background children when the action exits.
+# The menu's `start` action therefore uses this foreground variant; `client`
+# keeps the detached behavior for terminal-driven development workflows.
+start_client_foreground() {
+    require_build
+    daemon_pid >/dev/null || die "dev daemon is not running -- use: scripts/dev-instance.sh start"
+    ensure_runtime
+    stop_packaged_client
+
+    say "launching local client (runtime $DEV_RUNTIME)"
+    local theme_file="${OMACHAT_THEME_FILE:-$HOME/.config/omachat/theme.toml}"
+    env XDG_RUNTIME_DIR="$DEV_RUNTIME" OMACHAT_SOCKET="$DEV_SOCKET" \
+        OMACHAT_THEME_FILE="$theme_file" \
+        "$CLIENT_BIN" "$@" >"$DEV_ROOT/client.log" 2>&1 &
+    local cpid=$!
+    local i
+    for i in $(seq 1 50); do
+        if ! kill -0 "$cpid" 2>/dev/null; then
+            say "--- client log ---"; cat "$DEV_ROOT/client.log" >&2 || true
+            die "local client exited during startup"
+        fi
+        if hyprctl clients -j 2>/dev/null | jq -e --arg pid "$cpid" \
+            'any(.[]; .class == "org.omarchy.OmaChat" and (.pid | tostring) == $pid)' >/dev/null; then
+            hyprctl eval 'hl.dispatch(hl.dsp.focus({ window = "class:org.omarchy.OmaChat" }))' >/dev/null
+            break
+        fi
+        sleep 0.2
+    done
+    wait "$cpid"
 }
 
 # The client dies when PipeWire is unavailable or restarting, so a bare
@@ -306,7 +384,7 @@ do_check() {
 }
 
 case "${1:-status}" in
-    start)   start_daemon; shift; start_client "$@" ;;
+    start)   start_daemon; shift; start_client_foreground "$@" ;;
     daemon)  start_daemon ;;
     client)  shift; start_client "$@" ;;
     stop)    stop_all ;;

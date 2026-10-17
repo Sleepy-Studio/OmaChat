@@ -11,7 +11,7 @@ CERT_PATH="$DATA_DIR/cert.pem"
 KEY_PATH="$DATA_DIR/key.pem"
 
 # All optional; sane defaults make the bare `docker run` case work.
-: "${OMACHAT_NAME:=OmaChat}"
+: "${OMACHAT_NAME:=omachat}"
 : "${OMACHAT_HOSTNAME:=localhost}"   # what clients connect to; goes in the cert
 : "${OMACHAT_PORT:=6473}"
 : "${OMACHAT_MEDIA_PORT:=6474}"

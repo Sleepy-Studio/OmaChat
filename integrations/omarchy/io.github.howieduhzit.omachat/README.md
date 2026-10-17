@@ -1,11 +1,11 @@
-# OmaChat for the Omarchy bar
+# omachat for the Omarchy bar
 
-Shows your OmaChat voice channel and speaker count in the bar, with a compact
-panel for mute, deafen, leave and "open OmaChat".
+Shows your omachat voice channel and speaker count in the bar, with a compact
+panel for mute, deafen, leave and "open omachat".
 
 - Left click: open the panel (`m` mute, `d` deafen, `l` leave, `o` open app, `Esc` close)
 - Middle click: toggle mute
-- Right click: open OmaChat
+- Right click: open omachat
 
 The widget talks to `omachatd` over its per-user socket
 (`$XDG_RUNTIME_DIR/omachat/omachat.sock`) and receives pushed status events —

@@ -11,7 +11,16 @@ namespace omachat::client {
 // messages is displayed literally and can never inject markup.
 //
 // Supported: **bold**, *italic*, ~~strike~~, `inline code`, ```code blocks```,
-// > quotes, http(s)/omachat URLs, and @mentions / #channels highlighting.
+// > quotes, http(s)/omachat/omatube URLs, and @mentions / #channels highlighting.
+//
+// The scheme list is duplicated in two places in MarkdownRenderer.cpp -- the
+// `isSafeUrl` allowlist and the `urlRe` alternation -- and they must stay
+// identical. A scheme present in only one is silently broken. check-omatubelink.py
+// compares them.
+//
+// `omatube` links are click-only: rendering one never opens anything, and
+// clicking hands it to the desktop via QDesktopServices. OmaChat does not
+// fetch media.
 struct MarkdownPalette {
     QColor codeBackground{0x22, 0x22, 0x22};
     QColor codeText{0xdd, 0xdd, 0xdd};

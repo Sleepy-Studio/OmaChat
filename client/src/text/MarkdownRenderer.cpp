@@ -40,7 +40,16 @@ bool MarkdownRenderer::isSafeUrl(const QString& url)
     if (!u.isValid())
         return false;
     const QString scheme = u.scheme().toLower();
-    return scheme == u"https" || scheme == u"http" || scheme == u"omachat";
+    // `omatube` is here so a share link posted in a channel renders as a
+    // clickable link instead of a wall of base64. It is deliberately in the
+    // same allowlist as http(s) and omachat rather than special-cased later:
+    // this function is the single gate on what becomes an <a href>, so a
+    // scheme that is not listed can never be turned into a link at all.
+    //
+    // Clicking it does NOT download anything. AppController::openLink hands it
+    // to the desktop, which starts omatube, and *omatube* decides what to do
+    // with it. OmaChat carries a string; it never fetches media.
+    return scheme == u"https" || scheme == u"http" || scheme == u"omachat" || scheme == u"omatube";
 }
 
 namespace {
@@ -104,7 +113,14 @@ QString MarkdownRenderer::renderInline(const QString& raw, const QString& selfUs
     }
 
     // 2. URLs (only safe schemes become links).
-    static const QRegularExpression urlRe(QStringLiteral(R"(\b((?:https?|omachat)://[^\s<>"'`]+[^\s<>"'`.,;:!?)\]]))"),
+    //
+    // `omatube` is in the alternation because isSafeUrl admits it; the two must
+    // agree. Adding a scheme to only one of them is the bug this comment exists
+    // to prevent: an allowlisted scheme the regex never matches is silently dead
+    // code, and a regex match that isSafeUrl rejects is emitted as plain text.
+    // check-omatubelink.py asserts the two lists are identical.
+    static const QRegularExpression urlRe(
+        QStringLiteral(R"(\b((?:https?|omachat|omatube)://[^\s<>"'`]+[^\s<>"'`.,;:!?)\]]))"),
         QRegularExpression::CaseInsensitiveOption);
     {
         QString out;

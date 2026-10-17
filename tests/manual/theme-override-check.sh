@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Headless check for the OmaChat-local theme override.
+# Headless check for the omachat-local theme override.
 #
 # Proves the local theme file wins over the Omarchy one: it renders the client
 # offscreen with each of three setups and compares the background pixel of the
@@ -52,7 +52,7 @@ render() { # $1=out png, rest=env assignments handled by caller via globals
         $EXTRA_ENV "$BIN" --screenshot "$1" >"$WORK/log" 2>&1
 }
 
-# Average RGB of the whole image; OmaChat's window is a single flat-ish surface
+# Average RGB of the whole image; omachat's window is a single flat-ish surface
 # so the mean is dominated by the background.
 bg_of() {
     python3 - "$1" <<'PY'

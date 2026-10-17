@@ -6,13 +6,22 @@
 #include "text/CommandParser.hpp"
 
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDesktopServices>
+#include <QDir>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonArray>
+#include <QJsonDocument>
+#include <QLocalSocket>
+#include <QProcessEnvironment>
+#include <QStandardPaths>
+#include <QTimer>
 #include <QUrl>
 
 #include <algorithm>
+#include <memory>
 
 namespace omachat::client {
 
@@ -46,6 +55,129 @@ void AppController::removeAccount(const QString& accountId)
 {
     call(
         QStringLiteral("account.remove"), {{"account", accountId.toLongLong()}}, nullptr, tr("Could not remove account"));
+}
+
+void AppController::refreshOmkaonInbox()
+{
+    m_link.request(QStringLiteral("omkaon.inbox.list"), {}, [this](const ipc::Reply& reply) {
+        if (!reply.ok) {
+            showNotice(tr("Could not load omkaon inbox: %1").arg(reply.errorMessage), true);
+            return;
+        }
+        QVariantList messages;
+        for (const auto& value : reply.result.value(QStringLiteral("messages")).toArray())
+            messages.append(value.toObject().toVariantMap());
+        m_omkaonInbox = std::move(messages);
+        emit omkaonInboxChanged();
+    });
+}
+
+void AppController::deleteOmkaonInboxMessage(const QString& messageId)
+{
+    m_link.request(QStringLiteral("omkaon.inbox.delete"), {{"message_id", messageId}}, [this](const ipc::Reply& reply) {
+        if (!reply.ok) {
+            showNotice(tr("Could not delete omkaon message: %1").arg(reply.errorMessage), true);
+            return;
+        }
+        refreshOmkaonInbox();
+    });
+}
+
+void AppController::requestOmkaonDiscordControl(const QString& method, const QJsonObject& params)
+{
+    if (m_omkaonDiscordBusy)
+        return;
+    m_omkaonDiscordBusy = true;
+    m_omkaonDiscordError.clear();
+    emit omkaonDiscordChanged();
+
+    QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (runtime.isEmpty())
+        runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    if (runtime.isEmpty()) {
+        m_omkaonDiscordBusy = false;
+        m_omkaonDiscordError = tr("The user runtime directory is not available.");
+        emit omkaonDiscordChanged();
+        return;
+    }
+    const QString socketPath = QDir(runtime).filePath(QStringLiteral("omkaon/discord-control.sock"));
+    auto* socket = new QLocalSocket(this);
+    auto* timer = new QTimer(socket);
+    timer->setSingleShot(true);
+    auto completed = std::make_shared<bool>(false);
+    auto finish = [this, socket, timer, completed](const QString& error = QString()) {
+        if (*completed)
+            return;
+        *completed = true;
+        timer->stop();
+        if (socket->state() != QLocalSocket::UnconnectedState)
+            socket->abort();
+        m_omkaonDiscordBusy = false;
+        m_omkaonDiscordError = error;
+        emit omkaonDiscordChanged();
+        socket->deleteLater();
+    };
+    connect(timer, &QTimer::timeout, socket, [finish] { finish(QObject::tr("The local omkaon bot did not respond.")); });
+    connect(socket, &QLocalSocket::connected, socket, [socket, method, params] {
+        QJsonObject request{{QStringLiteral("v"), 1}, {QStringLiteral("method"), method}};
+        if (!params.isEmpty())
+            request.insert(QStringLiteral("params"), params);
+        socket->write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
+    });
+    connect(socket, &QLocalSocket::readyRead, socket, [this, socket, finish] {
+        if (!socket->canReadLine())
+            return;
+        const QByteArray line = socket->readLine();
+        QJsonParseError parseError;
+        const auto document = QJsonDocument::fromJson(line, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            finish(QObject::tr("The local omkaon bot returned an invalid response."));
+            return;
+        }
+        const QJsonObject response = document.object();
+        if (response.value(QStringLiteral("v")).toInt() != 1) {
+            finish(QObject::tr("The local omkaon bot uses an incompatible control protocol."));
+            return;
+        }
+        if (!response.value(QStringLiteral("ok")).toBool()) {
+            const QString message = response.value(QStringLiteral("error")).toObject()
+                                        .value(QStringLiteral("message")).toString();
+            finish(message.isEmpty() ? QObject::tr("The local omkaon bot rejected the request.") : message);
+            return;
+        }
+        m_omkaonDiscordStatus = response.value(QStringLiteral("result")).toObject().toVariantMap();
+        finish();
+    });
+    connect(socket, &QLocalSocket::errorOccurred, socket, [socket, finish](QLocalSocket::LocalSocketError) {
+        finish(QObject::tr("Cannot reach the local omkaon bot: %1").arg(socket->errorString()));
+    });
+    timer->start(30000);
+    socket->connectToServer(socketPath);
+}
+
+void AppController::refreshOmkaonDiscord()
+{
+    requestOmkaonDiscordControl(QStringLiteral("status"));
+}
+
+void AppController::selectOmkaonDiscordGuild(const QString& guildId)
+{
+    requestOmkaonDiscordControl(QStringLiteral("guild.select"), {{QStringLiteral("guild_id"), guildId}});
+}
+
+void AppController::startOmkaonDiscordBridge()
+{
+    requestOmkaonDiscordControl(QStringLiteral("bridge.start"));
+}
+
+void AppController::stopOmkaonDiscordBridge()
+{
+    requestOmkaonDiscordControl(QStringLiteral("bridge.stop"));
+}
+
+void AppController::leaveOmkaonDiscordVoice()
+{
+    requestOmkaonDiscordControl(QStringLiteral("voice.leave"));
 }
 
 void AppController::login(const QString& host, int port, const QString& username, const QString& password,
@@ -567,6 +699,27 @@ void AppController::openLink(const QString& url)
         QDesktopServices::openUrl(u);
         return;
     }
+    if (scheme == u"omatube") {
+        // A share link posted in a channel. Hand it to the desktop, which
+        // starts omatube (or hands the URL to the instance already running).
+        //
+        // OmaChat does **not** download anything here, and never will: it has no
+        // yt-dlp, no library and no media pipeline. It passes a string to
+        // whoever registered `x-scheme-handler/omatube`, and omatube decides
+        // what that string means. Keeping the fetch in one app is the entire
+        // reason a share is "a trigger, not a transfer".
+        //
+        // Because that starts another application, this raises a window and
+        // takes focus. It is reachable ONLY from a deliberate click on the link
+        // -- never from rendering a message, and never automatically -- so the
+        // focus change is the user asking for it.
+        if (!QDesktopServices::openUrl(u)) {
+            showNotice(tr("omatube is not installed, or does not handle its links"), true);
+            return;
+        }
+        showNotice(tr("Opening in omatube"));
+        return;
+    }
     showNotice(tr("Blocked a link with an unsupported scheme (%1)").arg(scheme), true);
 }
 
@@ -665,6 +818,67 @@ void AppController::pushToTalk(bool pressed)
 void AppController::setInputMode(const QString& mode)
 {
     call(QStringLiteral("voice.mode"), {{"mode", mode}});
+}
+
+void AppController::speakVoiceboard(const QString& text, bool monitor)
+{
+    const QString message = text.trimmed();
+    if (message.isEmpty() || m_voiceboardBusy)
+        return;
+    if (!voiceJoined()) {
+        showNotice(tr("Join a voice channel before speaking."), true);
+        return;
+    }
+
+    QString bridge = qEnvironmentVariable("OMACHAT_VOICEBOX_BRIDGE");
+    const QStringList candidates{
+        bridge,
+        QDir::current().filePath(QStringLiteral("integrations/voicebox/omavb")),
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("../../integrations/voicebox/omavb")),
+        QStandardPaths::findExecutable(QStringLiteral("omavb"))};
+    bridge.clear();
+    for (const auto& candidate : candidates) {
+        if (!candidate.isEmpty() && QFileInfo::exists(candidate)) {
+            bridge = QFileInfo(candidate).canonicalFilePath();
+            break;
+        }
+    }
+    if (bridge.isEmpty()) {
+        showNotice(tr("Voicebox bridge not found."), true);
+        return;
+    }
+
+    QString socket = qEnvironmentVariable("OMACHAT_SOCKET", QStringLiteral("/tmp/omachat-dev/omachat.sock"));
+    QStringList args{
+        QStringLiteral("--socket"), socket,
+        QStringLiteral("--profile"), QStringLiteral("Omatube E2E Test Voice Normalized"),
+        QStringLiteral("--engine"), QStringLiteral("qwen"),
+        QStringLiteral("--model-size"), QStringLiteral("0.6B")};
+    if (monitor)
+        args << QStringLiteral("--monitor");
+    args << message;
+
+    m_voiceboardBusy = true;
+    m_voiceboardStatus = tr("Generating and sending…");
+    emit voiceboardChanged();
+    m_voiceboardProcess.setProgram(bridge);
+    m_voiceboardProcess.setArguments(args);
+    m_voiceboardProcess.setWorkingDirectory(QFileInfo(bridge).absolutePath());
+    connect(&m_voiceboardProcess, &QProcess::finished, this,
+        [this](int code, QProcess::ExitStatus status) {
+            m_voiceboardBusy = false;
+            m_voiceboardStatus = status == QProcess::NormalExit && code == 0
+                ? tr("Sent through voice")
+                : tr("Voiceboard failed");
+            emit voiceboardChanged();
+        }, Qt::UniqueConnection);
+    connect(&m_voiceboardProcess, &QProcess::errorOccurred, this,
+        [this](QProcess::ProcessError) {
+            m_voiceboardBusy = false;
+            m_voiceboardStatus = tr("Could not start Voicebox");
+            emit voiceboardChanged();
+        }, Qt::UniqueConnection);
+    m_voiceboardProcess.start();
 }
 
 // ---------------------------------------------------------- screen sharing
@@ -1264,6 +1478,8 @@ void AppController::setNotification(const QString& key, bool enabled)
 {
     if (key == u"messages")
         m_config.notifications.messages = enabled;
+    else if (key == u"channel_messages")
+        m_config.notifications.channelMessages = enabled;
     else if (key == u"mentions")
         m_config.notifications.mentions = enabled;
     else if (key == u"voice_join")

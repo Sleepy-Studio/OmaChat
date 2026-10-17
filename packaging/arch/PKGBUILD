@@ -18,7 +18,7 @@ pkgver=0.2.2
 pkgrel=1
 pkgdesc="Native voice, text and screen chat for Omarchy and Linux (client, daemon, CLI and self-hostable server)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/Sleepy-Studio/OmaChat"
+url="https://github.com/Sleepy-Studio/omachat"
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'qt6-multimedia' 'qtkeychain-qt6' 'protobuf' 'abseil-cpp'
          'libsodium' 'opus' 'libpipewire' 'openssl' 'tomlplusplus' 'rnnoise' 'ffmpeg' 'hicolor-icon-theme')
@@ -40,7 +40,7 @@ _src() {
     if [[ -n ${OMACHAT_SRC:-} ]]; then
         echo "${OMACHAT_SRC}"
     else
-        echo "${srcdir}/OmaChat"
+        echo "${srcdir}/omachat"
     fi
 }
 

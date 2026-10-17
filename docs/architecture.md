@@ -1,6 +1,6 @@
 # Architecture
 
-OmaChat is four native programs plus an optional shell plugin.
+omachat is four native programs plus an optional shell plugin.
 
 ```text
                   omachat-server  (self-hosted)

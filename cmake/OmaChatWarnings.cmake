@@ -1,4 +1,4 @@
-# Shared warning configuration for OmaChat-owned targets.
+# Shared warning configuration for omachat-owned targets.
 function(omachat_set_warnings target)
     target_compile_options(${target} PRIVATE
         -Wall -Wextra -Wpedantic -Wshadow -Wnon-virtual-dtor

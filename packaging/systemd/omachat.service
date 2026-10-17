@@ -1,6 +1,6 @@
 [Unit]
-Description=OmaChat Communication Service
-Documentation=https://github.com/Sleepy-Studio/OmaChat
+Description=omachat Communication Service
+Documentation=https://github.com/Sleepy-Studio/omachat
 After=pipewire.service
 Wants=pipewire.service
 

@@ -21,7 +21,7 @@ The later phases remain proposals. They have not been implemented by this increm
 
 ## Baseline before this increment
 
-OmaChat has text and voice channels, one level of categories, stored positions,
+omachat has text and voice channels, one level of categories, stored positions,
 topics, role/member permission overrides, local category collapse and channel
 mute, and server-side create/update/delete. The GUI can create channels and
 categories, set a topic, edit overrides, mute, and delete. It has no channel

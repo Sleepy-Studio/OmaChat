@@ -10,7 +10,7 @@
 namespace omachat::daemon {
 
 // Boundary to the system secret store. Refresh tokens never touch disk in
-// OmaChat's own files, logs or IPC.
+// omachat's own files, logs or IPC.
 class ICredentialStore {
 public:
     virtual ~ICredentialStore() = default;

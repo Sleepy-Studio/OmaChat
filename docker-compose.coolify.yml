@@ -1,9 +1,9 @@
-# Coolify Git-based Docker Compose application for the OmaChat server.
+# Coolify Git-based Docker Compose application for the omachat server.
 # Set Base Directory to / and Docker Compose Location to /docker-compose.coolify.yml.
 # The image is built and published to GHCR by .github/workflows/docker.yml;
 # Coolify pulls it rather than building source code.
 #
-# OmaChat serves its own TLS over TCP and media over UDP. Neither protocol
+# omachat serves its own TLS over TCP and media over UDP. Neither protocol
 # belongs behind Coolify's HTTP proxy, so expose both ports directly. Coolify
 # generates the hostname below from its server wildcard domain (or sslip.io).
 # Its HTTP proxy route is unused: clients connect to that hostname on TCP 6473.
@@ -14,7 +14,7 @@ services:
 
     # Use the same host:container form as Coolify's own Compose examples.
     # These are direct host ports; the generated HTTP domain does not carry
-    # OmaChat's TLS control connection or UDP media.
+    # omachat's TLS control connection or UDP media.
     ports:
       - "${OMACHAT_PORT:-6473}:${OMACHAT_PORT:-6473}/tcp"
       - "${OMACHAT_MEDIA_PORT:-6474}:${OMACHAT_MEDIA_PORT:-6474}/udp"
@@ -29,7 +29,7 @@ services:
     # omachat-server becomes OMACHAT_SERVER in the magic variable.
     environment:
       OMACHAT_HOSTNAME: ${SERVICE_FQDN_OMACHAT_SERVER}
-      OMACHAT_NAME: ${OMACHAT_NAME:-OmaChat}
+      OMACHAT_NAME: ${OMACHAT_NAME:-omachat}
       OMACHAT_PORT: ${OMACHAT_PORT:-6473}
       OMACHAT_MEDIA_PORT: ${OMACHAT_MEDIA_PORT:-6474}
       OMACHAT_REGISTRATION_OPEN: ${OMACHAT_REGISTRATION_OPEN:-true}

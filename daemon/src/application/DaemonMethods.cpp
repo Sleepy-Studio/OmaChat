@@ -14,12 +14,14 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QByteArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QMimeDatabase>
 #include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QUuid>
 
 namespace omachat::daemon {
 
@@ -507,7 +509,9 @@ void Daemon::registerMethods()
     m[QStringLiteral("daemon.status")] = [this](const QJsonObject&, const Responder& r) { r.ok(statusJson()); };
     m[QStringLiteral("daemon.version")] = [](const QJsonObject&, const Responder& r) {
         r.ok({{"version", QString::fromLatin1(kVersion)}, {"ipc", kIpcVersion},
-            {"protocol_major", int(kProtocolMajor)}});
+            {"protocol_major", int(kProtocolMajor)},
+            {"features", QJsonArray{QStringLiteral("voice.speech_chunk"), QStringLiteral("voice.audio"),
+                QStringLiteral("omkaon.inbox.v1")}}});
     };
     m[QStringLiteral("state.snapshot")] = [this, model](const QJsonObject&, const Responder& r) {
         QJsonObject snap = model->snapshotJson();
@@ -1069,7 +1073,7 @@ void Daemon::registerMethods()
         if (!requireConnected(r))
             return;
         if (!m_conn->capabilities().contains(QStringLiteral("discord.import"))) {
-            r.error(e::BadRequest, QStringLiteral("this OmaChat server does not support Discord imports yet"));
+            r.error(e::BadRequest, QStringLiteral("this omachat server does not support Discord imports yet"));
             return;
         }
         const auto name = validation::serverName(p.value(QStringLiteral("name")).toString());
@@ -1529,6 +1533,61 @@ void Daemon::registerMethods()
         sendMessage(cid, p.value(QStringLiteral("content")).toString(), idFromJson(p.value(QStringLiteral("reply_to"))),
             p.value(QStringLiteral("action")).toBool(false), files, r);
     };
+    // Local-only bridge endpoint. The caller must already have decrypted the
+    // portal envelope on this same-user machine. Do not log the message body.
+    m[QStringLiteral("omkaon.inbox.deliver")] = [this](const QJsonObject& p, const Responder& r) {
+        const QString messageId = p.value(QStringLiteral("message_id")).toString();
+        const QString sender = p.value(QStringLiteral("sender")).toString().trimmed();
+        const QString content = p.value(QStringLiteral("content")).toString();
+        const QString kind = p.value(QStringLiteral("kind")).toString(QStringLiteral("message"));
+        const QString replyTo = p.value(QStringLiteral("reply_to")).toString().trimmed();
+        if (QUuid::fromString(messageId).isNull() || sender.size() > 80 || content.trimmed().isEmpty()
+            || content.size() > 2000 || (kind != QStringLiteral("message") && kind != QStringLiteral("call_request"))
+            || replyTo.size() > 200) {
+            r.error(e::BadRequest, QStringLiteral("portal sender or message is invalid"));
+            return;
+        }
+        bool inserted = false;
+        if (!m_store.addOmkaonInboxMessage(messageId, sender, content, kind, replyTo, &inserted)) {
+            r.error(e::StorageError, QStringLiteral("could not save portal message to local inbox"));
+            return;
+        }
+        if (inserted) {
+            QString safeSender;
+            for (const QChar ch : sender)
+                if (ch.isPrint())
+                    safeSender.append(ch);
+            const QString title = safeSender.isEmpty() ? QStringLiteral("omkaon message")
+                                                       : QStringLiteral("omkaon · %1").arg(safeSender);
+            if (m_options.notifications && m_config.notifications.messages && m_notifier.available())
+                m_notifier.notify(title, kind == QStringLiteral("call_request") ? QStringLiteral("Voice call request")
+                                                                                 : QStringLiteral("New portal message"),
+                    QStringLiteral("im.received"));
+            m_ipc.broadcast(QStringLiteral("omkaon.inbox.received"), {{"id", messageId}});
+        }
+        r.ok({{"stored", true}, {"duplicate", !inserted}});
+    };
+    m[QStringLiteral("omkaon.inbox.list")] = [this](const QJsonObject&, const Responder& r) {
+        QJsonArray messages;
+        for (const auto& message : m_store.omkaonInboxMessages()) {
+            messages.append(QJsonObject{{"id", message.id}, {"sender", message.sender}, {"content", message.content},
+                {"received_at", static_cast<qint64>(message.receivedAt)}, {"kind", message.kind},
+                {"reply_to", message.replyTo}});
+        }
+        r.ok({{"messages", messages}});
+    };
+    m[QStringLiteral("omkaon.inbox.delete")] = [this](const QJsonObject& p, const Responder& r) {
+        const QString messageId = p.value(QStringLiteral("message_id")).toString();
+        if (QUuid::fromString(messageId).isNull()) {
+            r.error(e::BadRequest, QStringLiteral("invalid portal message id"));
+            return;
+        }
+        if (!m_store.deleteOmkaonInboxMessage(messageId)) {
+            r.error(e::StorageError, QStringLiteral("could not delete portal message"));
+            return;
+        }
+        r.ok({{"deleted", true}});
+    };
     // One step for scripts: opens the conversation and sends into it.
     m[QStringLiteral("dm.send")] = [this, model](const QJsonObject& p, const Responder& r) {
         const Id uid = userParam(p, r);
@@ -1922,6 +1981,27 @@ void Daemon::registerMethods()
         r.ok({{"ptt", false}});
     };
 
+    m[QStringLiteral("voice.speech_chunk")] = [this](const QJsonObject& p, const Responder& r) {
+        if (!m_voice || !m_voice->active()) {
+            r.error(e::BadRequest, QStringLiteral("not in a voice channel"));
+            return;
+        }
+        const QByteArray raw = QByteArray::fromBase64(p.value(QStringLiteral("pcm_f32le")).toString().toLatin1());
+        if (raw.isEmpty() || raw.size() % static_cast<int>(sizeof(float)) != 0) {
+            r.error(e::BadRequest, QStringLiteral("pcm_f32le must be base64 float32 mono PCM"));
+            return;
+        }
+        const auto* samples = reinterpret_cast<const float*>(raw.constData());
+        const std::size_t count = static_cast<std::size_t>(raw.size()) / sizeof(float);
+        const std::size_t pushed = m_voice->enqueueSpeech(
+            std::span<const float>(samples, count), p.value(QStringLiteral("final")).toBool());
+        if (pushed != count) {
+            r.error(e::BadRequest, QStringLiteral("speech queue is full"));
+            return;
+        }
+        r.ok({{"queued", static_cast<double>(pushed)}});
+    };
+
     // -------------------------------------------------------------- audio
     m[QStringLiteral("audio.devices")] = [this](const QJsonObject&, const Responder& r) {
         QJsonArray inputs, outputs;
@@ -2217,6 +2297,7 @@ void Daemon::registerMethods()
         r.ok({{"path", m_options.configPath},
             {"notifications",
                 QJsonObject{{"messages", m_config.notifications.messages},
+                    {"channel_messages", m_config.notifications.channelMessages},
                     {"mentions", m_config.notifications.mentions}, {"voice_join", m_config.notifications.voiceJoin}}},
             {"ui",
                 QJsonObject{{"compact_mode", m_config.ui.compactMode}, {"scale", m_config.ui.scale},
@@ -2226,6 +2307,7 @@ void Daemon::registerMethods()
     m[QStringLiteral("config.set_notifications")] = [this](const QJsonObject& p, const Responder& r) {
         auto& n = m_config.notifications;
         n.messages = p.value(QStringLiteral("messages")).toBool(n.messages);
+        n.channelMessages = p.value(QStringLiteral("channel_messages")).toBool(n.channelMessages);
         n.mentions = p.value(QStringLiteral("mentions")).toBool(n.mentions);
         n.voiceJoin = p.value(QStringLiteral("voice_join")).toBool(n.voiceJoin);
         QString err;

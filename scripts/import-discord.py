@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline import of DiscordChatExporter JSON channels into one OmaChat server."""
+"""Offline import of DiscordChatExporter JSON channels into one omachat server."""
 
 import argparse
 import hashlib
@@ -71,9 +71,9 @@ def load_exports(paths):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", required=True, type=Path, help="OmaChat SQLite database")
-    parser.add_argument("--files", required=True, type=Path, help="OmaChat files directory")
-    parser.add_argument("--server-id", required=True, type=int, help="existing OmaChat server ID")
+    parser.add_argument("--db", required=True, type=Path, help="omachat SQLite database")
+    parser.add_argument("--files", required=True, type=Path, help="omachat files directory")
+    parser.add_argument("--server-id", required=True, type=int, help="existing omachat server ID")
     parser.add_argument("--apply", action="store_true", help="write changes (default: dry run)")
     parser.add_argument("exports", nargs="+", type=Path, help="DiscordChatExporter JSON channel files")
     args = parser.parse_args()
@@ -86,16 +86,16 @@ def main():
     if version != 6:
         raise ValueError(f"database schema is {version}; start the updated server once to migrate it to 6")
     if not db.execute("SELECT 1 FROM servers WHERE id=?", (args.server_id,)).fetchone():
-        raise ValueError("target OmaChat server does not exist")
+        raise ValueError("target omachat server does not exist")
     count = sum(len(messages) for _, _, messages in exports)
-    print(f"{len(exports)} channel export(s), {count} message(s) -> OmaChat server {args.server_id}")
+    print(f"{len(exports)} channel export(s), {count} message(s) -> omachat server {args.server_id}")
     if not args.apply:
         print("Dry run only. Stop omachat-server and repeat with --apply to import.")
         return
 
     copied = []
     now = int(time.time() * 1000)
-    # OmaChat's epoch is 2025-01-01, and node 1023 is reserved for this
+    # omachat's epoch is 2025-01-01, and node 1023 is reserved for this
     # offline import. Advancing past existing ids also avoids a collision if
     # the server itself happens to use that node.
     next_id = max((max(now - 1735689600000, 0) << 22) | (1023 << 12), *(
@@ -108,7 +108,7 @@ def main():
         result = next_id
         next_id += 1
         if result >= 2**63:
-            raise ValueError("OmaChat ID space exhausted")
+            raise ValueError("omachat ID space exhausted")
         return result
 
     def mapped(kind, discord_id):

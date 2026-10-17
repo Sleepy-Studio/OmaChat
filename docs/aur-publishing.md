@@ -38,7 +38,7 @@ login on the AUR website):
 ```bash
 git clone ssh://aur@aur.archlinux.org/omachat.git /tmp/omachat-aur
 cd /tmp/omachat-aur
-cp /path/to/OmaChat/packaging/arch/PKGBUILD .
+cp /path/to/omachat/packaging/arch/PKGBUILD .
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
 git commit -m "Initial import: omachat 0.2.0"
@@ -57,7 +57,7 @@ After tagging a new version in the main repo (see `docs/status.md` →
 ```bash
 cd /tmp/omachat-aur
 git pull
-cp /path/to/OmaChat/packaging/arch/PKGBUILD .   # pkgver already bumped there
+cp /path/to/omachat/packaging/arch/PKGBUILD .   # pkgver already bumped there
 makepkg --printsrcinfo > .SRCINFO
 git add PKGBUILD .SRCINFO
 git commit -m "Update to $(grep -m1 pkgver PKGBUILD | cut -d= -f2)"

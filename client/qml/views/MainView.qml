@@ -149,6 +149,15 @@ Item {
             id: bottomBar
             Layout.fillWidth: true
             onOpenSettings: settingsDialog.open()
+            onOpenVoiceboard: voiceboardDialog.open()
+            onOpenOmkaonInbox: {
+                App.refreshOmkaonInbox()
+                omkaonInbox.open()
+            }
+            onOpenOmkaonDiscord: {
+                App.refreshOmkaonDiscord()
+                omkaonDiscord.open()
+            }
         }
     }
 
@@ -180,6 +189,11 @@ Item {
     Shortcut {
         sequence: App.shortcuts["search"] || "Ctrl+F"
         onActivated: searchPanel.open()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+V"
+        enabled: App.voiceJoined
+        onActivated: voiceboardDialog.open()
     }
     Shortcut {
         sequence: App.shortcuts["command_help"] || "Ctrl+/"
@@ -253,11 +267,14 @@ Item {
         exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationMs } }
     }
     QuickSwitcher { id: switcher }
+    OmkaonInboxDialog { id: omkaonInbox }
+    OmkaonDiscordDialog { id: omkaonDiscord }
     SettingsDialog { id: settingsDialog }
     CommandHelp { id: commandHelp }
     SearchPanel { id: searchPanel }
     ServerSettingsDialog { id: serverSettings }
     InstanceConsoleDialog { id: instanceConsole }
+    VoiceboardDialog { id: voiceboardDialog }
     Connections {
         target: rail
         function onOpenInstanceConsole() { instanceConsole.open() }

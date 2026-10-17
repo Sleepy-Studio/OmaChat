@@ -66,3 +66,17 @@ jobs:
               assert os.path.isfile(f"{d}/{ep}") and not os.path.islink(f"{d}/{ep}")
           print("manifest ok")
           PY
+
+  omatube-links:
+    # The omatube:// scheme is declared in TWO places (MarkdownRenderer's
+    # isSafeUrl allowlist and the urlRe alternation) plus a handler in
+    # AppActions. A mismatch between them is silent -- an allowlisted scheme the
+    # regex never matches does nothing, and a matched scheme isSafeUrl rejects
+    # renders as plain text. The C++ unit test proves a real link becomes an
+    # <a href>; this proves the three places still agree and that omachat has
+    # not grown a downloader.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-omatubelink.py
+        run: python3 check-omatubelink.py

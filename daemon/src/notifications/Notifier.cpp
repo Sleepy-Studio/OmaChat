@@ -7,6 +7,8 @@
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
 #include <QDBusMetaType>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QVariantMap>
 
 namespace omachat::daemon {
@@ -55,6 +57,15 @@ void Notifier::send(const QString& summary, const QString& body, const QString& 
 {
     if (!QDBusConnection::sessionBus().isConnected())
         return;
+    // A quiet, local cue for new chat messages. Keep it out of the IPC
+    // contract: the daemon plays it directly through the user's audio session.
+    if (category == QStringLiteral("im.received")) {
+        const QString player = QStandardPaths::findExecutable(QStringLiteral("canberra-gtk-play"));
+        if (!player.isEmpty()) {
+            QProcess::startDetached(player,
+                {QStringLiteral("--id=message-new-instant"), QStringLiteral("--volume=-18.0")});
+        }
+    }
     // Built by the same helper the tests assert against, so the wire shape has
     // one definition.
     QDBusConnection::sessionBus().asyncCall(buildNotifyMessage(summary, body, category, urgent, actionKey, replaceId));
@@ -81,7 +92,7 @@ QDBusMessage Notifier::buildNotifyMessage(const QString& summary, const QString&
         actions << QStringLiteral("default");
 
     // Notify's signature ends with expire_timeout; -1 = server default.
-    msg << QStringLiteral("OmaChat") << replaceId << QString::fromLatin1(kAppId) << summary << plain << actions
+    msg << QStringLiteral("omachat") << replaceId << QString::fromLatin1(kAppId) << summary << plain << actions
         << hints << qint32(-1);
     return msg;
 }

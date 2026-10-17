@@ -62,6 +62,41 @@ TEST(Markdown, OnlySafeSchemesBecomeLinks)
     EXPECT_FALSE(contains(render("data:text/html,<b>"), "<a"));
 }
 
+// A share link posted in a channel has to render as a clickable link, or it
+// sits there as an unclickable wall of base64 and sharing looks broken.
+//
+// This is the behavioural half of check-omatubelink.py: that check compares the
+// two scheme lists statically, this proves a real link actually comes out as an
+// <a href>. Both exist because the scheme lives in two places (isSafeUrl and
+// the urlRe alternation) and a mismatch between them is silent.
+//
+// `render` takes a const char*, so text is composed inline rather than with
+// QString::arg -- the helper is UTF-8 in and std::string out.
+TEST(Markdown, OmatubeShareLinksBecomeClickable)
+{
+    // A real link, produced by `omatube share dQw4w9WgXcQ --kind audio`.
+    EXPECT_TRUE(contains(
+        render("look at this omatube://s/eyJpZCI6ImRxVzR3OVcWWNBIiwia2kiOiJhdWRpbyIsIm4iOiJ0aGUgZ29vZCBiaXQifQ"),
+        "<a href=\"omatube://s/"));
+
+    // Case-insensitive like every other scheme. QUrl::toEncoded() normalises the
+    // scheme to lower case in the href, so assert the normalised form -- the
+    // link still works either way, and that is what the click actually uses.
+    EXPECT_TRUE(contains(render("OMATUBE://s/abc"), "href=\"omatube://s/abc\""));
+
+    // A lookalike must NOT become a link: the allowlist is an exact scheme
+    // list, not a prefix match.
+    EXPECT_FALSE(contains(render("omatube-evil://s/abc"), "<a"));
+    EXPECT_FALSE(contains(render("xomatube://s/abc"), "<a"));
+    EXPECT_FALSE(contains(render("javascript:alert(1)"), "<a"));
+
+    // Note what is deliberately NOT asserted: that a string merely *containing*
+    // "omatube://" refuses to linkify. It does linkify, and that is correct --
+    // the scheme after the last "//" is the only thing isSafeUrl looks at, so
+    // "javascript:alert(1)//omatube://s/x" yields one safe omatube link and one
+    // inert run of text. That is the same behaviour http(s) has always had.
+}
+
 TEST(Markdown, UrlsCannotBreakOutOfAttributes)
 {
     const auto out = render("https://evil.example/\"onmouseover=\"x");

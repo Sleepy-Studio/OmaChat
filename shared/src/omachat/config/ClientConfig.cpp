@@ -122,6 +122,7 @@ ClientConfig ClientConfig::load(const QString& path, QString* error)
 
     auto n = t["notifications"];
     cfg.notifications.messages = flag(n["messages"], cfg.notifications.messages);
+    cfg.notifications.channelMessages = flag(n["channel_messages"], cfg.notifications.channelMessages);
     cfg.notifications.mentions = flag(n["mentions"], cfg.notifications.mentions);
     cfg.notifications.voiceJoin = flag(n["voice_join"], cfg.notifications.voiceJoin);
 
@@ -170,8 +171,8 @@ bool ClientConfig::save(const QString& path, QString* error) const
         toml::table{{"fps", video.fps}, {"max_height", video.maxHeight}, {"bitrate_kbps", video.bitrateKbps},
             {"encoder", video.encoder.toStdString()}, {"audio", video.audio}});
     root.insert("notifications",
-        toml::table{{"messages", notifications.messages}, {"mentions", notifications.mentions},
-            {"voice_join", notifications.voiceJoin}});
+        toml::table{{"messages", notifications.messages}, {"channel_messages", notifications.channelMessages},
+            {"mentions", notifications.mentions}, {"voice_join", notifications.voiceJoin}});
     root.insert("ui",
         toml::table{{"compact_mode", ui.compactMode}, {"scale", ui.scale}, {"reduced_motion", ui.reducedMotion},
             {"theme", ui.theme.toStdString()}});
@@ -182,7 +183,7 @@ bool ClientConfig::save(const QString& path, QString* error) const
     root.insert("shortcuts", std::move(sc));
 
     std::ostringstream os;
-    os << "# OmaChat client configuration. Secrets are never stored here.\n" << root << '\n';
+    os << "# omachat client configuration. Secrets are never stored here.\n" << root << '\n';
 
     QDir().mkpath(QFileInfo(path).absolutePath());
     QSaveFile file(path);

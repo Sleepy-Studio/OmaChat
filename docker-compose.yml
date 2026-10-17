@@ -17,7 +17,7 @@ services:
     volumes:
       - omachat-data:/var/lib/omachat
     environment:
-      OMACHAT_NAME: "OmaChat"
+      OMACHAT_NAME: "omachat"
       OMACHAT_HOSTNAME: "localhost" # change to your real domain or IP
       OMACHAT_REGISTRATION_OPEN: "true"
       # Optional: instance operator console. Set to your numeric server user

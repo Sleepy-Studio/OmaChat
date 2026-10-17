@@ -301,6 +301,11 @@ Dialog {
                     onToggled: App.setNotification("messages", checked)
                 }
                 Toggle {
+                    text: qsTr("Channel messages")
+                    checked: App.notificationSettings.channel_messages === true
+                    onToggled: App.setNotification("channel_messages", checked)
+                }
+                Toggle {
                     text: qsTr("Mentions (@you)")
                     checked: App.notificationSettings.mentions === true
                     onToggled: App.setNotification("mentions", checked)

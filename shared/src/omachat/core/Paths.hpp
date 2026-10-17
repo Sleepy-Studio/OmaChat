@@ -4,7 +4,7 @@
 
 namespace omachat::paths {
 
-// XDG base directories with OmaChat's application subdirectory appended.
+// XDG base directories with omachat's application subdirectory appended.
 // Each honours the corresponding XDG_* variable and falls back to the
 // specification defaults. None of these functions create directories.
 QString configDir(); // $XDG_CONFIG_HOME/omachat

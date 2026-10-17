@@ -92,7 +92,7 @@ To confirm the binary itself, from another shell:
 
 ```bash
 readlink -f /proc/$(cat /tmp/omachat-dev/daemon.pid)/exe
-# -> .../OmaChat/build/daemon/omachatd
+# -> .../omachat/build/daemon/omachatd
 
 pacman -Qkk omachat      # packaged install: "0 altered files"
 ```

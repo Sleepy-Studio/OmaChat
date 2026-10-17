@@ -20,7 +20,7 @@ struct OAuthProviderSettings {
 };
 
 struct ServerConfig {
-    QString instanceName = QStringLiteral("OmaChat");
+    QString instanceName = QStringLiteral("omachat");
     QString bind = QStringLiteral("0.0.0.0");
     std::uint16_t port = 6473;
     bool registrationOpen = true;

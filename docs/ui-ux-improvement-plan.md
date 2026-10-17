@@ -1,4 +1,4 @@
-# OmaChat UI/UX improvement plan
+# omachat UI/UX improvement plan
 
 Last reviewed: 2026-10-01. The first conversation-flow pass is implemented in the working tree; later priorities remain planned.
 
@@ -12,7 +12,7 @@ For repeatable visual checks, `omachat --screenshot /tmp/omachat.png` remains th
 
 ## Product direction
 
-Keep OmaChat a fast, native communications workspace: compact, readable, and keyboard friendly. Use the active Omarchy palette as the visual identity. Spend accent color on selection, focus, speaking, and actions that need attention; keep routine chrome quiet. Preserve the user's place when opening search, settings, and channel details. Add motion only where it explains a state change, using the existing reduced-motion setting.
+Keep omachat a fast, native communications workspace: compact, readable, and keyboard friendly. Use the active Omarchy palette as the visual identity. Spend accent color on selection, focus, speaking, and actions that need attention; keep routine chrome quiet. Preserve the user's place when opening search, settings, and channel details. Add motion only where it explains a state change, using the existing reduced-motion setting.
 
 The existing client already has useful foundations: a virtualized message list, theme and scale support, keyboard shortcuts, focus rings on common buttons, accessible labels in many views, and clear voice status. This plan builds on those foundations rather than replacing the layout or introducing a visual framework.
 

@@ -105,7 +105,7 @@ int main(int argc, char** argv)
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral(
-        "Self-hostable OmaChat server.\n\nSubcommands:\n  generate-cert   create a self-signed TLS certificate"));
+        "Self-hostable omachat server.\n\nSubcommands:\n  generate-cert   create a self-signed TLS certificate"));
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addOption({{QStringLiteral("c"), QStringLiteral("config")}, QStringLiteral("Path to server.toml."),

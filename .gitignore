@@ -21,3 +21,5 @@
 # Python bytecode (scripts/import-discord.py)
 __pycache__/
 *.pyc
+
+/.aws

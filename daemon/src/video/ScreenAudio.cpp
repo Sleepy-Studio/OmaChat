@@ -95,10 +95,10 @@ public:
             return false;
         }
         // Not auto-connected: it only hears what we link into it. Marked as
-        // OmaChat so another OmaChat never captures it either.
-        m_stream = pw_stream_new(m_core, "OmaChat Screen Audio",
+        // omachat so another omachat never captures it either.
+        m_stream = pw_stream_new(m_core, "omachat Screen Audio",
             pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Capture", PW_KEY_MEDIA_ROLE, "Screen",
-                PW_KEY_APP_NAME, "OmaChat", PW_KEY_APP_ID, "org.omarchy.OmaChat", PW_KEY_NODE_NAME,
+                PW_KEY_APP_NAME, "omachat", PW_KEY_APP_ID, "org.omarchy.omachat", PW_KEY_NODE_NAME,
                 "omachat-screen-audio", PW_KEY_NODE_LATENCY, "480/48000", nullptr));
         static const pw_stream_events streamEvents = [] {
             pw_stream_events e{};
@@ -180,7 +180,7 @@ private:
     {
         const char* app = spa_dict_lookup(props, PW_KEY_APP_ID);
         const char* pid = spa_dict_lookup(props, PW_KEY_APP_PROCESS_ID);
-        return (app && std::strcmp(app, "org.omarchy.OmaChat") == 0)
+        return (app && std::strcmp(app, "org.omarchy.omachat") == 0)
             || (pid && std::atoi(pid) == static_cast<int>(::getpid()));
     }
 

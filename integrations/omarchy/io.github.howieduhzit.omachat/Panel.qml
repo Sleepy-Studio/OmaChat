@@ -4,7 +4,7 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 
-// OmaChat bar widget + compact voice panel.
+// omachat bar widget + compact voice panel.
 //
 // Thin UI over omachatd's local socket: no credentials, no network
 // protocol, no audio. If omachatd is not running the widget shows a
@@ -38,7 +38,7 @@ Panel {
   }
 
   readonly property string stateText: {
-    if (!client.connected) return "OmaChat is not running"
+    if (!client.connected) return "omachat is not running"
     switch (client.connectionState) {
     case "connected": return client.inVoice ? "In voice" : "Connected"
     case "reconnecting": return "Reconnecting…"
@@ -55,7 +55,7 @@ Panel {
   implicitWidth: button.visible ? button.implicitWidth : 0
   implicitHeight: button.implicitHeight
 
-  OmaChatClient { id: client }
+  omachatClient { id: client }
 
   WidgetButton {
     id: button
@@ -65,9 +65,9 @@ Panel {
     text: root.barText
     dimmed: !client.connected || client.connectionState !== "connected"
     active: client.muted || client.deafened
-    tooltipText: "OmaChat · " + root.stateText
+    tooltipText: "omachat · " + root.stateText
                  + (client.inVoice ? " · " + client.channelName : "")
-                 + " · Left: controls · Middle: mute · Right: open OmaChat"
+                 + " · Left: controls · Middle: mute · Right: open omachat"
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.MiddleButton) client.toggleMute()
       else if (buttonCode === Qt.RightButton) client.openApp()
@@ -106,7 +106,7 @@ Panel {
         ColumnLayout {
           spacing: 2
           Text {
-            text: "OmaChat"
+            text: "omachat"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.subtitle
@@ -135,7 +135,7 @@ Panel {
           visible: !client.inVoice
           Layout.fillWidth: true
           wrapMode: Text.Wrap
-          text: client.connected ? "Not in a voice channel." : "Start OmaChat to connect."
+          text: client.connected ? "Not in a voice channel." : "Start omachat to connect."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -202,7 +202,7 @@ Panel {
           Item { Layout.fillWidth: true }
           PanelActionButton {
             iconText: String.fromCodePoint(0xF0379) // open-in-new
-            tooltipText: "Open OmaChat (o)"
+            tooltipText: "Open omachat (o)"
             foreground: root.foreground
             fontFamily: root.fontFamily
             onClicked: { client.openApp(); root.close() }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Throwaway local OmaChat for manual testing, run from ./build:
+# Throwaway local omachat for manual testing, run from ./build:
 # a server on 127.0.0.1:26473, a "bob" helper daemon (no audio) and your
 # own daemon with real PipeWire, plus the GUI. Nothing touches your real
 # config, cache or keyring: every path lives under $OMACHAT_SANDBOX and
@@ -57,7 +57,7 @@ start() {
     "$B/server/omachat-server" generate-cert --cert "$S/srv/cert.pem" --key "$S/srv/key.pem" --name localhost >/dev/null
     cat >"$S/srv/server.toml" <<EOF
 [server]
-name = "OmaChat Sandbox"
+name = "omachat Sandbox"
 bind = "127.0.0.1"
 port = $PORT
 [media]

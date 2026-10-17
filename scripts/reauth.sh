@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-authenticate an OmaChat account against a server, then report what happened.
+# Re-authenticate an omachat account against a server, then report what happened.
 #
 # WHY THIS EXISTS
 # ---------------

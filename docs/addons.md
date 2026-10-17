@@ -1,7 +1,7 @@
-# OmaChat add-ons and extension points
+# omachat add-ons and extension points
 
 Status: design and staged plan, 2026-10-02. Nothing in Phases 2-5 is
-implemented; this records what OmaChat actually offers today, what can be built
+implemented; this records what omachat actually offers today, what can be built
 on it without changing the architecture, and what a real plugin system would
 cost.
 
@@ -12,9 +12,9 @@ Verified against the source, not assumed:
 - **No native plugin loading anywhere.** No `dlopen`, `QLibrary`, or
   `QPluginLoader` in the tree; no "plugin" identifier in `client/src/`,
   `client/qml/`, `daemon/src/`, or `server/src/`.
-- **QML is compiled into the binary.** `qt_add_qml_module(omachat URI OmaChat)`
+- **QML is compiled into the binary.** `qt_add_qml_module(omachat URI omachat)`
   (`client/CMakeLists.txt`) AOT-compiles every `.qml`; `client/src/main.cpp:72`
-  loads the root with `engine.loadFromModule("OmaChat", "Main")`. There is no
+  loads the root with `engine.loadFromModule("omachat", "Main")`. There is no
   `addImportPath` and no disk load, so **QML cannot be injected at runtime**.
 - **The server is authoritative.** Roles, channel permissions, and operator
   actions are enforced server-side. A client holds no authority over them.
@@ -80,7 +80,7 @@ requiring new daemon behaviour needs a daemon code change.
 ## Phase 2 — extend `omachat://` (small, upstreamable)
 
 **Partly implemented.** The client already registers `omachat://` as a desktop
-handler (`packaging/desktop/org.omarchy.OmaChat.desktop`) and dispatches it in
+handler (`packaging/desktop/org.omarchy.omachat.desktop`) and dispatches it in
 `AppController::openLink` (`client/src/controllers/AppActions.cpp:522`).
 
 Shipped so far:
@@ -151,7 +151,7 @@ assert on `status`, not the title, when testing that verb.
 `ThemeProvider.cpp:153`). It file-watches and live-reloads.
 
 The gap it had: that is the **Omarchy** theme file, so editing it recolors the
-whole desktop, not just OmaChat. `reload()` now resolves an OmaChat-local file
+whole desktop, not just omachat. `reload()` now resolves an omachat-local file
 first (`ThemeProvider::localThemeFile`) and falls back to Omarchy:
 
 | Priority | Source |
@@ -167,7 +167,7 @@ apply live. Per-user and per-application: no rebuild, no server, no
 desktop-wide side effects.
 
 ```toml
-# ~/.config/omachat/theme.toml — OmaChat only
+# ~/.config/omachat/theme.toml — omachat only
 background = "#12141a"
 foreground = "#e6e8ec"
 accent     = "#7aa2f7"
@@ -371,6 +371,52 @@ webhooks. The right primitive is a **local IPC call with a scoped token**
 | CRM or contact record | `dm/<userId>` | N |
 | Calendar event description | `join/<id>` | N |
 | Project template repo | `create-channel/<id>?name=&topic=` | C |
+| **omatube share in a channel** | `omatube://s/…` | N — **shipped**, see below |
+
+#### omatube: a shipped cross-application link
+
+`omatube://` is the one non-`omachat` scheme in the link allowlist, and it is
+there for a concrete reason: omatube shares videos as links, and a share posted
+in a channel would otherwise render as an unclickable wall of base64.
+
+**omachat does not download anything, and this is not a small thing.** It has no
+yt-dlp, no media library and no fetch path. Clicking the link calls
+`QDesktopServices::openUrl`, which hands a *string* to whichever application
+registered `x-scheme-handler/omatube`; omatube then decides what it means and
+does the fetching on its own machine. That is the whole design: a share is a
+trigger, not a transfer, and keeping the fetch in one application is what lets
+the other one be closed.
+
+Three properties worth preserving if this is ever touched:
+
+1. **Click-only.** `main.cpp` filters argv to `omachat://` alone, so an
+   `omatube://` URL is never acted on at launch. It opens *only* from a
+   deliberate click on the rendered link. Rendering a message does nothing, so
+   reading a channel full of shares cannot start a download or steal focus.
+2. **The scheme is listed twice** — `MarkdownRenderer::isSafeUrl` and the `urlRe`
+   alternation. A scheme present in only one is silently broken:
+   allowlisted-but-unmatched is dead code, matched-but-rejected is plain text.
+   `check-omatubelink.py` compares them and
+   `Markdown.OmatubeShareLinksBecomeClickable` proves a real link comes out as an
+   `<a href>`.
+3. **It takes focus, on purpose.** Opening omatube raises its window. That is
+   acceptable *only* because it is reachable from a click the user made. Do not
+   add it to the argv filter, and do not auto-open on receipt.
+
+#### Verifying a change here
+
+```bash
+./build/tests/omachat_unit_tests --gtest_filter='Markdown.*'   # behavioural
+python3 check-omatubelink.py                                  # the three sites agree
+clang-format --dry-run --Werror client/src/text/MarkdownRenderer.cpp  # CI enforces this
+```
+
+The last one is not optional: the `format` job in CI runs clang-format with
+`--Werror`, so a hand-wrapped line fails the build even though it compiles and
+passes every test. Run `clang-format -i` on the files you touched.
+
+`check-omatubelink.py` also runs in CI (the `omatube-links` job), so the three
+declarations cannot drift apart without a red build.
 
 ### 6.8 Sharing (outbound link generation)
 
@@ -442,3 +488,15 @@ Ship Phase 1 knowledge (document the IPC surface), then do Phase 2 and Phase 3
 as upstreamable pull requests — both small, both self-contained. Hold Phase 5
 until there is a concrete add-on that IPC and URL verbs genuinely cannot
 express.
+
+## Local receive audio event
+
+The local modified checkout adds an opt-in `voice.audio` event for trusted
+same-user IPC consumers such as the omkaon Discord adapter. A client must
+subscribe with the exact `voice.audio` topic; an empty or broad subscription
+does not receive audio. Frames contain 20 ms of the decoded and mixed remote
+call audio as 48 kHz mono float32 little-endian PCM, base64 encoded. The mix is
+decrypted voice and must be treated as sensitive. This interface is a local
+modification and is not currently part of upstream omachat. Consumers should
+not record it and should clearly notify call participants when relaying it to
+another service.

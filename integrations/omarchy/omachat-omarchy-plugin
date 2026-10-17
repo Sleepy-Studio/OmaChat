@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs or removes the OmaChat Omarchy bar widget for the current user.
+# Installs or removes the omachat Omarchy bar widget for the current user.
 # Copy, not symlink: Omarchy rejects symlinked plugins. Never touches the
 # native app itself, and never needs root.
 #

@@ -1,14 +1,26 @@
-# OmaChat
+# omachat
+
+## Current scope
+
+omachat is a standalone local-first chat and voice platform with a Qt client, daemon, CLI, and self-hostable server. Current implementation details are summarized below. The current checkout has pending local changes; its CMake build and CTest suite have been run for this enrollment, while live external integrations remain environment-dependent. omachat does not require ombrella services at runtime.
+
+## Entry points
+
+- Build and tests: [Build](#build) and [Development](#development).
+- GUI: `omachat`; daemon: `omachatd`; CLI: `omachatctl`.
+- Development instance: `scripts/dev-instance.sh start`.
+- Local IPC contract: [docs/protocol.md](docs/protocol.md#local-ipc-omachatd--gui-cli-plugin).
+- Project landing: [site/index.html](site/index.html), via omlocal route `omachat-landing` on port 9143.
 
 **The native communications layer for Omarchy: fast text, low-latency voice,
 keyboard-first control, and self-hostable infrastructure — no browser runtime.**
 
 IRC simplicity + TeamSpeak latency + Discord usability, as native Linux
 software: C++20, Qt 6 / Qt Quick, PipeWire, Opus, SQLite, TLS 1.3.
-OmaChat is a communication tool, not an AI product: it contains no
+omachat is a communication tool, not an AI product: it contains no
 assistants, bots or LLM features.
 
-![OmaChat main window](docs/screenshots/main.png)
+![omachat main window](docs/screenshots/main.png)
 
 ## What you get
 
@@ -41,7 +53,7 @@ assistants, bots or LLM features.
 - Several accounts (on one or more servers) connected at once, switched
   instantly; background accounts still notify
 - Presence (online, idle, do not disturb, offline) and desktop notifications
-  for DMs and mentions that respect DND and muted channels
+  for channel messages, DMs, and @mentions that respect DND and muted channels
 - Profiles with editable display name, bio and HTTPS avatar image; view a
   member's profile from the member list
 - `omachatd` keeps your session and voice call alive when the window closes
@@ -70,7 +82,7 @@ No AUR helper installed? Use the one-line script instead — it installs
 build dependencies and builds the same package with `makepkg`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/OmaChat/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/omachat/main/scripts/install.sh | bash
 ```
 
 Quiet by default (a one-line status per step); add `OMACHAT_VERBOSE=1` before
@@ -133,15 +145,15 @@ OMACHAT_SRC=$PWD/../.. makepkg -si      # build the working tree
 ```
 
 The package installs the binaries, desktop entry
-(`org.omarchy.OmaChat.desktop`, also the `omachat://` link handler), icon,
+(`org.omarchy.omachat.desktop`, also the `omachat://` link handler), icon,
 the `omachat.service` user unit, and the server's system unit and sysusers
 entry. Uninstalling never deletes your data.
 
 ### The `omachat://` link scheme
 
-OmaChat registers `omachat://`, so any script, keybind, browser or other
+omachat registers `omachat://`, so any script, keybind, browser or other
 application can focus or join something. It is a small, declarative
-integration surface — useful precisely because OmaChat has no plugin
+integration surface — useful precisely because omachat has no plugin
 system (see [docs/addons.md](docs/addons.md)).
 
 | URL | Effect | Asks first? |
@@ -221,7 +233,7 @@ binding.
 ![Omarchy bar widget](docs/screenshots/omarchy-bar.png)
 
 A bar widget shows your voice channel and speaker count (`General · 3`);
-left-click opens compact controls (mute, deafen, leave, open OmaChat),
+left-click opens compact controls (mute, deafen, leave, open omachat),
 middle-click toggles mute, right-click opens the app. It talks to
 `omachatd` over the local socket and shows a dim icon when the daemon is
 not running.
@@ -236,7 +248,7 @@ omachat-omarchy-plugin uninstall    # disables and removes it
 (Building from source instead? The same script lives at
 `integrations/omarchy/omachat-omarchy-plugin`.)
 
-OmaChat works fully without the plugin, and outside Omarchy on any Wayland
+omachat works fully without the plugin, and outside Omarchy on any Wayland
 desktop (built-in dark theme, same features).
 
 ## Configuration
@@ -265,6 +277,7 @@ audio = false              # opt in: shares all other applications' sound
 
 [notifications]
 messages = true            # direct messages
+channel_messages = true    # messages in text channels
 mentions = true
 voice_join = false
 
@@ -293,7 +306,7 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
   per-application theme file, and what a plugin system would actually cost):
   [docs/addons.md](docs/addons.md).
 - **Per-application theme:** drop a `theme.toml` in `~/.config/omachat/` to
-  recolour OmaChat alone, leaving the Omarchy desktop theme untouched.
+  recolour omachat alone, leaving the Omarchy desktop theme untouched.
 - Tests: `ctest --test-dir build -L unit|integration|fuzz`. Integration
   tests run a real TLS server and real daemons in-process (null audio
   device) and push a synthetic tone through the full voice path.
@@ -337,3 +350,20 @@ Not done yet — be aware:
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Ombrella integrations
+
+- [omkaon](../voice/omkaon/README.md): optional same-user IPC voice relay; the live Discord path is not verified by this README.
+- [omatube](../media/omatube/README.md): uses `omachatctl` for message sending and `omatube://` for the click handoff.
+- [omban](../coordinate/omban/docs/OMACHAT-INTEGRATION.md): optional capture and snapshot adapter owned by omban; live IPC was not verified in the last recorded inspection.
+- [omavb](../voice/omavb/README.md): optional voicebox integration under `integrations/voicebox/`; environment and runtime verification are deployment-dependent.
+
+These integrations are optional. omachat remains independently buildable and runnable.
+
+## Checks
+
+See [Development](#development) for focused unit, integration, and fuzz commands. Checks for the current ombrella enrollment are recorded in [docs/STATUS.md](docs/STATUS.md).
+
+## Project guide
+
+- [Idea](IDEA.md) · [Architecture](ARCHITECTURE.md) · [Build](BUILD.md) · [Agent instructions](AGENTS.md) · [Project skill](SKILL.md) · [Capabilities](CAPABILITIES.md) · [Current status](docs/STATUS.md).

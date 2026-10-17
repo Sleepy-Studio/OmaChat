@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Build, run a LOCAL OmaChat against your real hosted server, and prove it
+# Build, run a LOCAL omachat against your real hosted server, and prove it
 # landed on the same account -- without replacing /usr/bin.
 #
 #   ./run-local.sh            build if needed, then start (daemon + GUI)

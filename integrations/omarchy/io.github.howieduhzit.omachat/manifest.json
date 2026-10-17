@@ -1,18 +1,18 @@
 {
   "schemaVersion": 1,
   "id": "io.github.howieduhzit.omachat",
-  "name": "OmaChat",
+  "name": "omachat",
   "version": "0.2.0",
   "author": "HowieDuhzit",
   "license": "MIT",
-  "description": "OmaChat in the Omarchy bar: voice channel, speakers, mute and deafen, and a shortcut into the app.",
+  "description": "omachat in the Omarchy bar: voice channel, speakers, mute and deafen, and a shortcut into the app.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "OmaChat",
-    "description": "Current voice channel and speaker count. Left: controls · Middle: mute · Right: open OmaChat.",
+    "displayName": "omachat",
+    "description": "Current voice channel and speaker count. Left: controls · Middle: mute · Right: open omachat.",
     "category": "Social",
     "allowMultiple": false,
     "defaultSection": "right",

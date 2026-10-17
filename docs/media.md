@@ -141,7 +141,7 @@ with sound carries every *other* application's playback.
 The daemon creates a PipeWire input node that is not auto-connected and
 links each application playback stream (`Stream/Output/Audio`) into its
 single mono port, following streams as they appear and go; PipeWire mixes
-and downmixes. Nodes of OmaChat itself (its `application.id` or process)
+and downmixes. Nodes of omachat itself (its `application.id` or process)
 are never linked, so voice is not echoed back through the share. The mix is
 Opus in music mode (96 kbit/s, 20 ms, mono) sent as video-type packets
 with flag bit2 (`FlagScreenAudio`), so the relay delivers it only to

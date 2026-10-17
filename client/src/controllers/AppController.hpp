@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
+#include <QProcess>
 #include <QQmlEngine>
 #include <QSet>
 #include <QTimer>
@@ -20,9 +21,10 @@ namespace omachat::client {
 
 // The single QML-facing controller ("App" in QML). It mirrors daemon state
 // into properties and list models and turns user intent into IPC requests.
-// It never touches the network, credentials or audio directly: all of that
-// lives in omachatd. Passwords typed in the login form pass straight through
-// to the daemon and are not retained here.
+// Network credentials and audio remain in omachatd; the controller also has
+// a narrow same-user local socket for the separately installed omkaon bot.
+// Passwords typed in the login form pass straight through to the daemon and
+// are not retained here.
 class AppController : public QObject {
     Q_OBJECT
     QML_NAMED_ELEMENT(App)
@@ -76,6 +78,8 @@ class AppController : public QObject {
     Q_PROPERTY(bool transmitting READ transmitting NOTIFY voiceChanged)
     Q_PROPERTY(bool voiceConnected READ voiceConnected NOTIFY voiceChanged)
     Q_PROPERTY(QString audioError READ audioError NOTIFY voiceChanged)
+    Q_PROPERTY(bool voiceboardBusy READ voiceboardBusy NOTIFY voiceboardChanged)
+    Q_PROPERTY(QString voiceboardStatus READ voiceboardStatus NOTIFY voiceboardChanged)
     // screen sharing (StreamActions in AppActions.cpp)
     Q_PROPERTY(bool canShareScreen READ canShareScreen NOTIFY voiceChanged)
     Q_PROPERTY(bool sharingScreen READ sharingScreen NOTIFY voiceChanged)
@@ -141,6 +145,10 @@ class AppController : public QObject {
 
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     Q_PROPERTY(bool noticeIsError READ noticeIsError NOTIFY noticeChanged)
+    Q_PROPERTY(QVariantList omkaonInbox READ omkaonInbox NOTIFY omkaonInboxChanged)
+    Q_PROPERTY(QVariantMap omkaonDiscordStatus READ omkaonDiscordStatus NOTIFY omkaonDiscordChanged)
+    Q_PROPERTY(bool omkaonDiscordBusy READ omkaonDiscordBusy NOTIFY omkaonDiscordChanged)
+    Q_PROPERTY(QString omkaonDiscordError READ omkaonDiscordError NOTIFY omkaonDiscordChanged)
 
     // models
     Q_PROPERTY(omachat::client::RowListModel* servers READ servers CONSTANT)
@@ -222,6 +230,8 @@ public:
     {
         return m_status.value(QStringLiteral("audio")).toObject().value(QStringLiteral("error")).toString();
     }
+    bool voiceboardBusy() const { return m_voiceboardBusy; }
+    QString voiceboardStatus() const { return m_voiceboardStatus; }
 
     QString selectedServerId() const { return m_selectedServer; }
     bool discordImportBusy() const { return m_discordImportBusy; }
@@ -289,6 +299,10 @@ public:
     }
     QString notice() const { return m_notice; }
     bool noticeIsError() const { return m_noticeError; }
+    QVariantList omkaonInbox() const { return m_omkaonInbox; }
+    QVariantMap omkaonDiscordStatus() const { return m_omkaonDiscordStatus; }
+    bool omkaonDiscordBusy() const { return m_omkaonDiscordBusy; }
+    QString omkaonDiscordError() const { return m_omkaonDiscordError; }
 
     RowListModel* servers() { return &m_servers; }
     RowListModel* channels() { return &m_channels; }
@@ -344,6 +358,13 @@ public:
     Q_INVOKABLE QVariantMap complete(const QString& textBeforeCursor) const;
     Q_INVOKABLE void copyText(const QString& text);
     Q_INVOKABLE void openLink(const QString& url);
+    Q_INVOKABLE void refreshOmkaonInbox();
+    Q_INVOKABLE void deleteOmkaonInboxMessage(const QString& messageId);
+    Q_INVOKABLE void refreshOmkaonDiscord();
+    Q_INVOKABLE void selectOmkaonDiscordGuild(const QString& guildId);
+    Q_INVOKABLE void startOmkaonDiscordBridge();
+    Q_INVOKABLE void stopOmkaonDiscordBridge();
+    Q_INVOKABLE void leaveOmkaonDiscordVoice();
     // wholeServer searches every readable channel of the selected server.
     Q_INVOKABLE void search(const QString& query, bool wholeServer = false);
     Q_INVOKABLE void clearSearch();
@@ -354,6 +375,7 @@ public:
     Q_INVOKABLE void toggleMute();
     Q_INVOKABLE void toggleDeafen();
     Q_INVOKABLE void pushToTalk(bool pressed);
+    Q_INVOKABLE void speakVoiceboard(const QString& text, bool monitor = true);
     Q_INVOKABLE void setInputMode(const QString& mode);
     Q_INVOKABLE void setUserVolume(const QString& userId, int percent);
     Q_INVOKABLE void toggleScreenShare();
@@ -473,6 +495,7 @@ signals:
     void authChanged();
     void oauthIdentitiesChanged();
     void voiceChanged();
+    void voiceboardChanged();
     void requestScreenAudioConsent();
     void selectionChanged();
     void channelDataChanged(const QString& channelId);
@@ -484,6 +507,8 @@ signals:
     void replyChanged();
     void typingChanged();
     void noticeChanged();
+    void omkaonInboxChanged();
+    void omkaonDiscordChanged();
     void searchStateChanged();
     void configChanged();
     void audioChanged();
@@ -500,6 +525,7 @@ signals:
     void requestInviteJoin(const QString& invite);
 
 private:
+    void requestOmkaonDiscordControl(const QString& method, const QJsonObject& params = {});
     // AppController.cpp
     void onDaemonConnected();
     void onEvent(const QString& name, const QJsonObject& data);
@@ -549,6 +575,10 @@ private:
     QHash<QString, QJsonObject> m_emojiById;
     QVariantList m_channelOverrides;
     QVariantList m_safetyNumbers;
+    QVariantList m_omkaonInbox;
+    QVariantMap m_omkaonDiscordStatus;
+    bool m_omkaonDiscordBusy = false;
+    QString m_omkaonDiscordError;
     bool m_addingAccount = false;
     bool m_shareStarting = false;
     QString m_overridesChannel;
@@ -600,6 +630,9 @@ private:
     QVariantList m_outputDevices;
     QVariantMap m_videoSettings;
     QVariantMap m_audioSettings;
+    QProcess m_voiceboardProcess;
+    bool m_voiceboardBusy = false;
+    QString m_voiceboardStatus;
 
     RowListModel m_servers;
     RowListModel m_channels;

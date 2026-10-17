@@ -1,6 +1,6 @@
 [Unit]
-Description=OmaChat Server
-Documentation=https://github.com/Sleepy-Studio/OmaChat/blob/main/docs/self-hosting.md
+Description=omachat Server
+Documentation=https://github.com/Sleepy-Studio/omachat/blob/main/docs/self-hosting.md
 After=network-online.target
 Wants=network-online.target
 

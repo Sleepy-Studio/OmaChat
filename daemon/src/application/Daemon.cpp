@@ -86,6 +86,14 @@ bool Daemon::start(QString* error)
 
     m_voice = std::make_unique<voice::VoiceEngine>(*m_audio, this);
     m_voice->applySettings(engineSettings());
+    connect(&m_ipc, &IpcServer::subscriptionsChanged, this, [this] {
+        m_voice->setPlaybackAudioSubscribed(m_ipc.hasSubscribers(QStringLiteral("voice.audio")));
+    });
+    connect(m_voice.get(), &voice::VoiceEngine::playbackAudioFrame, this, [this](const QByteArray& frame) {
+        m_ipc.broadcast(QStringLiteral("voice.audio"), {{"sample_rate", 48000}, {"channels", 1},
+            {"encoding", QStringLiteral("f32le")},
+            {"pcm_f32le", QString::fromLatin1(frame.toBase64())}});
+    }, Qt::QueuedConnection);
     connect(m_voice.get(), &voice::VoiceEngine::speakingChanged, this, [this](quint64 userId, bool speaking) {
         if (speaking)
             m_speaking.insert(userId);
@@ -564,7 +572,10 @@ void Daemon::maybeNotify(const ServerConnection& conn, const std::set<std::uint6
         return;
     const bool dm = channel->type() == proto::CHANNEL_TYPE_DM || channel->type() == proto::CHANNEL_TYPE_GROUP_DM;
     const bool mention = msg.value(QStringLiteral("mentions_me")).toBool();
-    if (!(dm && m_config.notifications.messages) && !(mention && m_config.notifications.mentions))
+    const bool enabled = dm ? m_config.notifications.messages
+                            : (m_config.notifications.channelMessages
+                                || (mention && m_config.notifications.mentions));
+    if (!enabled)
         return;
     const proto::User* u = model.user(author);
     const QString who = u ? QString::fromStdString(u->display_name()) : QStringLiteral("Someone");

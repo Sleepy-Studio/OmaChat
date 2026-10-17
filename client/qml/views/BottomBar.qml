@@ -7,6 +7,9 @@ import OmaChat
 Rectangle {
     id: bar
     signal openSettings()
+    signal openVoiceboard()
+    signal openOmkaonInbox()
+    signal openOmkaonDiscord()
     readonly property bool compact: width < Theme.px(900)
 
     implicitHeight: Theme.px(52)
@@ -166,6 +169,47 @@ Rectangle {
             checked: App.deafened
             tip: (App.deafened ? qsTr("Undeafen") : qsTr("Deafen")) + " (" + (App.shortcuts["toggle_deafen"] || "Ctrl+Shift+D") + ")"
             onClicked: App.toggleDeafen()
+        }
+        IconButton {
+            visible: App.voiceJoined
+            iconName: "message"
+            tip: qsTr("Voiceboard (Ctrl+Shift+V)")
+            onClicked: bar.openVoiceboard()
+        }
+        IconButton {
+            iconName: "speaker"
+            tip: qsTr("omkaon Discord bridge")
+            onClicked: bar.openOmkaonDiscord()
+        }
+        Item {
+            implicitWidth: inboxButton.implicitWidth
+            implicitHeight: inboxButton.implicitHeight
+            IconButton {
+                id: inboxButton
+                anchors.fill: parent
+                iconName: "message"
+                tip: qsTr("omkaon inbox · %1 saved messages").arg(App.omkaonInbox.length)
+                onClicked: bar.openOmkaonInbox()
+            }
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.rightMargin: -Theme.px(2)
+                anchors.topMargin: -Theme.px(2)
+                width: Math.max(Theme.px(15), countText.implicitWidth + Theme.px(6))
+                height: Theme.px(15)
+                radius: height / 2
+                visible: App.omkaonInbox.length > 0
+                color: Theme.accent
+                Text {
+                    id: countText
+                    anchors.centerIn: parent
+                    text: App.omkaonInbox.length > 99 ? "99+" : App.omkaonInbox.length
+                    color: Theme.accentText
+                    font.pixelSize: Theme.px(9)
+                    font.bold: true
+                }
+            }
         }
         IconButton {
             iconName: "settings"
