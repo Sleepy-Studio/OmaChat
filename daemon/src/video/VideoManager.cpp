@@ -156,9 +156,7 @@ void ScreenShare::sendPointer(bool active, double x, double y)
 {
     // [active:1][x:2][y:2], x/y fixed-point 0..65535 over 0.0..1.0: plenty
     // of precision for a cursor dot, and it sidesteps float endianness.
-    const auto fixed = [](double v) {
-        return static_cast<std::uint16_t>(std::clamp(v, 0.0, 1.0) * 65535.0 + 0.5);
-    };
+    const auto fixed = [](double v) { return static_cast<std::uint16_t>(std::clamp(v, 0.0, 1.0) * 65535.0 + 0.5); };
     const std::uint16_t fx = fixed(x), fy = fixed(y);
     const std::array<std::uint8_t, 5> payload{active ? std::uint8_t{1} : std::uint8_t{0},
         static_cast<std::uint8_t>(fx >> 8), static_cast<std::uint8_t>(fx), static_cast<std::uint8_t>(fy >> 8),
@@ -383,9 +381,9 @@ QJsonObject StreamViewer::statsJson() const
     // "connecting" until there is enough of a sample to judge; a raw loss
     // ratio over a handful of frames is noise, not a signal.
     const double total = static_cast<double>(frames) + static_cast<double>(lost);
-    const QString quality = total < 20.0 ? QStringLiteral("connecting")
-        : (static_cast<double>(lost) / total > 0.08)                    ? QStringLiteral("poor")
-                                                                          : QStringLiteral("good");
+    const QString quality = total < 20.0             ? QStringLiteral("connecting")
+        : (static_cast<double>(lost) / total > 0.08) ? QStringLiteral("poor")
+                                                     : QStringLiteral("good");
     return {{"user_id", QString::number(m_userId)}, {"path", m_path}, {"width", m_width.load()},
         {"height", m_height.load()}, {"frames", static_cast<double>(frames)},
         {"decoded", static_cast<double>(m_decoded.load())}, {"lost", static_cast<double>(lost)}, {"quality", quality},

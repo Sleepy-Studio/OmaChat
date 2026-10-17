@@ -9,6 +9,7 @@
 #include "omachat/config/ClientConfig.hpp"
 #include "platform/CredentialStore.hpp"
 #include "storage/LocalStore.hpp"
+#include "storage/SendRecoveryStore.hpp"
 #include "video/VideoManager.hpp"
 #include "voice/VoiceEngine.hpp"
 
@@ -28,6 +29,9 @@ struct DaemonOptions {
     QString databasePath;
     QString configPath;
     bool memoryCredentials = false;
+    // In-process test injection only; never selected by an environment variable
+    // or IPC method. Production uses makeKeychainStore with fallback disabled.
+    std::function<std::unique_ptr<ICredentialStore>(QObject*)> credentialStoreFactory;
     bool nullAudio = false;
     bool syntheticScreen = false; // share a test pattern instead of using the portal
     bool notifications = true;
@@ -81,7 +85,9 @@ private:
     void uploadAll(Id channelId, QStringList files, std::vector<proto::Attachment> done,
         std::function<void(
             bool ok, const QString& code, const QString& message, const std::vector<proto::Attachment>& attachments)>
-            finish);
+            finish,
+        QPointer<ServerConnection> connection = {}, QPointer<FileTransfers> transfers = {}, bool bound = false,
+        std::optional<quint64> identityGeneration = std::nullopt);
     void pruneAttachmentCache();
     QString downloadDestination(Id attachmentId, const QString& filename, const QString& to, QString* error) const;
 
@@ -113,8 +119,10 @@ private:
     void startLink(Link& link, const Account& account, ServerConnection::Credentials creds = {});
     // Sends through the active account; direct and group conversations are
     // end-to-end encrypted (files included) when the server supports it.
-    void sendMessage(
-        Id channelId, const QString& content, Id replyTo, bool action, const QStringList& files, const Responder& r);
+    void sendMessage(Id channelId, const QString& content, Id replyTo, bool action, const QStringList& files,
+        const Responder& r, const QString& recoveryId = {});
+    std::optional<SendRecoveryStore::Binding> recoveryBinding() const;
+    void purgeRecovery(std::int64_t accountId, SendRecoveryStore::Completion callback);
     void onModelEvent(const QString& name, const QJsonObject& data);
     void maybeNotify(const ServerConnection& conn, const std::set<std::uint64_t>& muted, const QJsonObject& message);
     void scheduleStatus();
@@ -126,6 +134,7 @@ private:
     config::ClientConfig m_config;
     LocalStore m_store;
     std::unique_ptr<ICredentialStore> m_credentials;
+    std::unique_ptr<SendRecoveryStore> m_sendRecovery;
     std::map<std::int64_t, Link> m_links; // by account id; 0 = no account yet
     ServerConnection* m_conn = nullptr; // the active link
     FileTransfers* m_transfers = nullptr;

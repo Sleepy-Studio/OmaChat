@@ -40,12 +40,12 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(14)
+        spacing: Metrics.px(14)
 
         Text {
             text: dialog.title
             color: Theme.text
-            font.pixelSize: Theme.px(16)
+            font.pixelSize: Metrics.px(16)
             font.bold: true
         }
 
@@ -70,7 +70,7 @@ Dialog {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             FlatButton {
                 text: qsTr("Start fresh")
                 primary: !dialog.importing
@@ -88,13 +88,13 @@ Dialog {
         ColumnLayout {
             visible: dialog.importing
             Layout.fillWidth: true
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
 
             Text {
                 Layout.fillWidth: true
                 text: qsTr("Choose JSON channel exports from the same Discord server. Include downloaded assets beside them to bring over attachments.")
                 color: Theme.textMuted
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 wrapMode: Text.Wrap
             }
             RowLayout {
@@ -108,7 +108,7 @@ Dialog {
                     text: dialog.exportFiles.length === 0 ? qsTr("No files selected")
                          : qsTr("%1 selected").arg(dialog.exportFiles.length)
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                 }
             }
         }
@@ -118,13 +118,13 @@ Dialog {
             Layout.fillWidth: true
             text: App.discordImportStatus
             color: Theme.textMuted
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
             wrapMode: Text.Wrap
         }
 
         RowLayout {
             Layout.alignment: Qt.AlignRight
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             FlatButton {
                 text: qsTr("Cancel")
                 enabled: !App.discordImportBusy

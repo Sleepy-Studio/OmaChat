@@ -90,8 +90,7 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
             const auto id = envOperator.toULongLong(&ok);
             if (!ok || id == 0 || id > static_cast<Id>(INT64_MAX)) {
                 if (error)
-                    *error = QStringLiteral(
-                        "OMACHAT_OPERATOR_USER_ID must be a positive integer (server user id)");
+                    *error = QStringLiteral("OMACHAT_OPERATOR_USER_ID must be a positive integer (server user id)");
                 return false;
             }
             operatorId = static_cast<std::int64_t>(id);

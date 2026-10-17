@@ -1,7 +1,7 @@
 find_package(GTest REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Test)
 if(OMACHAT_BUILD_CLIENT)
-    find_package(Qt6 6.8 REQUIRED COMPONENTS Multimedia)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Multimedia Quick)
 endif()
 include(GoogleTest)
 
@@ -24,12 +24,17 @@ add_executable(omachat_unit_tests
     unit/test_server_state.cpp
     unit/test_server_config_env.cpp
     unit/test_store.cpp
+    unit/test_artwork_images.cpp
+    unit/test_send_recovery.cpp
     unit/test_video.cpp
     unit/test_e2e.cpp
     unit/test_notification_actions.cpp
 )
 if(OMACHAT_BUILD_CLIENT)
     target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp
+        unit/test_artwork_crop.cpp ../client/src/platform/ArtworkCrop.cpp
+        unit/test_artwork_crop_memory.cpp ../client/src/platform/ArtworkCropMemory.cpp
+        unit/test_artwork_cache.cpp ../client/src/platform/ArtworkCache.cpp
         unit/test_audio_levels.cpp unit/test_message_list_model.cpp
         ../client/src/views/AudioLevels.cpp ../client/src/models/MessageListModel.cpp)
     target_include_directories(omachat_unit_tests PRIVATE ../client/src)
@@ -40,6 +45,33 @@ target_link_libraries(omachat_unit_tests PRIVATE
     omachat_shared omachat_daemon_core omachat_server_core GTest::gtest Qt6::Test)
 gtest_discover_tests(omachat_unit_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS unit)
 
+# The real QML singleton factory must reuse the instance configured by main().
+if(OMACHAT_BUILD_CLIENT)
+    qt_policy(SET QTP0004 NEW)
+    qt_add_executable(omachat_theme_tests gui/test_theme.cpp)
+    set_source_files_properties(../client/qml/Metrics.qml PROPERTIES
+        QT_QML_SINGLETON_TYPE TRUE QT_RESOURCE_ALIAS Metrics.qml)
+    qt_add_qml_module(omachat_theme_tests
+        URI OmaChatThemeTest
+        VERSION 1.0
+        SOURCES ../client/src/platform/ThemeProvider.cpp ../client/src/platform/ThemeProvider.hpp
+        QML_FILES ../client/qml/Metrics.qml)
+    target_include_directories(omachat_theme_tests PRIVATE ../client/src ../client/src/platform)
+    target_link_libraries(omachat_theme_tests PRIVATE
+        GTest::gtest Qt6::Quick omachat_shared)
+    omachat_set_warnings(omachat_theme_tests)
+    gtest_discover_tests(omachat_theme_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS gui)
+
+    qt_add_executable(omachat_theme_state_tests gui/test_theme_states.cpp
+        ../client/src/platform/ThemeProvider.cpp ../client/src/platform/ThemeProvider.hpp)
+    target_include_directories(omachat_theme_state_tests PRIVATE ../client/src)
+    target_compile_definitions(omachat_theme_state_tests PRIVATE OMACHAT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(omachat_theme_state_tests PRIVATE
+        GTest::gtest Qt6::Quick Qt6::Test omachat_shared)
+    omachat_set_warnings(omachat_theme_state_tests)
+    gtest_discover_tests(omachat_theme_state_tests DISCOVERY_TIMEOUT 30 PROPERTIES LABELS gui)
+endif()
+
 # Integration tests: real server, real TLS, real daemons (null audio device).
 add_executable(omachat_integration_tests
     integration/test_main.cpp
@@ -47,9 +79,22 @@ add_executable(omachat_integration_tests
     integration/test_protocol.cpp
     integration/test_daemon.cpp
     integration/test_voice.cpp
+    integration/test_channel_details.cpp
+    integration/test_artwork_framing.cpp
+    integration/test_channel_placement.cpp
+    integration/test_category_delete.cpp
+    integration/test_permission_preview.cpp
+    integration/test_channel_duplicate.cpp
+    integration/test_channel_conflicts.cpp
+    integration/test_placement_revision.cpp
+    integration/test_send_recovery_daemon.cpp
 )
 omachat_set_warnings(omachat_integration_tests)
 target_include_directories(omachat_integration_tests PRIVATE integration)
+# Integration checks launch the CLI; targeted builds must refresh it too.
+if(TARGET omachatctl)
+    add_dependencies(omachat_integration_tests omachatctl)
+endif()
 target_link_libraries(omachat_integration_tests PRIVATE
     omachat_shared omachat_daemon_core omachat_server_core GTest::gtest Qt6::Test)
 gtest_discover_tests(omachat_integration_tests DISCOVERY_TIMEOUT 30
@@ -69,5 +114,61 @@ if(OMACHAT_ENABLE_FUZZERS)
         target_compile_options(fuzz_${target} PRIVATE -fsanitize=fuzzer,address,undefined)
         target_link_options(fuzz_${target} PRIVATE -fsanitize=fuzzer,address,undefined)
         target_link_libraries(fuzz_${target} PRIVATE omachat_shared omachat_daemon_core)
+    endforeach()
+endif()
+
+if(OMACHAT_BUILD_CLIENT)
+    qt_add_executable(omachat_channel_drag_tests gui/test_channel_drag.cpp)
+    target_compile_definitions(omachat_channel_drag_tests PRIVATE OMACHAT_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(omachat_channel_drag_tests PRIVATE GTest::gtest Qt6::Quick Qt6::Test)
+    omachat_set_warnings(omachat_channel_drag_tests)
+    gtest_discover_tests(omachat_channel_drag_tests DISCOVERY_TIMEOUT 30
+        PROPERTIES LABELS gui TIMEOUT 120)
+    qt_add_executable(omachat_channel_edge_scroll_tests gui/test_channel_edge_scroll.cpp)
+    target_compile_definitions(omachat_channel_edge_scroll_tests PRIVATE OMACHAT_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(omachat_channel_edge_scroll_tests PRIVATE GTest::gtest Qt6::Quick Qt6::Test)
+    omachat_set_warnings(omachat_channel_edge_scroll_tests)
+    gtest_discover_tests(omachat_channel_edge_scroll_tests DISCOVERY_TIMEOUT 30
+        PROPERTIES LABELS gui TIMEOUT 120)
+    qt_add_executable(omachat_creation_crop_tests gui/test_creation_crop.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_channel_details_view_tests gui/test_channel_details_view.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_channel_settings_navigation_tests gui/test_channel_settings_navigation.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_placement_conflicts_tests gui/test_placement_conflicts.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_channel_duplication_tests gui/test_channel_duplication.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_artwork_conflicts_tests gui/test_artwork_conflicts.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_send_recovery_view_tests gui/test_send_recovery_view.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_artwork_identity_tests gui/test_artwork_identity.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_operation_tests gui/test_operations.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_permission_sources_tests gui/test_permission_sources.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_permission_targets_tests gui/test_permission_targets.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_permission_review_tests gui/test_permission_review.cpp integration/Harness.cpp)
+    qt_add_executable(omachat_server_crop_tests gui/test_server_crop.cpp integration/Harness.cpp)
+    foreach(operation_target omachat_operation_tests omachat_permission_sources_tests omachat_permission_targets_tests omachat_permission_review_tests omachat_server_crop_tests
+            omachat_creation_crop_tests omachat_artwork_identity_tests omachat_channel_details_view_tests
+            omachat_channel_settings_navigation_tests omachat_placement_conflicts_tests omachat_channel_duplication_tests
+            omachat_artwork_conflicts_tests omachat_send_recovery_view_tests)
+        target_sources(${operation_target} PRIVATE ../client/src/platform/ArtworkCache.cpp)
+        target_sources(${operation_target} PRIVATE ../client/src/platform/ArtworkCrop.cpp ../client/src/platform/ArtworkCropMemory.cpp)
+        file(GLOB operation_icons "${CMAKE_SOURCE_DIR}/client/icons/*.svg")
+        qt_add_resources(${operation_target} operation_icons
+            PREFIX "/qt/qml/OmaChat" BASE "${CMAKE_SOURCE_DIR}/client" FILES ${operation_icons}
+            "${CMAKE_SOURCE_DIR}/client/data/emoji.json")
+        target_sources(${operation_target} PRIVATE
+            ../client/src/application/DaemonLink.cpp ../client/src/application/DaemonLink.hpp
+            ../client/src/controllers/AppController.cpp ../client/src/controllers/AppController.hpp
+            ../client/src/controllers/AppActions.cpp ../client/src/controllers/AttachmentActions.cpp
+            ../client/src/controllers/EmojiActions.cpp ../client/src/controllers/RoleActions.cpp
+            ../client/src/models/RowListModel.cpp ../client/src/models/RowListModel.hpp
+            ../client/src/models/MessageListModel.cpp ../client/src/models/MessageListModel.hpp
+            ../client/src/views/VideoFrameItem.cpp ../client/src/views/VideoFrameItem.hpp
+            ../client/src/views/AudioLevels.cpp ../client/src/views/AudioLevels.hpp
+            ../client/src/platform/ThemeProvider.cpp ../client/src/platform/ThemeProvider.hpp)
+        target_compile_definitions(${operation_target} PRIVATE OMACHAT_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+        target_include_directories(${operation_target} PRIVATE ../client/src integration)
+        target_link_libraries(${operation_target} PRIVATE omachat_client_text omachat_shared
+            omachat_daemon_core omachat_server_core GTest::gtest Qt6::Quick Qt6::DBus Qt6::Test Qt6::Multimedia)
+        omachat_set_warnings(${operation_target})
+        gtest_discover_tests(${operation_target} DISCOVERY_TIMEOUT 30
+            PROPERTIES LABELS "gui;integration" TIMEOUT 120)
     endforeach()
 endif()

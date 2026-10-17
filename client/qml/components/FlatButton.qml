@@ -9,13 +9,13 @@ Button {
     property bool primary: false
     property bool danger: false
 
-    implicitHeight: Theme.px(32)
-    leftPadding: Theme.px(14)
-    rightPadding: Theme.px(14)
+    implicitHeight: Metrics.px(32)
+    leftPadding: Metrics.px(14)
+    rightPadding: Metrics.px(14)
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
 
-    font.pixelSize: Theme.px(13)
+    font.pixelSize: Metrics.px(13)
     font.bold: primary
 
     contentItem: Text {
@@ -29,11 +29,20 @@ Button {
     }
 
     background: Rectangle {
-        radius: Theme.px(4)
-        color: control.primary ? (control.down ? Qt.darker(Theme.accent, 1.2) : control.hovered ? Qt.lighter(Theme.accent, 1.1) : Theme.accent)
+        radius: Metrics.px(4)
+        color: control.primary ? (control.down ? Theme.accentPressed : control.hovered ? Theme.accentHover : Theme.accent)
                                : (control.down ? Theme.selection : control.hovered ? Theme.raised : Theme.surfaceAlt)
         opacity: control.enabled ? 1 : 0.5
-        border.width: control.visualFocus ? 2 : (control.primary ? 0 : 1)
-        border.color: control.visualFocus ? Theme.text : Theme.border
+        border.width: control.primary ? 0 : 1
+        border.color: Theme.controlBorder
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -Metrics.px(3)
+            color: "transparent"
+            radius: Metrics.px(6)
+            border.width: Metrics.px(2)
+            border.color: Theme.focus
+            visible: control.visualFocus && control.enabled
+        }
     }
 }

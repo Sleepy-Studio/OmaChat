@@ -13,12 +13,12 @@ Dialog {
     onOpened: cancelButton.forceActiveFocus()
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(14)
+        spacing: Metrics.px(14)
         Text {
             Layout.fillWidth: true
             text: dialog.title
             color: Theme.text
-            font.pixelSize: Theme.px(16)
+            font.pixelSize: Metrics.px(16)
             font.bold: true
             wrapMode: Text.Wrap
         }
@@ -26,12 +26,12 @@ Dialog {
             Layout.fillWidth: true
             text: dialog.message
             color: Theme.textMuted
-            font.pixelSize: Theme.px(13)
+            font.pixelSize: Metrics.px(13)
             wrapMode: Text.Wrap
         }
         RowLayout {
             Layout.alignment: Qt.AlignRight
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             FlatButton {
                 id: cancelButton
                 text: qsTr("Cancel")

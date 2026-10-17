@@ -23,6 +23,7 @@ protocol ([media.md](media.md)), and the local IPC protocol.
     `attachments`; since 1.2 `search.server`, `dm.group`,
     `attachments.resume`, `video.h264`, `e2e.v1`; `profile.v1` adds editable profiles;
     `channel.identity.v1` adds channel descriptions plus icon/banner artwork;
+    `channel.placement.v1` adds atomic placement before a visible sibling;
     `server.identity.v1` adds server descriptions plus icon/banner artwork;
     `discord.import` enables owner-only channel history import). `HelloReply.max_upload_bytes` is 0
    when a server takes no attachments. Clients check a capability before
@@ -135,6 +136,19 @@ says where to continue. `Download{attachment_id, offset, length}` →
 `FileChunk{offset, data, total_size}` for anyone who may read the
 message's channel history.
 
+Artwork framing (`artwork.framing.v1`) adds optional `ArtworkFraming` to
+`BeginUploadRequest` and `Attachment`, and `artwork_variant` to `DownloadRequest`.
+Framing uploads a metadata-free full source and exact source-pixel crop rectangle
+for an icon/banner. Default downloads remain the canonical crop; `SMALL` requests
+the smaller variant with legacy fallback, and `SOURCE` requires current artwork
+management permission (or the uploader's still-authorized pending upload).
+`FileChunk` returns framing metadata for framed assets. Each chunk rechecks
+reference-based authorization. New image selection retains a source only through
+an explicit crop-dialog choice; old clients keep their existing upload contract.
+Schema 15 persists framing and gives attachments a nullable upload carrier so
+server artwork survives its carrier's deletion; message deletion still cascades.
+See [shared-artwork-framing.md](shared-artwork-framing.md) for limits and API usage.
+
 ### End-to-end encryption (`e2e.v1`)
 
 `PublishDeviceKey{public_key}` (32-byte X25519, ≤ 10 per user),
@@ -174,6 +188,7 @@ never reaches anyone who did not ask to watch. Packet format:
 
 Rejections carry `ERROR_RATE_LIMITED` with `retry_after_ms`.
 
+
 ## Local IPC (omachatd ⇄ GUI, CLI, plugin)
 
 Unix socket `$XDG_RUNTIME_DIR/omachat/omachat.sock` (override:
@@ -203,20 +218,78 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 
 | Area | Methods |
 |---|---|
-| daemon | `daemon.status`, `daemon.version` → `{version, ipc, protocol_major, features[]}`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe`, `omkaon.inbox.deliver {message_id, sender, content, kind?, reply_to?}`, `omkaon.inbox.list`, `omkaon.inbox.delete {message_id}` (local omkaon inbox extension) |
+| daemon | `daemon.status`, `daemon.version` → `{version, ipc, protocol_major, features[]}`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe` |
 | accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.oauthLogin {host, port, provider: discord\|github\|google}`, `account.oauthLink {provider}` (attaches a provider to the signed-in account), `account.oauthUnlink {provider}`, `account.oauthIdentities` → `{identities: [{provider, username, linked_at}]}`, `account.logout`, `account.remove`, `account.forgetDuplicate {account}`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
 
 | servers | `server.list`, `server.create`, `server.create_from_discord {name, files}`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
-| channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
+| channels | `channel.list`, `channel.join`, `channel.create`, `channel.update`, `channel.details.reload`, `channel.delete`, `channel.mute`, `dm.open`, `dm.send {user, content}`, `dm.create {users, name?}`, `dm.add {channel, user}`, `dm.leave {channel}` |
 | messages | `message.history`, `message.send {files?}`, `message.edit`, `message.delete`, `message.search {channel \| server, query}`, `message.react`, `typing`, `presence.set` |
 | profile | `profile.update {display_name, avatar_url, bio}` |
-| attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?}` → `{path, cached}`, `transfer.list`, `transfer.cancel {id}` |
+| attachments | `attachment.download {attachment, filename?, to?: downloads\|cache\|/abs/path, size?, artwork_variant?: full\|small\|source}` → `{path, cached, framing?}`, `transfer.list`, `transfer.cancel {id}` |
 | voice | `voice.join`, `voice.leave`, `voice.mute`, `voice.unmute`, `voice.toggle_mute`, `voice.deafen`, `voice.undeafen`, `voice.toggle_deafen`, `voice.mode`, `voice.stats`, `ptt.begin`, `ptt.end` |
 | encryption | `e2e.status` → `{enabled, ready, device}`, `e2e.safety {user}` → `{number, devices, verified}`, `e2e.verify {user, verified?}` |
 | screen sharing | `stream.start {audio?}` (answers after the desktop picker; no timeout), `stream.stop`, `stream.watch {user}` → `{path}`, `stream.unwatch {user}`, `stream.stats`, `video.settings`, `video.set` |
 | audio | `audio.devices`, `audio.settings`, `audio.set`, `audio.user_volume` |
 | moderation | `moderation.kick`, `moderation.ban`, `moderation.unban`, `moderation.voice_mute`, `role.create`, `role.update` (fields left out are kept), `role.delete`, `role.assign`, `override.set {channel, role \| user, allow, deny, remove?}`, `override.list` |
-| ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.reload` |
+| ui/config | `ui.focus`, `ui.navigate`, `config.get`, `config.set_notifications`, `config.set_ui`, `config.reload` |
+
+`channel.update {channel, parent?, before?}` accepts a decimal string sibling ID
+when `channel.placement.v1` is advertised. `before: "0"` appends to the destination;
+`before` and numeric `position` are mutually exclusive. The server resolves the
+sibling after excluding the moved channel, validates destination/type/visibility,
+and writes dense positions transactionally, including siblings hidden from the
+actor. A missing or moved target rejects the operation without changing storage.
+Existing numeric position requests remain supported. CLI parity is
+`omachatctl channel place CHANNEL CATEGORY_ID [BEFORE_CHANNEL_ID]`.
+Channel JSON now includes `permissions`, the names of the server-reported effective
+permissions for the current user, alongside the existing `can_*` convenience flags.
+These are final results, not attribution to individual roles or overrides.
+
+Channel detail conflict checks are capability gated by `channel.details.cas.v1`.
+`UpdateChannelRequest.check_details` compares `expected_name`, `expected_topic`
+and `expected_description` exactly against the current channel before any
+mutation. A mismatch returns `ERROR_CONFLICT`; checked detail updates cannot
+include artwork or placement. Legacy updates remain compatible. Desktop detail
+saves require this capability and retain local edits on conflict.
+
+Daemon `channel.update` accepts `original: {name, topic, description}` to request
+the check. `channel.details.reload {channel}` fetches an authoritative server
+snapshot and returns the permitted channel's latest details. The desktop's
+explicit Reload latest action retains local input and rebases its comparison
+values for a deliberate subsequent save. Remote events never rebase dirty input.
+
+The additive `channel.duplicate.v1` capability enables
+`channel.duplicate {channel, name, parent?}`. Omitted parent retains the source
+category; explicit decimal string `"0"` selects top level. Sources must be visible
+and manageable community text/voice/category channels. Destination categories
+must be visible and manageable in the same server. Configuration, artwork
+references and explicit permission overrides are committed atomically before
+publication. Messages, recipients, active voice state and category children are
+excluded. Shared artwork downloads authorize any visible referencing channel;
+deleting its original channel preserves surviving references.
+
+`channel.artwork.cas.v1` accepts `artwork_original:
+{icon_attachment_id, banner_attachment_id}` on `channel.artwork.set` and
+artwork-only `channel.update`. `channel.placement.cas.v1` accepts
+`placement_original: {parent_id, position}` on placement-only `channel.update`.
+IDs are decimal strings; position is a nonnegative JSON integer. Comparison is
+permission-first and atomic with the update; stale values return `Conflict`.
+These checks do not compare every sibling or a whole-list revision.
+
+Daemon status `send_recovery` reports bound secure-keyring support and the actual
+verified certificate fingerprint. `message.send` optionally accepts
+`recovery_id` plus `original` composer text. The daemon persists an encrypted
+record before network dispatch. `recovery.list` returns records bound to the
+active account/endpoint/verified certificate/user; `recovery.dismiss {id}` deletes
+one durably. `recovery.changed {account}` announces changed outcomes without
+including their content. States are pending, rejected and uncertain. After a
+daemon restart, pending becomes uncertain. Only a correlated server rejection
+permits manual retry of the immutable record context. `RecoveryError` covers
+storage failure and ambiguous delivery, including acknowledged delivery whose
+recovery deletion failed; it never authorizes retry. Limits are 20 records,
+128 KiB serialized bytes and 30 days per account. Logout and both explicit and
+automatic duplicate retirement purge recovery state; failure remains visible.
+See [desktop-send-recovery-design.md](desktop-send-recovery-design.md) for boundaries.
 
 `account.remove` requires a connected session for that account. It permanently deletes the user on the server, including owned servers and private conversations, then removes the local account. A server failure leaves the local account intact. Messages the user posted in shared servers remain in those servers under the deleted user's ID.
 
@@ -232,18 +305,6 @@ channels, and Do Not Disturb status.
 
 Push-to-talk held by a client is released automatically if that client
 disconnects.
-
-`omkaon.inbox.deliver` is a same-user local IPC extension used by the omkaon
-connector after it decrypts a portal envelope on the owner's device. It
-validates bounded sender/message text, a `message` or `call_request` kind, and
-an optional bounded reply method, then stores them in the local omachat
-database, deduplicated by message id. A call request is only a request to
-arrange a call; it does not initiate media. It can also display a generic
-desktop notification without message content. `omkaon.inbox.list` returns the newest 200 locally stored
-entries; `omkaon.inbox.delete` removes one. The entries are local inbox data,
-not network messages, and never impersonate an omachat account. Local storage
-keeps the newest 200 messages and expires entries older than 90 days. The
-private Unix socket remains local; never expose it to a network listener.
 
 Messages of encrypted conversations arrive decrypted, with `"e2e": "ok"`
 (`"unverified"`: the sending device is not one we know for the author;
@@ -306,3 +367,11 @@ does not cancel them.
 `state` is one of `not_configured, connecting, authenticating,
 login_required, synchronizing, connected, reconnecting, offline,
 disconnected, error`. Keys are only ever added in minor releases.
+
+## Android additions
+
+See [mobile protocol changes](mobile-protocol-changes.md) for additive capability-negotiated durable message operations, read markers, voice ownership and server instance identity. Existing control framing remains unchanged.
+
+`config.set_ui` accepts optional `scale` (number, 0.5–3.0) and
+`reduced_motion` (boolean). It atomically saves these preferences and returns
+the saved values; invalid input or failed storage leaves the existing preferences intact.

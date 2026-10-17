@@ -19,6 +19,7 @@ public:
     {
         auto* job = new QKeychain::ReadPasswordJob(QString::fromLatin1(kAppId), m_parent);
         job->setAutoDelete(true);
+        job->setInsecureFallback(false);
         job->setKey(key);
         QObject::connect(job, &QKeychain::Job::finished, m_parent, [cb = std::move(cb)](QKeychain::Job* j) {
             auto* rj = static_cast<QKeychain::ReadPasswordJob*>(j);
@@ -36,6 +37,7 @@ public:
     {
         auto* job = new QKeychain::WritePasswordJob(QString::fromLatin1(kAppId), m_parent);
         job->setAutoDelete(true);
+        job->setInsecureFallback(false);
         job->setKey(key);
         job->setTextData(secret);
         QObject::connect(job, &QKeychain::Job::finished, m_parent, [cb = std::move(cb)](QKeychain::Job* j) {
@@ -49,6 +51,7 @@ public:
     {
         auto* job = new QKeychain::DeletePasswordJob(QString::fromLatin1(kAppId), m_parent);
         job->setAutoDelete(true);
+        job->setInsecureFallback(false);
         job->setKey(key);
         QObject::connect(job, &QKeychain::Job::finished, m_parent, [cb = std::move(cb)](QKeychain::Job* j) {
             const bool ok = j->error() == QKeychain::NoError || j->error() == QKeychain::EntryNotFound;

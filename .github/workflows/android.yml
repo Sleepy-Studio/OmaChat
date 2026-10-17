@@ -1,0 +1,74 @@
+name: Android
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install pinned SDK
+        run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
+      - name: Protocol tests, lint, debug and optimized unsigned release
+        working-directory: android
+        run: |
+          ./gradlew :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
+          ./gradlew :protocol:test :app:lintDebug
+          python3 tools/check_native_alignment.py app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release-unsigned.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apks-unsigned-release-and-debug
+          path: android/app/build/outputs/apk/**/*.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-test-reports
+          path: |
+            android/protocol/build/reports/tests/
+            android/app/build/reports/lint-results-debug.html
+  persistence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: |
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
+      - name: Run persistence tests on API 36
+        working-directory: android
+        timeout-minutes: 20
+        run: |
+          sdkmanager 'emulator' 'platform-tools' 'system-images;android-36;google_apis;x86_64'
+          sudo chmod a+rw /dev/kvm
+          export ANDROID_USER_HOME="$RUNNER_TEMP/omachat-android"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | avdmanager create avd --force --name omachat-ci --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" -avd omachat-ci -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -accel on > /tmp/omachat-emulator.log 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true; cat /tmp/omachat-emulator.log' EXIT
+          adb="$ANDROID_HOME/platform-tools/adb"
+          timeout 180 "$adb" wait-for-device
+          booted=false
+          for attempt in {1..90}; do
+            if [[ $("$adb" shell getprop sys.boot_completed | tr -d '\r') == 1 ]]; then
+              booted=true
+              break
+            fi
+            kill -0 "$emulator_pid"
+            sleep 2
+          done
+          [[ "$booted" == true ]] || { echo 'Emulator boot timed out' >&2; exit 1; }
+          "$adb" shell input keyevent 82
+          ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=org.omachat.android.RoomPersistenceTest

@@ -8,9 +8,9 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QUrl>
 #include <QUrlQuery>
-#include <QRegularExpression>
 
 #include <cmath>
 
@@ -63,8 +63,8 @@ std::optional<QString> avatarUrl(const QJsonObject& obj)
         return QString();
     const QString value = obj.value(QStringLiteral("avatar_url")).toString();
     const QUrl url(value);
-    if (value.size() > 2048 || !url.isValid() || url.scheme() != u"https"
-        || url.host().isEmpty() || !url.userInfo().isEmpty())
+    if (value.size() > 2048 || !url.isValid() || url.scheme() != u"https" || url.host().isEmpty()
+        || !url.userInfo().isEmpty())
         return std::nullopt;
     return value;
 }
@@ -86,8 +86,7 @@ std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJ
             if (hash.isEmpty())
                 p.avatarUrl = QString();
             else if (safeId.match(p.id).hasMatch() && safeHash.match(hash).hasMatch())
-                p.avatarUrl = QStringLiteral("https://cdn.discordapp.com/avatars/%1/%2.png?size=256")
-                                  .arg(p.id, hash);
+                p.avatarUrl = QStringLiteral("https://cdn.discordapp.com/avatars/%1/%2.png?size=256").arg(p.id, hash);
         }
         break;
     case proto::OAUTH_PROVIDER_GITHUB:
@@ -121,8 +120,8 @@ std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJ
     }
     if (p.id.isEmpty() || p.username.isEmpty())
         return std::nullopt;
-    p.displayName = validation::displayName(p.displayName)
-                        .value_or(validation::displayName(p.username).value_or(QString()));
+    p.displayName
+        = validation::displayName(p.displayName).value_or(validation::displayName(p.username).value_or(QString()));
     return p;
 }
 
@@ -145,8 +144,8 @@ const OAuthProviderMeta* metaByName(const QString& name)
 }
 
 void exchangeAndFetchProfile(QNetworkAccessManager& net, const OAuthProviderMeta& meta,
-    const OAuthProviderSettings& settings, const QString& code, const QString& codeVerifier,
-    const QString& redirectUri, std::function<void(std::optional<OAuthProfile>, QString error)> done)
+    const OAuthProviderSettings& settings, const QString& code, const QString& codeVerifier, const QString& redirectUri,
+    std::function<void(std::optional<OAuthProfile>, QString error)> done)
 {
     QUrlQuery body;
     body.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));

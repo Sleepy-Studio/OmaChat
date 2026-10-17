@@ -87,26 +87,10 @@ bool LocalStore::open(const QString& path, QString* error)
             return false;
         }
     }
-    if (version < 3) {
-        const bool ok = exec(QStringLiteral(
-            "CREATE TABLE omkaon_inbox(id TEXT PRIMARY KEY, sender TEXT NOT NULL, content TEXT NOT NULL, "
-            "received_at INTEGER NOT NULL)"))
-            && exec(QStringLiteral("CREATE INDEX omkaon_inbox_received_at ON omkaon_inbox(received_at DESC)"));
-        if (!ok) {
-            if (error)
-                *error = QStringLiteral("cannot upgrade local database");
-            return false;
-        }
-    }
-    if (version < 4) {
-        const bool ok = exec(QStringLiteral("ALTER TABLE omkaon_inbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'message'"))
-            && exec(QStringLiteral("ALTER TABLE omkaon_inbox ADD COLUMN reply_to TEXT NOT NULL DEFAULT ''"));
-        if (!ok) {
-            if (error)
-                *error = QStringLiteral("cannot upgrade local database");
-            return false;
-        }
-    }
+    // Versions 3 and 4 were reserved by a local-only extension that is no
+    // longer part of this application. Keep the version high-water mark so
+    // existing databases upgrade monotonically; any existing extension data
+    // remains untouched and is not read by omachat.
     exec(QStringLiteral("PRAGMA user_version=%1").arg(kSchemaVersion));
     return true;
 }
@@ -304,55 +288,6 @@ bool LocalStore::setValue(const QString& key, const QString& value)
         QStringLiteral("INSERT INTO kv(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"));
     q.addBindValue(key);
     q.addBindValue(value);
-    return q.exec();
-}
-
-bool LocalStore::addOmkaonInboxMessage(
-    const QString& id, const QString& sender, const QString& content, const QString& kind,
-    const QString& replyTo, bool* inserted)
-{
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("INSERT OR IGNORE INTO omkaon_inbox(id, sender, content, received_at, kind, reply_to) "
-                             "VALUES(?,?,?,?,?,?)"));
-    q.addBindValue(id);
-    q.addBindValue(sender);
-    q.addBindValue(content);
-    q.addBindValue(QDateTime::currentMSecsSinceEpoch());
-    q.addBindValue(kind);
-    q.addBindValue(replyTo);
-    if (!q.exec())
-        return false;
-    if (inserted)
-        *inserted = q.numRowsAffected() > 0;
-    // Keep this local inbox bounded and expire old contact messages.
-    QSqlQuery prune(m_db);
-    prune.prepare(QStringLiteral(
-        "DELETE FROM omkaon_inbox WHERE received_at < ? OR id NOT IN "
-        "(SELECT id FROM omkaon_inbox ORDER BY received_at DESC LIMIT 200)"));
-    prune.addBindValue(QDateTime::currentMSecsSinceEpoch() - 90LL * 24 * 60 * 60 * 1000);
-    return prune.exec();
-}
-
-std::vector<OmkaonInboxMessage> LocalStore::omkaonInboxMessages() const
-{
-    std::vector<OmkaonInboxMessage> messages;
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "SELECT id, sender, content, received_at, kind, reply_to FROM omkaon_inbox ORDER BY received_at DESC LIMIT 200"));
-    if (!q.exec())
-        return messages;
-    while (q.next()) {
-        messages.push_back({q.value(0).toString(), q.value(1).toString(), q.value(2).toString(),
-            q.value(3).toLongLong(), q.value(4).toString(), q.value(5).toString()});
-    }
-    return messages;
-}
-
-bool LocalStore::deleteOmkaonInboxMessage(const QString& id)
-{
-    QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("DELETE FROM omkaon_inbox WHERE id = ?"));
-    q.addBindValue(id);
     return q.exec();
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "network.pb.h"
 #include "storage/Records.hpp"
 
 #include <QSqlDatabase>
@@ -26,6 +27,7 @@ public:
 
     bool open(const QString& path, QString* error);
     int schemaVersion() const;
+    QString instanceId();
     std::optional<bool> registrationOverride();
     bool setRegistrationOverride(bool open);
     std::uint64_t messageCount();
@@ -69,6 +71,10 @@ public:
     std::optional<SessionRecord> sessionByDigest(const QByteArray& digest);
     bool rotateSession(Id sessionId, const QByteArray& newDigest, std::int64_t expiresAt);
     bool deleteSession(Id sessionId);
+    bool sessionActive(Id sessionId, Id userId, std::int64_t nowMs);
+    std::optional<std::vector<SessionRecord>> loginSessions(Id userId, Id beforeId, std::int64_t nowMs);
+    // nullopt on database error; false for a missing/foreign session.
+    std::optional<bool> revokeLoginSession(Id userId, Id sessionId);
     int purgeExpiredSessions(std::int64_t nowMs);
 
     // ---- servers, roles, members, channels (loaded into memory at startup)
@@ -105,7 +111,18 @@ public:
 
     // ---- messages
     // Also claims m.attachments (by id) for the message, atomically.
-    bool insertMessage(const MessageRecord& m, Id importServerId = 0, const QString& discordId = {});
+    bool insertMessage(const MessageRecord& m, Id importServerId = 0, const QString& discordId = {},
+        const QByteArray& operationId = {}, const QByteArray& digest = {}, const QByteArray& result = {});
+    struct MessageOperation {
+        QByteArray digest;
+        QByteArray result;
+        Id messageId;
+    };
+    std::optional<MessageOperation> messageOperation(Id userId, const QByteArray& operationId);
+    bool setReadMarker(Id userId, const MessageRecord& message);
+    std::vector<proto::ReadMarker> readMarkers(Id userId);
+    // One SQL snapshot; nullopt on failure, never a fabricated empty result.
+    std::optional<proto::UnreadSummary> unreadSummary(Id userId, Id channelId);
     std::optional<Id> discordImportId(Id serverId, const QString& kind, const QString& discordId);
     bool rememberDiscordImport(Id serverId, const QString& kind, const QString& discordId, Id localId);
     bool rememberDiscordReply(Id serverId, Id messageId, const QString& replyDiscordId);
@@ -135,6 +152,7 @@ public:
     bool deleteAttachment(Id id);
     // Returns the channel that currently uses an attachment as artwork.
     Id artworkChannel(Id attachmentId);
+    std::optional<std::vector<Id>> artworkChannels(Id attachmentId);
     // Returns the server that currently uses an attachment as icon/banner.
     Id artworkServer(Id attachmentId);
     std::vector<Id> allAttachmentIds();
@@ -151,6 +169,7 @@ public:
 private:
     bool exec(const QString& sql, const std::vector<QVariant>& binds = {});
     bool migrate(QString* error);
+    bool reclaimDetachedAttachments();
 
     QString m_connectionName;
     QSqlDatabase m_db;

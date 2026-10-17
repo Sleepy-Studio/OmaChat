@@ -1,7 +1,8 @@
-# Development status
+# Archived development status notes
 
-Handoff notes for whoever picks this up next (human or agent). Last updated
-2026-10-01. "Current source" below means `main`.
+Historical handoff notes retained during branch consolidation. The current
+status snapshot is [STATUS.md](STATUS.md); entries below describe the earlier
+worktree and are not claims about the current implementation.
 
 ## Channel notifications — 2026-10-17
 
@@ -22,6 +23,10 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
 - Verification: `cmake --build /tmp/omachat-build --target omachat omachatd -j2`
   passed after the final source change; Omarchy plugin rescan succeeded. No
   tests run. The working tree was already dirty with unrelated work.
+- On `review/omachat-standalone`, a clean CMake configure and targeted
+  `omachat`/`omachatd` build passed; no tests were run there. The complete
+  worktree was preserved on `holding/omachat-complete-worktree` before this
+  consolidation. PR #2 was open against `main` at that snapshot.
 
 ## 0.2.2 conversation UI release
 

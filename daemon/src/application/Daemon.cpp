@@ -60,10 +60,14 @@ bool Daemon::start(QString* error)
         return false;
     pruneAttachmentCache();
 
-    if (m_options.memoryCredentials)
+    if (m_options.credentialStoreFactory)
+        m_credentials = m_options.credentialStoreFactory(this);
+    else if (m_options.memoryCredentials)
         m_credentials = std::make_unique<MemoryCredentialStore>();
     else
         m_credentials = makeKeychainStore(this);
+    m_sendRecovery = std::make_unique<SendRecoveryStore>(
+        QFileInfo(m_options.databasePath).absolutePath() + QStringLiteral("/send-recovery"), *m_credentials);
 
     if (m_options.nullAudio) {
         m_audio = std::make_unique<audio::NullAudioBackend>();
@@ -421,7 +425,8 @@ QJsonObject Daemon::statusJson() const
     if (m_conn && m_conn->hasAccount()) {
         const auto& a = m_conn->account();
         status.insert(QStringLiteral("account"),
-            QJsonObject{{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port}, {"username", a.username}});
+            QJsonObject{{"id", QString::number(a.id)}, {"host", a.host}, {"port", a.port}, {"username", a.username},
+                {"trusted_fingerprint", a.trustedFingerprint}});
         status.insert(QStringLiteral("instance"), m_conn->instanceName());
         status.insert(QStringLiteral("max_upload_bytes"), static_cast<double>(m_conn->maxUploadBytes()));
         status.insert(QStringLiteral("capabilities"), QJsonArray::fromStringList(m_conn->capabilities()));
@@ -478,6 +483,13 @@ QJsonObject Daemon::statusJson() const
             {"output", m_config.audio.output}, {"error", m_audioError}});
     status.insert(QStringLiteral("clients"), m_ipc.clientCount());
     status.insert(QStringLiteral("accounts"), accountsJson());
+    const auto recovery = recoveryBinding();
+    status.insert(QStringLiteral("send_recovery"),
+        QJsonObject{
+            {"supported",
+                m_credentials && m_credentials->backendName() == QStringLiteral("keyring") && recovery.has_value()},
+            {"certificate_fingerprint", recovery ? recovery->certificatePin : QString()},
+            {"max_records", SendRecoveryStore::kMaxRecords}});
     status.insert(QStringLiteral("e2e"), m_e2e ? m_e2e->statusJson() : QJsonObject());
     return status;
 }
@@ -497,6 +509,13 @@ void Daemon::onModelEvent(const QString& name, const QJsonObject& data)
         const Id channel = idFromJson(data.value(QStringLiteral("channel_id")));
         const Id self = m_conn->model().self().id();
         if (user == self) {
+            const Id owner = idFromJson(data.value(QStringLiteral("owner_session_id")));
+            if (owner && owner != m_conn->sessionId() && m_voiceChannel) {
+                m_voiceChannel = 0;
+                stopVoiceEngine();
+                m_video->stopSharing();
+                m_ipc.broadcast(QStringLiteral("voice.ownership_lost"), {});
+            }
             if (channel == 0 && m_voiceChannel && !m_voicePending) {
                 // The server removed us (kicked from channel, permission change).
                 OMA_INFO("voice", "removed from voice by server");
@@ -747,6 +766,13 @@ void Daemon::checkVoiceAfterSync()
         return;
     const ClientState& model = m_conn->model();
     const proto::VoiceState* mine = model.voiceState(model.self().id());
+    if (mine && mine->owner_session_id() && mine->owner_session_id() != m_conn->sessionId()) {
+        m_voiceChannel = 0;
+        stopVoiceEngine();
+        m_video->stopSharing();
+        m_ipc.broadcast(QStringLiteral("voice.ownership_lost"), {});
+        return;
+    }
     if (mine && mine->channel_id() == m_voiceChannel)
         return;
     // Full resync after an outage lost our voice session: rejoin transparently.

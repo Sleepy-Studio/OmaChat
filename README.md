@@ -27,6 +27,9 @@ assistants, bots or LLM features.
 - Servers with categories, text channels and voice channels; direct
   messages and group conversations (3–10 people), end-to-end encrypted
   with safety numbers (text and files; see [security](docs/security.md))
+- Channel icons, banners and descriptions, bounded channel/server artwork cropping,
+  keyboard or pointer placement, current-user access review, and checked channel
+  detail saves that retain edits when another administrator changes the channel
 - Persistent history (paged, 50 at a time), edits, deletes, replies,
   @mentions, reactions, typing indicators, full-text search of a channel
   or a whole server
@@ -64,7 +67,8 @@ assistants, bots or LLM features.
   `Ctrl+Shift+D` deafen, `Alt+↑/↓` channels, `Ctrl+L` channel list,
   `Ctrl+F` search, `Ctrl+/` help, `Up` edits your last message,
   `Tab` completes `@user`, `#channel` and `/commands` (all configurable)
-- Omarchy theme colors applied live; optional bar widget for Omarchy
+- Omarchy theme colors applied live; interface scale and reduced motion in Settings;
+  optional bar widget for Omarchy
 
 ## Install
 
@@ -116,7 +120,7 @@ guide, including a `docker-compose.yml`: [docs/self-hosting.md](docs/self-hostin
 See [docs/architecture.md](docs/architecture.md), [docs/protocol.md](docs/protocol.md),
 [docs/media.md](docs/media.md), [docs/security.md](docs/security.md) and
 [docs/self-hosting.md](docs/self-hosting.md). Current progress and what's
-next: [docs/status.md](docs/status.md).
+next: [docs/STATUS.md](docs/STATUS.md).
 
 ## Build
 
@@ -124,7 +128,7 @@ For development, or to build for a distribution the install script doesn't
 cover yet. On Arch Linux:
 
 ```bash
-sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia \
+sudo pacman -S --needed cmake ninja gcc qt6-base qt6-declarative qt6-svg qt6-wayland qt6-multimedia qt6-imageformats \
     qtkeychain-qt6 protobuf libsodium opus libpipewire openssl tomlplusplus rnnoise ffmpeg gtest
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
@@ -320,7 +324,7 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
 
 ## Status: 0.2 (early)
 
-`v0.2.2` is the latest tag; see [the development status](docs/status.md) for
+`v0.2.2` is the latest tag; see [the development status](docs/STATUS.md) for
 its verification and release plan.
 
 Working and tested (see `ctest`): accounts, sessions and resume, TLS with
@@ -345,7 +349,7 @@ Not done yet — be aware:
   yet (the rest of the video path is tested). Shared sound is opt-in,
   mono, and comes from all other applications, not only the shared window.
   The GUI confirms each share with sound.
-- See [docs/status.md](docs/status.md) for the current list.
+- See [docs/STATUS.md](docs/STATUS.md) for the current list.
 
 ## License
 
@@ -353,7 +357,6 @@ MIT — see [LICENSE](LICENSE).
 
 ## Ombrella integrations
 
-- [omkaon](../voice/omkaon/README.md): optional same-user IPC voice relay; the live Discord path is not verified by this README.
 - [omatube](../media/omatube/README.md): uses `omachatctl` for message sending and `omatube://` for the click handoff.
 - [omban](../coordinate/omban/docs/OMACHAT-INTEGRATION.md): optional capture and snapshot adapter owned by omban; live IPC was not verified in the last recorded inspection.
 - [omavb](../voice/omavb/README.md): optional voicebox integration under `integrations/voicebox/`; environment and runtime verification are deployment-dependent.
@@ -367,3 +370,19 @@ See [Development](#development) for focused unit, integration, and fuzz commands
 ## Project guide
 
 - [Idea](IDEA.md) · [Architecture](ARCHITECTURE.md) · [Build](BUILD.md) · [Agent instructions](AGENTS.md) · [Project skill](SKILL.md) · [Capabilities](CAPABILITIES.md) · [Current status](docs/STATUS.md).
+
+## Android
+
+A native Kotlin/Compose Android client is being implemented in `android/`.
+The current vertical slice connects directly over TLS, supports community text,
+history, replies/edits/deletion/reactions, persisted drafts/outbox, and foreground
+recovery. Independent Android keys interoperate with desktop encrypted DMs,
+groups, edits and files, with safety numbers and key-change warnings. Native voice
+now has explicit ownership/transfer controls and a microphone foreground service;
+physical audio/routes/calls remain unverified. Persisted transfer resume, push, OAuth
+and screen-share viewing remain pending; this is not a completed mobile release.
+
+See [build/install and emulator tests](docs/android.md),
+[architecture](docs/android-architecture.md),
+[additive protocol changes](docs/mobile-protocol-changes.md), and
+[actual verification status](docs/android-implementation-status.md).

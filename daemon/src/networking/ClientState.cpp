@@ -99,6 +99,8 @@ void ClientState::reset(const proto::SyncState& sync)
         m_voice[v.user_id()] = v;
     for (int i = 0; i < sync.server_permissions_server_ids_size() && i < sync.server_permissions_size(); ++i)
         m_serverPermissions[sync.server_permissions_server_ids(i)] = sync.server_permissions(i);
+    for (const auto& marker : sync.read_markers())
+        m_readMarkers[marker.channel_id()] = marker;
     m_lastSequence = sync.last_sequence();
 }
 
@@ -308,6 +310,14 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
             {QStringLiteral("presence"), {{"user_id", idString(p.user_id())}, {"status", statusName(p.status())}}});
         break;
     }
+    case proto::Event::kReadMarker: {
+        const auto& marker = e.read_marker();
+        m_readMarkers[marker.channel_id()] = marker;
+        out.push_back({QStringLiteral("read.marker"),
+            {{"channel_id", idString(marker.channel_id())}, {"message_id", idString(marker.message_id())},
+                {"timestamp", static_cast<double>(marker.timestamp())}}});
+        break;
+    }
     case proto::Event::kVoiceStateUpdate: {
         const auto& v = e.voice_state_update();
         const Id previous = m_voice.contains(v.user_id()) ? m_voice[v.user_id()].channel_id() : 0;
@@ -435,12 +445,16 @@ QJsonObject ClientState::channelJson(const proto::Channel& c) const
         name = others.join(QStringLiteral(", "));
     }
     const auto p = c.effective_permissions();
+    QJsonArray effective;
+    for (auto n : permissions::names(p))
+        effective.append(QString::fromLatin1(n.data(), static_cast<qsizetype>(n.size())));
     return {{"id", idString(c.id())}, {"server_id", idString(c.server_id())}, {"name", name},
         {"type", channelTypeName(c.type())}, {"parent_id", idString(c.parent_id())},
         {"position", static_cast<int>(c.position())}, {"topic", QString::fromStdString(c.topic())},
+        {"placement_token", QString::fromStdString(c.placement_token())},
         {"description", QString::fromStdString(c.description())},
         {"icon_attachment_id", idString(c.icon_attachment_id())},
-        {"banner_attachment_id", idString(c.banner_attachment_id())},
+        {"banner_attachment_id", idString(c.banner_attachment_id())}, {"permissions", effective},
         {"recipients", recipients}, {"can_send", permissions::has(p, permissions::SendMessages)},
         {"can_connect", permissions::has(p, permissions::ConnectVoice)},
         {"can_speak", permissions::has(p, permissions::Speak)},
@@ -485,7 +499,8 @@ QJsonObject ClientState::voiceStateJson(const proto::VoiceState& v) const
 {
     return {{"user_id", idString(v.user_id())}, {"channel_id", idString(v.channel_id())}, {"self_mute", v.self_mute()},
         {"self_deaf", v.self_deaf()}, {"server_mute", v.server_mute()}, {"server_deaf", v.server_deaf()},
-        {"stream_id", static_cast<double>(v.stream_id())}, {"streaming", v.streaming()}};
+        {"stream_id", static_cast<double>(v.stream_id())}, {"streaming", v.streaming()},
+        {"owner_session_id", idString(v.owner_session_id())}};
 }
 
 QJsonObject ClientState::attachmentJson(const proto::Attachment& a)
@@ -564,9 +579,13 @@ QJsonObject ClientState::snapshotJson() const
         users.append(userJson(u));
     for (const auto& [id, v] : m_voice)
         voice.append(voiceStateJson(v));
-    return {{"valid", m_valid}, {"self", m_valid ? userJson(m_self) : QJsonObject{}}, {"servers", servers},
-        {"channels", channels}, {"roles", roles}, {"emoji", emoji}, {"members", members}, {"users", users},
-        {"voice_states", voice}};
+    QJsonArray markers;
+    for (const auto& [id, marker] : m_readMarkers)
+        markers.append(QJsonObject{{"channel_id", idString(id)}, {"message_id", idString(marker.message_id())},
+            {"timestamp", static_cast<double>(marker.timestamp())}});
+    return {{"read_markers", markers}, {"valid", m_valid}, {"self", m_valid ? userJson(m_self) : QJsonObject{}},
+        {"servers", servers}, {"channels", channels}, {"roles", roles}, {"emoji", emoji}, {"members", members},
+        {"users", users}, {"voice_states", voice}};
 }
 
 } // namespace omachat::daemon

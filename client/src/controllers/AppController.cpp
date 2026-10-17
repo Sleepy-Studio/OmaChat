@@ -31,6 +31,19 @@ QString initials(const QString& name)
 
 } // namespace
 
+void AppController::refreshCreationContext()
+{
+    if (m_creationAccount == accountId() && m_creationServer == m_selectedServer
+        && m_creationArtworkGeneration == artworkGeneration())
+        return;
+    m_creationAccount = accountId();
+    m_creationServer = m_selectedServer;
+    m_creationArtworkGeneration = artworkGeneration();
+    ++m_stagedCropOperation;
+    ++m_channelCreateGeneration;
+    m_stagedArtwork.clear();
+}
+
 AppController::AppController(const config::ClientConfig& config, QObject* parent)
     : QObject(parent)
     , m_config(config)
@@ -40,12 +53,29 @@ AppController::AppController(const config::ClientConfig& config, QObject* parent
     , m_channels({"key", "itemId", "rowType", "name", "depth", "unread", "mentions", "muted", "locked", "selected",
           "collapsed", "speaking", "userMuted", "userDeafened", "userId", "presence", "voiceCount", "topic",
           "streaming"})
-    , m_members(
-          {"key", "userId", "name", "username", "avatarUrl", "status", "nameColor", "section", "isOwner", "inVoice", "speaking"})
+    , m_members({"key", "userId", "name", "username", "avatarUrl", "status", "nameColor", "section", "isOwner",
+          "inVoice", "speaking"})
     , m_switcher({"key", "kind", "itemId", "label", "detail"})
     , m_searchResults({"key", "itemId", "channelId", "channel", "author", "preview", "time"})
 {
     g_app = this;
+    connect(this, &AppController::selectionChanged, this, &AppController::refreshCreationContext);
+    connect(this, &AppController::statusChanged, this, &AppController::refreshCreationContext);
+    connect(this, &AppController::artworkGenerationChanged, this, &AppController::refreshCreationContext);
+    connect(this, &AppController::statusChanged, this, &AppController::invalidatePermissionPreview);
+    connect(this, &AppController::selectionChanged, this, &AppController::invalidatePermissionPreview);
+    connect(this, &AppController::rolesChanged, this, &AppController::invalidatePermissionPreview);
+    connect(this, &AppController::channelDataChanged, this, [this](const QString& id) {
+        const QString reviewed = m_permissionPreview.value(QStringLiteral("channelId")).toString();
+        if (id == reviewed || id == channel(reviewed).value(QStringLiteral("parent_id")).toString()
+            || (m_permissionPreview.value("newChannel").toBool()
+                && id == m_permissionPreview.value("parentId").toString()))
+            invalidatePermissionPreview();
+    });
+    connect(this, &AppController::serverDataChanged, this, [this](const QString& id) {
+        if (id == m_permissionPreviewServer)
+            invalidatePermissionPreview();
+    });
     prunePastedImages();
     connect(&m_link, &DaemonLink::stateChanged, this, &AppController::daemonChanged);
     connect(&m_link, &DaemonLink::connected, this, &AppController::onDaemonConnected);
@@ -120,17 +150,20 @@ QString AppController::version() const
 // --------------------------------------------------------------- plumbing
 
 void AppController::call(const QString& method, const QJsonObject& params, std::function<void(const QJsonObject&)> onOk,
-    const QString& failurePrefix)
+    const QString& failurePrefix, std::function<void(const QString&)> onError)
 {
-    m_link.request(method, params, [this, onOk = std::move(onOk), failurePrefix](const ipc::Reply& r) {
-        if (!r.ok) {
-            const QString msg = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
-            showNotice(failurePrefix.isEmpty() ? msg : failurePrefix + QStringLiteral(": ") + msg, true);
-            return;
-        }
-        if (onOk)
-            onOk(r.result);
-    });
+    m_link.request(method, params,
+        [this, onOk = std::move(onOk), failurePrefix, onError = std::move(onError)](const ipc::Reply& r) {
+            if (!r.ok) {
+                const QString msg = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
+                showNotice(failurePrefix.isEmpty() ? msg : failurePrefix + QStringLiteral(": ") + msg, true);
+                if (onError)
+                    onError(msg);
+                return;
+            }
+            if (onOk)
+                onOk(r.result);
+        });
 }
 
 void AppController::showNotice(const QString& text, bool error)
@@ -163,14 +196,19 @@ void AppController::onDaemonConnected()
         m_config.notifications.channelMessages = n.value(QStringLiteral("channel_messages")).toBool(true);
         m_config.notifications.mentions = n.value(QStringLiteral("mentions")).toBool(true);
         m_config.notifications.voiceJoin = n.value(QStringLiteral("voice_join")).toBool(false);
+        const QJsonObject ui = r.result.value(QStringLiteral("ui")).toObject();
+        m_config.ui.scale = ui.value(QStringLiteral("scale")).toDouble(m_config.ui.scale);
+        m_config.ui.reducedMotion = ui.value(QStringLiteral("reduced_motion")).toBool(m_config.ui.reducedMotion);
+        ThemeProvider::instance()->setScale(m_config.ui.scale);
+        ThemeProvider::instance()->setReducedMotion(m_config.ui.reducedMotion);
         const QJsonObject sc = r.result.value(QStringLiteral("shortcuts")).toObject();
         for (auto it = sc.begin(); it != sc.end(); ++it)
             m_config.shortcuts.insert(it.key(), it.value().toString());
         emit configChanged();
     });
     loadSnapshot();
-    refreshOmkaonInbox();
     refreshAudio();
+    refreshTransfers();
 }
 
 void AppController::loadSnapshot()
@@ -188,6 +226,8 @@ void AppController::applyStatus(const QJsonObject& status)
     const bool voiceBefore = voiceJoined();
     const QString voiceChannelBefore = voiceChannelId();
     m_status = status;
+    if (previousAccount != accountId() || state() != u"connected")
+        ++m_sendRecoveryRequest;
     if (state() != u"connected" || previousAccount != accountId()) {
         m_instanceOperator = false;
         m_instanceStatus = {};
@@ -196,10 +236,21 @@ void AppController::applyStatus(const QJsonObject& status)
     const QJsonObject user = status.value(QStringLiteral("user")).toObject();
     if (!user.isEmpty())
         m_self = user;
+    const auto recoveryFingerprint = status.value(QStringLiteral("send_recovery"))
+                                         .toObject()
+                                         .value(QStringLiteral("certificate_fingerprint"))
+                                         .toString();
+    if (!recoveryFingerprint.isEmpty())
+        m_recoveryPeerFingerprints.insert(sendRecoveryEndpoint(), recoveryFingerprint);
+    refreshArtworkCache();
     emit statusChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
     emit voiceChanged();
     if (voiceBefore != voiceJoined() || voiceChannelBefore != voiceChannelId())
         rebuildServers();
+    if (previousAccount != accountId())
+        refreshTransfers();
     if (previousState != state() && state() == u"connected")
         loadSnapshot();
 }
@@ -265,12 +316,16 @@ void AppController::applySnapshot(const QJsonObject& snap)
             m_selectedServer.clear();
     }
     ensureSelection();
+    refreshArtworkCache(true);
     rebuildServers();
     rebuildChannels();
     rebuildMembers();
     m_messages.refreshRendering();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
     refreshInstanceStatus();
+    refreshSendRecovery();
 }
 
 void AppController::refreshInstanceStatus()
@@ -344,11 +399,25 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
     }
     if (name == u"state.reset") {
         loadSnapshot();
-        refreshOmkaonInbox();
         return;
     }
-    if (name == u"omkaon.inbox.received") {
-        refreshOmkaonInbox();
+    if (name == u"read.marker") {
+        const QString channelId = id("channel_id");
+        const qint64 at = static_cast<qint64>(data.value(QStringLiteral("timestamp")).toDouble());
+        const quint64 messageId = id("message_id").toULongLong();
+        auto& unread = m_unreadMessages[channelId];
+        unread.removeIf([&](const QJsonObject& msg) {
+            const qint64 timestamp = static_cast<qint64>(msg.value(QStringLiteral("timestamp")).toDouble());
+            return timestamp < at
+                || (timestamp == at && msg.value(QStringLiteral("id")).toString().toULongLong() <= messageId);
+        });
+        m_unread[channelId] = static_cast<int>(unread.size());
+        m_mentions[channelId] = static_cast<int>(std::ranges::count_if(unread, [&](const QJsonObject& msg) {
+            return msg.value(QStringLiteral("mentions_me")).toBool()
+                || channel(channelId).value(QStringLiteral("type")).toString() == u"dm";
+        }));
+        rebuildServers();
+        rebuildChannels();
         return;
     }
     if (name == u"message.created") {
@@ -356,6 +425,7 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         if (channelId == m_selectedChannel) {
             m_messages.addMessage(data);
         } else if (id("author_id") != selfId()) {
+            m_unreadMessages[channelId].append(data);
             m_unread[channelId] += 1;
             if (data.value(QStringLiteral("mentions_me")).toBool()
                 || channel(channelId).value(QStringLiteral("type")).toString() == u"dm")
@@ -388,6 +458,11 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         updateTyping();
         return;
     }
+    if (name == u"recovery.changed") {
+        if (data.value(QStringLiteral("account")).toString() == accountId())
+            refreshSendRecovery();
+        return;
+    }
     if (name == u"channel.created" || name == u"channel.updated") {
         m_channelsById.insert(id("id"), data);
         rebuildChannels();
@@ -400,6 +475,7 @@ void AppController::onEvent(const QString& name, const QJsonObject& data)
         m_channelsById.remove(id("channel_id"));
         ensureSelection();
         rebuildChannels();
+        emit channelDataChanged(id("channel_id"));
         return;
     }
     if (name == u"server.updated") {
@@ -827,8 +903,17 @@ void AppController::ensureSelection()
     markRead(m_selectedChannel);
 }
 
+void AppController::markConversationRead(const QString& messageId)
+{
+    if (!m_windowFocused || m_selectedChannel.isEmpty() || messageId.isEmpty())
+        return;
+    markRead(m_selectedChannel);
+    m_link.request(QStringLiteral("message.read"), {{"channel", m_selectedChannel}, {"message", messageId}});
+}
+
 void AppController::markRead(const QString& channelId)
 {
+    m_unreadMessages.remove(channelId);
     const bool had = m_unread.remove(channelId) + m_mentions.remove(channelId) > 0;
     if (had) {
         rebuildServers();
@@ -838,6 +923,7 @@ void AppController::markRead(const QString& channelId)
 
 void AppController::rebuildServers()
 {
+    refreshArtworkCache();
     QList<QVariantMap> rows;
     int homeUnread = 0, homeMentions = 0;
     QHash<QString, int> unreadByServer, mentionsByServer;
@@ -879,6 +965,7 @@ void AppController::rebuildServers()
 
 void AppController::rebuildChannels()
 {
+    refreshArtworkCache();
     QList<QVariantMap> rows;
     auto channelRow = [&](const QJsonObject& c, int depth) {
         const QString id = c.value(QStringLiteral("id")).toString();
@@ -958,7 +1045,7 @@ void AppController::rebuildChannels()
             const QString parent = c.value(QStringLiteral("parent_id")).toString();
             if (c.value(QStringLiteral("type")).toString() == u"category")
                 categories.append(c);
-            else if (parent.isEmpty() || parent == u"0")
+            else if (parent.isEmpty() || parent == u"0" || !m_channelsById.contains(parent))
                 top.append(c);
             else
                 children[parent].append(c);

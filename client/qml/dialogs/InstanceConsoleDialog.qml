@@ -6,8 +6,8 @@ import OmaChat
 Dialog {
     id: dialog
     title: qsTr("Instance console")
-    width: Math.min(Theme.px(820), (parent ? parent.width : 900) - Theme.px(32))
-    height: Math.min(Theme.px(660), (parent ? parent.height : 700) - Theme.px(32))
+    width: Math.min(Metrics.px(820), (parent ? parent.width : 900) - Metrics.px(32))
+    height: Math.min(Metrics.px(660), (parent ? parent.height : 700) - Metrics.px(32))
     onAboutToShow: { tabs.currentIndex = 0; App.refreshInstanceStatus() }
 
     readonly property var status: App.instanceStatus
@@ -35,7 +35,7 @@ Dialog {
 
     component Label: Text {
         color: Theme.textMuted
-        font.pixelSize: Theme.px(12)
+        font.pixelSize: Metrics.px(12)
     }
 
     component Metric: Rectangle {
@@ -43,29 +43,29 @@ Dialog {
         property string caption
         property string value
         Layout.fillWidth: true
-        implicitHeight: Theme.px(74)
-        radius: Theme.px(6)
+        implicitHeight: Metrics.px(74)
+        radius: Metrics.px(6)
         color: Theme.surfaceAlt
         border.color: Theme.border
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Theme.px(12)
-            spacing: Theme.px(3)
-            Text { text: metric.value; color: Theme.text; font.bold: true; font.pixelSize: Theme.px(21) }
+            anchors.margins: Metrics.px(12)
+            spacing: Metrics.px(3)
+            Text { text: metric.value; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(21) }
             Label { text: metric.caption }
         }
     }
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(12)
+        spacing: Metrics.px(12)
 
         RowLayout {
             Layout.fillWidth: true
-            Icon { name: "shield"; size: Theme.px(20); color: Theme.accent }
+            Icon { name: "shield"; size: Metrics.px(20); color: Theme.accent }
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 0
-                Text { text: dialog.title; color: Theme.text; font.bold: true; font.pixelSize: Theme.px(17) }
+                Text { text: dialog.title; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(17) }
                 Label { text: dialog.status.instance_name || App.instanceName }
             }
             IconButton { iconName: "x"; tip: qsTr("Close"); onClicked: dialog.close() }
@@ -81,7 +81,7 @@ Dialog {
                     id: tab
                     required property string modelData
                     text: modelData
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     contentItem: Text {
                         text: tab.text
                         font: tab.font
@@ -110,18 +110,18 @@ Dialog {
                 clip: true
                 ColumnLayout {
                     width: parent.width
-                    spacing: Theme.px(12)
+                    spacing: Metrics.px(12)
                     Label { text: qsTr("Live instance health") }
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: Theme.px(8)
+                        spacing: Metrics.px(8)
                         Metric { caption: qsTr("Online users"); value: String(dialog.status.online_users || 0) }
                         Metric { caption: qsTr("Sessions"); value: String(dialog.status.connected_sessions || 0) }
                         Metric { caption: qsTr("Accounts"); value: String(dialog.status.total_users || 0) }
                     }
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: Theme.px(8)
+                        spacing: Metrics.px(8)
                         Metric { caption: qsTr("Communities"); value: String(dialog.communities.length) }
                         Metric { caption: qsTr("Messages stored"); value: Number(dialog.status.total_messages || 0).toLocaleString() }
                     }
@@ -137,19 +137,19 @@ Dialog {
             ListView {
                 id: accountList
                 clip: true
-                spacing: Theme.px(5)
+                spacing: Metrics.px(5)
                 model: dialog.users
                 delegate: Rectangle {
                     id: accountRow
                     required property var modelData
                     width: accountList.width
-                    height: Theme.px(56)
-                    radius: Theme.px(5)
+                    height: Metrics.px(56)
+                    radius: Metrics.px(5)
                     color: Theme.surfaceAlt
                     RowLayout {
                         anchors.fill: parent
-                        anchors.margins: Theme.px(10)
-                        spacing: Theme.px(10)
+                        anchors.margins: Metrics.px(10)
+                        spacing: Metrics.px(10)
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 1
@@ -157,7 +157,7 @@ Dialog {
                                 text: accountRow.modelData.display_name
                                 color: Theme.text
                                 font.bold: true
-                                font.pixelSize: Theme.px(13)
+                                font.pixelSize: Metrics.px(13)
                                 elide: Text.ElideRight
                             }
                             Label { text: "@" + accountRow.modelData.username }
@@ -186,27 +186,27 @@ Dialog {
             }
 
             RowLayout {
-                spacing: Theme.px(12)
+                spacing: Metrics.px(12)
                 ListView {
                     id: communityList
-                    Layout.preferredWidth: Theme.px(245)
+                    Layout.preferredWidth: Metrics.px(245)
                     Layout.fillHeight: true
                     clip: true
-                    spacing: Theme.px(4)
+                    spacing: Metrics.px(4)
                     model: dialog.communities
                     delegate: Rectangle {
                         id: communityRow
                         required property var modelData
                         width: communityList.width
-                        height: Theme.px(55)
-                        radius: Theme.px(5)
+                        height: Metrics.px(55)
+                        radius: Metrics.px(5)
                         color: dialog.selectedCommunity && dialog.selectedCommunity.id === modelData.id
                                ? Theme.selection : Theme.surfaceAlt
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: Theme.px(8)
+                            anchors.margins: Metrics.px(8)
                             spacing: 2
-                            Text { text: communityRow.modelData.name; color: Theme.text; font.bold: true; font.pixelSize: Theme.px(13); elide: Text.ElideRight }
+                            Text { text: communityRow.modelData.name; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(13); elide: Text.ElideRight }
                             Label { text: qsTr("%1 members · %2 channels").arg(communityRow.modelData.members).arg(communityRow.modelData.channels) }
                         }
                         MouseArea { anchors.fill: parent; onClicked: dialog.selectedCommunityId = communityRow.modelData.id }
@@ -217,8 +217,8 @@ Dialog {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     visible: dialog.selectedCommunity !== null
-                    spacing: Theme.px(7)
-                    Text { text: dialog.selectedCommunity ? dialog.selectedCommunity.name : ""; color: Theme.text; font.bold: true; font.pixelSize: Theme.px(15) }
+                    spacing: Metrics.px(7)
+                    Text { text: dialog.selectedCommunity ? dialog.selectedCommunity.name : ""; color: Theme.text; font.bold: true; font.pixelSize: Metrics.px(15) }
                     Label { text: dialog.selectedCommunity ? qsTr("Owned by @%1").arg(dialog.selectedCommunity.owner_name) : "" }
                     SectionLabel { text: qsTr("MEMBERS") }
                     ListView {
@@ -231,8 +231,8 @@ Dialog {
                             id: memberRow
                             required property var modelData
                             width: selectedMemberList.width
-                            height: Theme.px(34)
-                            Text { text: "@" + memberRow.modelData.username; color: Theme.text; Layout.fillWidth: true; font.pixelSize: Theme.px(12) }
+                            height: Metrics.px(34)
+                            Text { text: "@" + memberRow.modelData.username; color: Theme.text; Layout.fillWidth: true; font.pixelSize: Metrics.px(12) }
                             FlatButton {
                                 visible: dialog.selectedCommunity && memberRow.modelData.id !== dialog.selectedCommunity.owner_id
                                          && memberRow.modelData.id !== App.selfId
@@ -252,7 +252,7 @@ Dialog {
                     ListView {
                         id: selectedBanList
                         Layout.fillWidth: true
-                        Layout.preferredHeight: Math.min(contentHeight, Theme.px(120))
+                        Layout.preferredHeight: Math.min(contentHeight, Metrics.px(120))
                         visible: dialog.selectedBans.length > 0
                         clip: true
                         model: dialog.selectedBans
@@ -260,7 +260,7 @@ Dialog {
                             id: bannedRow
                             required property var modelData
                             width: selectedBanList.width
-                            height: Theme.px(30)
+                            height: Metrics.px(30)
                             Label { text: "@" + bannedRow.modelData.username; Layout.fillWidth: true }
                             FlatButton { text: qsTr("Unban"); onClicked: dialog.confirmModeration("unban", bannedRow.modelData) }
                         }
@@ -282,19 +282,19 @@ Dialog {
             ListView {
                 id: auditList
                 clip: true
-                spacing: Theme.px(3)
+                spacing: Metrics.px(3)
                 model: dialog.audit
                 delegate: Rectangle {
                     id: auditRow
                     required property var modelData
                     width: auditList.width
-                    height: Theme.px(38)
+                    height: Metrics.px(38)
                     color: Theme.surfaceAlt
                     RowLayout {
                         anchors.fill: parent
-                        anchors.margins: Theme.px(8)
-                        Label { text: new Date(auditRow.modelData.at).toLocaleString(); Layout.preferredWidth: Theme.px(168) }
-                        Text { text: auditRow.modelData.action; color: Theme.text; Layout.fillWidth: true; font.pixelSize: Theme.px(12) }
+                        anchors.margins: Metrics.px(8)
+                        Label { text: new Date(auditRow.modelData.at).toLocaleString(); Layout.preferredWidth: Metrics.px(168) }
+                        Text { text: auditRow.modelData.action; color: Theme.text; Layout.fillWidth: true; font.pixelSize: Metrics.px(12) }
                         Label { text: auditRow.modelData.target_id === "0" ? "" : auditRow.modelData.target_id }
                     }
                 }
@@ -304,7 +304,7 @@ Dialog {
             ListView {
                 id: logList
                 clip: true
-                spacing: Theme.px(2)
+                spacing: Metrics.px(2)
                 model: dialog.logs
                 delegate: Text {
                     required property string modelData
@@ -312,7 +312,7 @@ Dialog {
                     text: modelData
                     color: Theme.textMuted
                     font.family: "monospace"
-                    font.pixelSize: Theme.px(11)
+                    font.pixelSize: Metrics.px(11)
                     wrapMode: Text.WrapAnywhere
                 }
                 Label { visible: logList.count === 0; anchors.centerIn: parent; text: qsTr("No recent process logs") }
@@ -322,13 +322,13 @@ Dialog {
                 clip: true
                 ColumnLayout {
                     width: parent.width
-                    spacing: Theme.px(16)
+                    spacing: Metrics.px(16)
                     SectionLabel { text: qsTr("ACCESS") }
                     RowLayout {
                         Layout.fillWidth: true
                         ColumnLayout {
                             Layout.fillWidth: true
-                            Text { text: qsTr("Public registration"); color: Theme.text; font.pixelSize: Theme.px(13) }
+                            Text { text: qsTr("Public registration"); color: Theme.text; font.pixelSize: Metrics.px(13) }
                             Label { text: qsTr("Controls creation of new accounts, including OAuth sign-up.") }
                         }
                         Switch {

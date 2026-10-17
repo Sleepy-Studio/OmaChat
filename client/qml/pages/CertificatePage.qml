@@ -10,25 +10,25 @@ Rectangle {
 
     Rectangle {
         anchors.centerIn: parent
-        width: Math.min(parent.width - Theme.px(32), Theme.px(560))
-        height: body.implicitHeight + Theme.px(48)
-        radius: Theme.px(8)
+        width: Math.min(parent.width - Metrics.px(32), Metrics.px(560))
+        height: body.implicitHeight + Metrics.px(48)
+        radius: Metrics.px(8)
         color: Theme.surface
         border.color: Theme.danger
 
         ColumnLayout {
             id: body
             anchors.fill: parent
-            anchors.margins: Theme.px(24)
-            spacing: Theme.px(12)
+            anchors.margins: Metrics.px(24)
+            spacing: Metrics.px(12)
 
             RowLayout {
-                spacing: Theme.px(10)
-                Icon { name: "shield"; size: Theme.px(28); color: Theme.danger }
+                spacing: Metrics.px(10)
+                Icon { name: "shield"; size: Metrics.px(28); color: Theme.danger }
                 Text {
                     text: qsTr("Untrusted server certificate")
                     color: Theme.text
-                    font.pixelSize: Theme.px(18)
+                    font.pixelSize: Metrics.px(18)
                     font.bold: true
                 }
             }
@@ -37,7 +37,7 @@ Rectangle {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: Theme.textMuted
-                font.pixelSize: Theme.px(13)
+                font.pixelSize: Metrics.px(13)
                 text: qsTr("%1:%2 presented a certificate that is not signed by an authority this system trusts. "
                            + "This is normal for self-hosted servers with a self-signed certificate — but only trust it "
                            + "if the fingerprint below matches the one your server administrator gave you.")
@@ -48,26 +48,26 @@ Rectangle {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 text: App.errorMessage
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                implicitHeight: fp.implicitHeight + Theme.px(16)
-                radius: Theme.px(4)
+                implicitHeight: fp.implicitHeight + Metrics.px(16)
+                radius: Metrics.px(4)
                 color: Theme.codeBackground
                 TextEdit {
                     id: fp
                     anchors.fill: parent
-                    anchors.margins: Theme.px(8)
+                    anchors.margins: Metrics.px(8)
                     readOnly: true
                     selectByMouse: true
                     wrapMode: TextEdit.WrapAnywhere
                     text: App.certificateFingerprint
                     color: Theme.text
                     font.family: Theme.monoFamily
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     Accessible.name: qsTr("Certificate fingerprint")
                 }
             }
@@ -76,13 +76,13 @@ Rectangle {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(11)
+                font.pixelSize: Metrics.px(11)
                 text: qsTr("The server administrator can print it with: omachat-server generate-cert … or from the server log line “tls identity loaded”.")
             }
 
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                spacing: Theme.px(8)
+                spacing: Metrics.px(8)
                 FlatButton {
                     text: qsTr("Use a different server")
                     onClicked: App.logout()

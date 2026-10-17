@@ -66,6 +66,7 @@ message Channel {
   string description = 10;             // longer channel details, empty by default
   uint64 icon_attachment_id = 11;
   uint64 banner_attachment_id = 12;
+  string placement_token = 13;
 }
 
 message Role {
@@ -85,12 +86,27 @@ message Member {
   int64 joined_at = 4;      // unix ms
 }
 
+// Immutable framing of a metadata-free, oriented source raster. Coordinates
+// are source pixels, not UI crop-travel fractions. The focal point is the
+// normalized centre of this rectangle. Capability: artwork.framing.v1.
+message ArtworkFraming {
+  enum Kind { NONE = 0; ICON = 1; BANNER = 2; }
+  Kind kind = 1;
+  uint32 source_width = 2;
+  uint32 source_height = 3;
+  uint32 x = 4;
+  uint32 y = 5;
+  uint32 width = 6;
+  uint32 height = 7;
+}
+
 message Attachment {
   uint64 id = 1;
   string filename = 2;
   string mime_type = 3;
   uint64 size = 4;
   bytes sha256 = 5;          // digest of the stored bytes
+  ArtworkFraming artwork_framing = 6;
 }
 
 message Reaction {
@@ -136,6 +152,7 @@ message VoiceState {
   bool server_deaf = 6;
   uint32 stream_id = 7;      // media stream id for speaking indicators
   bool streaming = 8;        // sharing their screen (1.2, "video.h264")
+  uint64 owner_session_id = 9; // voice.ownership.v1; 0 on legacy servers
 }
 
 message Invite {
@@ -221,6 +238,7 @@ message HelloReply {
   uint32 media_udp_port = 7;
   uint64 max_upload_bytes = 8;   // 0 = attachments unsupported
   repeated OAuthProviderConfig oauth_providers = 9;
+  string instance_id = 10; // instance.identity.v1: persistent server database UUID
 }
 
 // ---------------------------------------------------------- authentication
@@ -287,6 +305,23 @@ message OAuthIdentity {
 message OAuthIdentityList {
   repeated OAuthIdentity identities = 1;
 }
+
+// sessions.manage.v1; never exposes credentials, digests or peer addresses.
+message ListLoginSessionsRequest {
+  uint64 before_id = 1; // exclusive descending-ID cursor; 0 starts at newest
+}
+message LoginSession {
+  uint64 id = 1;
+  int64 created_at = 2; // unix ms
+  int64 expires_at = 3; // refresh expiry, unix ms
+  bool connected = 4;
+  bool current = 5;
+}
+message LoginSessionList {
+  repeated LoginSession sessions = 1; // at most 100
+  uint64 next_before_id = 2; // 0 when exhausted
+}
+message RevokeLoginSessionRequest { uint64 session_id = 1; }
 
 message LogoutRequest {}
 message DeleteAccountRequest {}
@@ -369,6 +404,7 @@ message SyncState {
   repeated uint64 server_permissions_server_ids = 9;
   repeated uint64 server_permissions = 10;  // parallel to the field above
   repeated CustomEmoji emoji = 11;
+  repeated ReadMarker read_markers = 12;
 }
 
 // --------------------------------------------------------- server/guilds
@@ -459,6 +495,31 @@ message UpdateChannelRequest {
   bool set_parent = 12;
   uint32 position = 13;
   bool set_position = 14;
+  uint64 before_id = 15;     // channel.placement.v1: stable sibling ID; 0 appends
+  bool set_before = 16;      // mutually exclusive with set_position
+  // channel.details.cas.v1: compare all three originals atomically before updating.
+  // Restricted to name/topic/description; placement and artwork cannot be combined.
+  bool check_details = 17;
+  string expected_name = 18;
+  string expected_topic = 19;
+  string expected_description = 20;
+  // Atomic artwork and placement comparisons, each restricted to its own scope.
+  bool check_artwork = 21;
+  uint64 expected_icon_attachment_id = 22;
+  uint64 expected_banner_attachment_id = 23;
+  bool check_placement = 24;
+  uint64 expected_parent_id = 25;
+  uint32 expected_position = 26;
+  string expected_placement_token = 27;
+  bool check_placement_list = 28;
+}
+// channel.duplicate.v1: configuration and explicit overrides only; no history,
+// recipients, voice occupants or category children. Omitted parent inherits source.
+message DuplicateChannelRequest {
+  uint64 channel_id = 1;
+  string name = 2;
+  uint64 parent_id = 3;
+  bool set_parent = 4;
 }
 message DeleteChannelRequest { uint64 channel_id = 1; }
 message OpenDmRequest { uint64 user_id = 1; }
@@ -481,8 +542,29 @@ message SendMessageRequest {
   uint64 reply_to = 3;
   bool is_action = 4;
   repeated uint64 attachment_ids = 5;
+  bytes operation_id = 7;         // messages.idempotency.v1: stable 16-byte operation ID
   bytes encrypted = 6;            // 1.2 "e2e.v1": direct/group conversations only, content empty
 }
+message ReadMarker { uint64 channel_id = 1; uint64 message_id = 2; int64 timestamp = 3; }
+message SetReadMarkerRequest { uint64 channel_id = 1; uint64 message_id = 2; }
+
+// read.summary.v1: one channel per request, ViewChannel + ReadHistory required.
+message GetUnreadSummaryRequest { uint64 channel_id = 1; }
+message MessagePosition { uint64 message_id = 1; int64 timestamp = 2; }
+message UnreadSummary {
+  uint64 channel_id = 1;
+  ReadMarker marker = 2;          // present even with no saved marker (zero position)
+  uint64 count = 3;               // surviving messages after marker, excluding self
+  uint64 mentions = 4;            // explicit user mentions in unencrypted messages
+  bool mentions_complete = 5;    // false if unread encrypted bodies hide mentions
+  MessagePosition first = 6;      // first unread non-self message, absent when count=0
+  MessagePosition latest = 7;     // latest surviving message, including self
+  // Snapshot includes all persistent events through this boundary. Apply later
+  // events once. Valid only on the requesting authenticated connection; discard
+  // on reconnect/resync (sequences restart with the server process).
+  uint64 sequence = 8;
+}
+
 message EditMessageRequest {
   uint64 message_id = 1;
   string content = 2;
@@ -494,7 +576,7 @@ message EditMessageRequest {
 // 1.2, capability "e2e.v1". Every device holds an X25519 key pair; only the
 // public half is published. A message body is sealed with a random content
 // key (XChaCha20-Poly1305, associated data = "omachat-e2e-v1" | channel id |
-// author id, both 8 bytes big-endian), and that key is boxed (crypto_box) from
+// author id (both 8 bytes big-endian) | 32-byte sender public key), and that key is boxed (crypto_box) from
 // the sender's device key to every participant device. The server stores and
 // relays the payload without being able to read it. See docs/security.md.
 
@@ -511,7 +593,7 @@ message DeviceKeyList { repeated DeviceKey keys = 1; }
 message E2EKeyWrap {
   bytes recipient_key = 1;        // device public key
   bytes nonce = 2;                // 24 bytes
-  bytes box = 3;                  // crypto_box_easy(content key)
+  bytes box = 3;                  // crypto_box_easy(content key | BLAKE2b-256(nonce | ciphertext))
 }
 message E2EFile {
   uint64 attachment_id = 1;
@@ -592,6 +674,7 @@ message BeginUploadRequest {
   string mime_type = 3;
   uint64 size = 4;
   bool channel_artwork = 5;            // ManageChannel; also permits voice/category uploads
+  ArtworkFraming artwork_framing = 6; // source raster upload; absent keeps legacy normalization
 }
 message UploadTicket {
   uint64 attachment_id = 1;
@@ -613,12 +696,15 @@ message DownloadRequest {
   uint64 attachment_id = 1;
   uint64 offset = 2;
   uint32 length = 3;              // clamped to the server chunk size
+  enum ArtworkVariant { FULL = 0; SMALL = 1; SOURCE = 2; }
+  ArtworkVariant artwork_variant = 4; // SOURCE is manager-only; SMALL falls back for legacy assets
 }
 message FileChunk {
   uint64 attachment_id = 1;
   uint64 offset = 2;
   bytes data = 3;
   uint64 total_size = 4;
+  ArtworkFraming artwork_framing = 5;
 }
 
 message TypingRequest { uint64 channel_id = 1; }
@@ -630,6 +716,7 @@ message JoinVoiceRequest {
   uint64 channel_id = 1;
   bool self_mute = 2;
   bool self_deaf = 3;
+  bool transfer = 4; // explicit user consent when another session owns voice
 }
 message LeaveVoiceRequest {}
 message SetVoiceStateRequest {
@@ -681,6 +768,32 @@ message AssignRoleRequest {
 message SetOverrideRequest { PermissionOverride override = 1; bool remove = 2; }
 message ListOverridesRequest { uint64 channel_id = 1; }
 message OverrideList { repeated PermissionOverride overrides = 1; }
+// Read-only authoritative explanation; contributor identities require ManageRoles.
+message PermissionPreviewRequest {
+  uint64 channel_id = 1;
+  uint64 user_id = 2;
+  uint64 role_id = 3;
+  bool new_channel = 4;
+  uint64 server_id = 5;
+  uint64 parent_id = 6;
+  ChannelType channel_type = 7;
+}
+message PermissionContributor { uint64 id = 1; string name = 2; }
+message PermissionSource {
+  uint64 permission = 1; bool allowed = 2; string source = 3;
+  repeated PermissionContributor roles = 4;
+}
+message PermissionPreview {
+  uint64 channel_id = 1;
+  uint64 user_id = 2;
+  uint64 effective_permissions = 3;
+  repeated PermissionSource permissions = 4;
+  bool can_preview_members = 5;
+  uint64 role_id = 6;
+  bool new_channel = 7;
+  uint64 server_id = 8;
+  uint64 parent_id = 9;
+}
 
 // ------------------------------------------------------------------ events
 
@@ -721,6 +834,7 @@ message Event {
     PermissionsChangedEvent permissions_changed = 29;
     DeviceKeysChangedEvent device_keys_changed = 30;
     EmojiEvent emoji_changed = 31;
+    ReadMarker read_marker = 32;
   }
 }
 
@@ -752,6 +866,9 @@ message Envelope {
     ListOAuthIdentitiesRequest list_oauth_identities = 133;
     OAuthIdentityList oauth_identity_list = 134;
     UpdateProfileRequest update_profile = 135;
+    ListLoginSessionsRequest list_login_sessions = 159;
+    LoginSessionList login_session_list = 160;
+    RevokeLoginSessionRequest revoke_login_session = 161;
 
     // sync
     SyncRequest sync = 20;
@@ -779,6 +896,7 @@ message Envelope {
     UpdateChannelRequest update_channel = 38;
     DeleteChannelRequest delete_channel = 39;
     Channel channel = 40;
+    DuplicateChannelRequest duplicate_channel = 162;
     OpenDmRequest open_dm = 41;
     ListInvitesRequest list_invites = 42;
     InviteList invite_list = 43;
@@ -797,6 +915,10 @@ message Envelope {
     SetPresenceRequest set_presence = 57;
     SearchMessagesRequest search_messages = 58;
     ReactionRequest reaction = 59;
+    SetReadMarkerRequest set_read_marker = 157;
+    ReadMarker read_marker = 158;
+    GetUnreadSummaryRequest get_unread_summary = 163;
+    UnreadSummary unread_summary = 164;
 
     // attachments
     BeginUploadRequest begin_upload = 60;
@@ -830,6 +952,8 @@ message Envelope {
     ServerMuteRequest server_mute = 89;
     ListOverridesRequest list_overrides = 90;
     OverrideList override_list = 91;
+    PermissionPreviewRequest permission_preview_request = 92;
+    PermissionPreview permission_preview = 93;
 
     // server push
     Event event = 100;

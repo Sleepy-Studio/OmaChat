@@ -83,17 +83,21 @@ public:
     void dropLink(const QString& reason);
     void login(Credentials credentials);
     void logout(AuthCallback done);
-    void updateAccount(const Account& account) { m_account = account; }
+    void updateAccount(const Account& account);
 
     // Sends a request; the callback receives the reply envelope (check
     // `has_error()`), or a synthetic NetworkError/timeout.
     void request(proto::Envelope env, ReplyCallback cb, int timeoutMs = 15000);
 
+    quint64 sessionId() const { return m_sessionId; }
     State state() const { return m_state; }
     static QString stateName(State s);
     QString errorCode() const { return m_errorCode; }
     QString errorMessage() const { return m_errorMessage; }
     QString certificateFingerprint() const { return m_certFingerprint; }
+    // Certificate actually presented by the current encrypted TLS connection.
+    // The diagnostic fingerprint above is only populated on trust failures.
+    QString verifiedPeerFingerprint() const;
     QString instanceName() const { return m_instanceName; }
     // The username the server assigned/returned on the most recent
     // successful authentication; only meaningful right after an OAuth login
@@ -114,6 +118,9 @@ public:
     // Changes whenever the socket is torn down: a reply error that arrives
     // after it changed means "connection lost", not "the server refused".
     quint64 linkGeneration() const { return m_generation; }
+    // Stable across ordinary reconnect/resume; explicit start/login/logout/stop
+    // and authenticated account changes invalidate work from the old identity.
+    quint64 identityGeneration() const { return m_identityGeneration; }
 
     ClientState& model() { return m_model; }
     const ClientState& model() const { return m_model; }
@@ -184,6 +191,9 @@ private:
     };
     std::map<std::uint64_t, Pending> m_pending;
     std::uint64_t m_nextRequestId = 1;
+    quint64 m_identityGeneration = 0;
+    quint64 m_authenticatedUserId = 0;
+    QString m_authenticatedPeerFingerprint;
     std::uint64_t m_generation = 0; // invalidates callbacks from old sockets
 
     ClientState m_model;

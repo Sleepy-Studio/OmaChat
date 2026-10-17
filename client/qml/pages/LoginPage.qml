@@ -33,44 +33,44 @@ Rectangle {
 
     Rectangle {
         anchors.centerIn: parent
-        width: Math.min(parent.width - Theme.px(32), Theme.px(420))
-        height: form.implicitHeight + Theme.px(48)
-        radius: Theme.px(8)
+        width: Math.min(parent.width - Metrics.px(32), Metrics.px(420))
+        height: form.implicitHeight + Metrics.px(48)
+        radius: Metrics.px(8)
         color: Theme.surface
         border.color: Theme.border
 
         ColumnLayout {
             id: form
             anchors.fill: parent
-            anchors.margins: Theme.px(24)
-            spacing: Theme.px(14)
+            anchors.margins: Metrics.px(24)
+            spacing: Metrics.px(14)
 
             RowLayout {
-                spacing: Theme.px(10)
+                spacing: Metrics.px(10)
                 Image {
                     source: "qrc:/qt/qml/OmaChat/icons/app.svg"
-                    sourceSize: Qt.size(Theme.px(36), Theme.px(36))
+                    sourceSize: Qt.size(Metrics.px(36), Metrics.px(36))
                 }
                 ColumnLayout {
                     spacing: 0
                     Text {
                         text: page.registering ? qsTr("Create an account") : qsTr("Welcome to OmaChat")
                         color: Theme.text
-                        font.pixelSize: Theme.px(18)
+                        font.pixelSize: Metrics.px(18)
                         font.bold: true
                     }
                     Text {
                         text: page.registering ? qsTr("Register on a self-hosted OmaChat server")
                                                : qsTr("Log in to your OmaChat server")
                         color: Theme.textMuted
-                        font.pixelSize: Theme.px(12)
+                        font.pixelSize: Metrics.px(12)
                     }
                 }
             }
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: Theme.px(8)
+                spacing: Metrics.px(8)
                 Field {
                     id: hostField
                     Layout.fillWidth: true
@@ -80,7 +80,7 @@ Rectangle {
                 }
                 Field {
                     id: portField
-                    Layout.preferredWidth: Theme.px(80)
+                    Layout.preferredWidth: Metrics.px(80)
                     label: qsTr("Port")
                     placeholder: "6473"
                     input.validator: IntValidator { bottom: 1; top: 65535 }
@@ -118,7 +118,7 @@ Rectangle {
                 visible: text.length > 0
                 wrapMode: Text.Wrap
                 color: Theme.danger
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 text: App.authError.length > 0 ? App.authError
                     : (App.state === "error" && App.errorCode !== "CertificateError" ? App.errorMessage : "")
                 Accessible.role: Accessible.AlertMessage
@@ -135,9 +135,9 @@ Rectangle {
 
             RowLayout {
                 Layout.fillWidth: true
-                spacing: Theme.px(8)
+                spacing: Metrics.px(8)
                 Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
-                Text { text: qsTr("or"); color: Theme.textMuted; font.pixelSize: Theme.px(11) }
+                Text { text: qsTr("or"); color: Theme.textMuted; font.pixelSize: Metrics.px(11) }
                 Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
             }
 
@@ -145,7 +145,7 @@ Rectangle {
             // replies with a clear error shown above like any other one.
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: Theme.px(8)
+                spacing: Metrics.px(8)
 
                 function go(provider) {
                     const port = parseInt(portField.text)
@@ -181,12 +181,12 @@ Rectangle {
                 Text {
                     text: page.registering ? qsTr("Already have an account?") : qsTr("New to this server?")
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                 }
                 Text {
                     text: page.registering ? qsTr("Log in") : qsTr("Register")
                     color: Theme.accent
-                    font.pixelSize: Theme.px(12)
+                    font.pixelSize: Metrics.px(12)
                     font.underline: toggleArea.containsMouse
                     MouseArea {
                         id: toggleArea
@@ -205,14 +205,14 @@ Rectangle {
                 readonly property var others: App.accounts.filter(a => !a.active)
                 visible: App.addingAccount || others.length > 0
                 Layout.fillWidth: true
-                spacing: Theme.px(6)
+                spacing: Metrics.px(6)
                 Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
                 Repeater {
                     model: parent.others
                     delegate: RowLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        spacing: Theme.px(4)
+                        spacing: Metrics.px(4)
                         FlatButton {
                             Layout.fillWidth: true
                             text: qsTr("Use %1@%2").arg(modelData.username).arg(modelData.host)

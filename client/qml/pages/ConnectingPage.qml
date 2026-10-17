@@ -18,8 +18,8 @@ Rectangle {
 
     ColumnLayout {
         anchors.centerIn: parent
-        spacing: Theme.px(12)
-        width: Math.min(parent.width - Theme.px(48), Theme.px(420))
+        spacing: Metrics.px(12)
+        width: Math.min(parent.width - Metrics.px(48), Metrics.px(420))
 
         BusyIndicator {
             Layout.alignment: Qt.AlignHCenter
@@ -30,14 +30,14 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
             visible: App.state === "offline" || App.state === "disconnected"
             name: "alert"
-            size: Theme.px(36)
+            size: Metrics.px(36)
         }
         Text {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             text: root.label
             color: Theme.text
-            font.pixelSize: Theme.px(16)
+            font.pixelSize: Metrics.px(16)
             font.bold: true
         }
         Text {
@@ -47,11 +47,11 @@ Rectangle {
             visible: App.errorMessage.length > 0
             text: App.errorMessage
             color: Theme.textMuted
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
         }
         RowLayout {
             Layout.alignment: Qt.AlignHCenter
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             FlatButton {
                 visible: App.state === "disconnected" || App.state === "reconnecting" || App.state === "offline"
                 primary: true

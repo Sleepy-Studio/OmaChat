@@ -154,3 +154,7 @@ shows as speaking, and deafen silences it.
 say which program owns it), DMA-BUF (zero-copy) capture, VAAPI/QSV
 encoding. `docs/security-roadmap.md` records the media encryption and sound
 privacy plan.
+
+## Session ownership additions
+
+Voice control now advertises `voice.ownership.v1`. Ownership is bound to a login session and connection; transfer is explicit and rotates the relay stream/key. Former-owner control requests and delayed teardown cannot terminate the new lease. Desktop stops its pipeline on ownership loss. Android audio, JNI media, and physical route/latency validation remain pending. See [wire additions](mobile-protocol-changes.md#voice-ownership-voiceownershipv1).

@@ -3,6 +3,7 @@
 
 #include "controllers/AppController.hpp"
 
+#include "platform/ThemeProvider.hpp"
 #include "text/CommandParser.hpp"
 
 #include <QClipboard>
@@ -14,11 +15,11 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QLocalSocket>
-#include <QProcessEnvironment>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QTimer>
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 #include <memory>
@@ -29,7 +30,7 @@ namespace {
 // The daemon waits up to five minutes for the browser callback, then needs
 // time to exchange the code and fetch the provider profile.
 constexpr int kOAuthFlowTimeoutMs = 6 * 60 * 1000;
-}
+} // namespace
 
 // ------------------------------------------------------------ connection
 
@@ -53,131 +54,8 @@ void AppController::switchAccount(const QString& accountId)
 
 void AppController::removeAccount(const QString& accountId)
 {
-    call(
-        QStringLiteral("account.remove"), {{"account", accountId.toLongLong()}}, nullptr, tr("Could not remove account"));
-}
-
-void AppController::refreshOmkaonInbox()
-{
-    m_link.request(QStringLiteral("omkaon.inbox.list"), {}, [this](const ipc::Reply& reply) {
-        if (!reply.ok) {
-            showNotice(tr("Could not load omkaon inbox: %1").arg(reply.errorMessage), true);
-            return;
-        }
-        QVariantList messages;
-        for (const auto& value : reply.result.value(QStringLiteral("messages")).toArray())
-            messages.append(value.toObject().toVariantMap());
-        m_omkaonInbox = std::move(messages);
-        emit omkaonInboxChanged();
-    });
-}
-
-void AppController::deleteOmkaonInboxMessage(const QString& messageId)
-{
-    m_link.request(QStringLiteral("omkaon.inbox.delete"), {{"message_id", messageId}}, [this](const ipc::Reply& reply) {
-        if (!reply.ok) {
-            showNotice(tr("Could not delete omkaon message: %1").arg(reply.errorMessage), true);
-            return;
-        }
-        refreshOmkaonInbox();
-    });
-}
-
-void AppController::requestOmkaonDiscordControl(const QString& method, const QJsonObject& params)
-{
-    if (m_omkaonDiscordBusy)
-        return;
-    m_omkaonDiscordBusy = true;
-    m_omkaonDiscordError.clear();
-    emit omkaonDiscordChanged();
-
-    QString runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
-    if (runtime.isEmpty())
-        runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
-    if (runtime.isEmpty()) {
-        m_omkaonDiscordBusy = false;
-        m_omkaonDiscordError = tr("The user runtime directory is not available.");
-        emit omkaonDiscordChanged();
-        return;
-    }
-    const QString socketPath = QDir(runtime).filePath(QStringLiteral("omkaon/discord-control.sock"));
-    auto* socket = new QLocalSocket(this);
-    auto* timer = new QTimer(socket);
-    timer->setSingleShot(true);
-    auto completed = std::make_shared<bool>(false);
-    auto finish = [this, socket, timer, completed](const QString& error = QString()) {
-        if (*completed)
-            return;
-        *completed = true;
-        timer->stop();
-        if (socket->state() != QLocalSocket::UnconnectedState)
-            socket->abort();
-        m_omkaonDiscordBusy = false;
-        m_omkaonDiscordError = error;
-        emit omkaonDiscordChanged();
-        socket->deleteLater();
-    };
-    connect(timer, &QTimer::timeout, socket, [finish] { finish(QObject::tr("The local omkaon bot did not respond.")); });
-    connect(socket, &QLocalSocket::connected, socket, [socket, method, params] {
-        QJsonObject request{{QStringLiteral("v"), 1}, {QStringLiteral("method"), method}};
-        if (!params.isEmpty())
-            request.insert(QStringLiteral("params"), params);
-        socket->write(QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n');
-    });
-    connect(socket, &QLocalSocket::readyRead, socket, [this, socket, finish] {
-        if (!socket->canReadLine())
-            return;
-        const QByteArray line = socket->readLine();
-        QJsonParseError parseError;
-        const auto document = QJsonDocument::fromJson(line, &parseError);
-        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-            finish(QObject::tr("The local omkaon bot returned an invalid response."));
-            return;
-        }
-        const QJsonObject response = document.object();
-        if (response.value(QStringLiteral("v")).toInt() != 1) {
-            finish(QObject::tr("The local omkaon bot uses an incompatible control protocol."));
-            return;
-        }
-        if (!response.value(QStringLiteral("ok")).toBool()) {
-            const QString message = response.value(QStringLiteral("error")).toObject()
-                                        .value(QStringLiteral("message")).toString();
-            finish(message.isEmpty() ? QObject::tr("The local omkaon bot rejected the request.") : message);
-            return;
-        }
-        m_omkaonDiscordStatus = response.value(QStringLiteral("result")).toObject().toVariantMap();
-        finish();
-    });
-    connect(socket, &QLocalSocket::errorOccurred, socket, [socket, finish](QLocalSocket::LocalSocketError) {
-        finish(QObject::tr("Cannot reach the local omkaon bot: %1").arg(socket->errorString()));
-    });
-    timer->start(30000);
-    socket->connectToServer(socketPath);
-}
-
-void AppController::refreshOmkaonDiscord()
-{
-    requestOmkaonDiscordControl(QStringLiteral("status"));
-}
-
-void AppController::selectOmkaonDiscordGuild(const QString& guildId)
-{
-    requestOmkaonDiscordControl(QStringLiteral("guild.select"), {{QStringLiteral("guild_id"), guildId}});
-}
-
-void AppController::startOmkaonDiscordBridge()
-{
-    requestOmkaonDiscordControl(QStringLiteral("bridge.start"));
-}
-
-void AppController::stopOmkaonDiscordBridge()
-{
-    requestOmkaonDiscordControl(QStringLiteral("bridge.stop"));
-}
-
-void AppController::leaveOmkaonDiscordVoice()
-{
-    requestOmkaonDiscordControl(QStringLiteral("voice.leave"));
+    call(QStringLiteral("account.remove"), {{"account", accountId.toLongLong()}}, nullptr,
+        tr("Could not remove account"));
 }
 
 void AppController::login(const QString& host, int port, const QString& username, const QString& password,
@@ -220,14 +98,16 @@ void AppController::loginWithOAuth(const QString& host, int port, const QString&
     emit authChanged();
     // This opens the user's browser and can take a while; the daemon reports
     // back once the whole flow (or a timeout) finishes.
-    m_link.request(QStringLiteral("account.oauthLogin"), {{"host", host.trimmed()}, {"port", port}, {"provider", provider}},
+    m_link.request(
+        QStringLiteral("account.oauthLogin"), {{"host", host.trimmed()}, {"port", port}, {"provider", provider}},
         [this](const ipc::Reply& r) {
             m_authBusy = false;
             if (r.ok || r.errorCode == u"CertificateError")
                 m_addingAccount = false;
             m_authError = r.ok || r.errorCode == u"CertificateError" ? QString() : r.errorMessage;
             emit authChanged();
-        }, kOAuthFlowTimeoutMs);
+        },
+        kOAuthFlowTimeoutMs);
 }
 
 void AppController::refreshOAuthIdentities()
@@ -257,17 +137,20 @@ void AppController::linkOAuthProvider(const QString& provider)
     emit oauthIdentitiesChanged();
     // Opens the user's browser; the daemon reports back once the flow (or a
     // timeout) finishes.
-    m_link.request(QStringLiteral("account.oauthLink"), {{"provider", provider}}, [this](const ipc::Reply& r) {
-        m_oauthLinkBusy = false;
-        if (r.ok) {
-            m_oauthLinkMessage = tr("Account linked. Your profile was updated from this provider.");
-            refreshOAuthIdentities();
-        } else {
-            m_oauthLinkMessage = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
-            m_oauthLinkError = true;
-        }
-        emit oauthIdentitiesChanged();
-    }, kOAuthFlowTimeoutMs);
+    m_link.request(
+        QStringLiteral("account.oauthLink"), {{"provider", provider}},
+        [this](const ipc::Reply& r) {
+            m_oauthLinkBusy = false;
+            if (r.ok) {
+                m_oauthLinkMessage = tr("Account linked. Your profile was updated from this provider.");
+                refreshOAuthIdentities();
+            } else {
+                m_oauthLinkMessage = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
+                m_oauthLinkError = true;
+            }
+            emit oauthIdentitiesChanged();
+        },
+        kOAuthFlowTimeoutMs);
 }
 
 void AppController::unlinkOAuthProvider(const QString& provider)
@@ -290,7 +173,10 @@ void AppController::reconnect()
 
 void AppController::logout()
 {
-    call(QStringLiteral("account.logout"), {}, [this](const QJsonObject&) {
+    const QString account = accountId();
+    call(QStringLiteral("account.logout"), {}, [this, account](const QJsonObject&) {
+        ++m_sendRecoveryRequest;
+        m_sendOperations.removeIf([&account](const auto& item) { return item.value().account == account; });
         m_serversById.clear();
         m_channelsById.clear();
         m_selectedServer = QStringLiteral("home");
@@ -300,6 +186,8 @@ void AppController::logout()
         rebuildChannels();
         rebuildMembers();
         emit selectionChanged();
+        emit attachmentsChanged();
+        emit sendOperationsChanged();
     });
 }
 
@@ -318,6 +206,7 @@ void AppController::selectHome()
 {
     if (homeSelected())
         return;
+    ++m_duplicateOperation;
     m_selectedServer = QStringLiteral("home");
     m_selectedChannel.clear();
     ensureSelection();
@@ -328,6 +217,8 @@ void AppController::selectHome()
     updateTyping();
     persistSelection();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
 }
 
 void AppController::selectServer(const QString& id)
@@ -338,6 +229,7 @@ void AppController::selectServer(const QString& id)
     }
     if (!m_serversById.contains(id) || id == m_selectedServer)
         return;
+    ++m_duplicateOperation;
     m_selectedServer = id;
     m_selectedChannel.clear();
     ensureSelection();
@@ -348,6 +240,8 @@ void AppController::selectServer(const QString& id)
     updateTyping();
     persistSelection();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
 }
 
 void AppController::selectChannel(const QString& id)
@@ -385,6 +279,8 @@ void AppController::selectChannel(const QString& id)
     updateTyping();
     persistSelection();
     emit selectionChanged();
+    emit attachmentsChanged();
+    emit sendOperationsChanged();
 }
 
 void AppController::selectRelativeChannel(int delta)
@@ -414,31 +310,248 @@ void AppController::toggleCategory(const QString& id)
 void AppController::sendMessage(const QString& channelId, const QString& content, const QString& replyTo, bool action,
     const QString& original, const QVariantList& files)
 {
-    QJsonObject params{{"channel", channelId}, {"content", content}, {"action", action}};
-    if (!replyTo.isEmpty())
-        params.insert(QStringLiteral("reply_to"), replyTo);
+    if (currentSendCount() >= 20) {
+        showNotice(tr("Resolve or dismiss earlier sends before sending more."), true);
+        emit composerRestore(original);
+        return;
+    }
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    SendOperation operation;
+    operation.account = accountId();
+    operation.channel = channelId;
+    operation.content = content;
+    operation.replyTo = replyTo;
+    operation.original = original;
+    operation.files = files;
+    operation.action = action;
+    m_sendOperations.insert(id, std::move(operation));
+    m_sendOperations[id].durable
+        = m_status.value(QStringLiteral("send_recovery")).toObject().value(QStringLiteral("supported")).toBool();
+    m_sendOperations[id].recoveryScope = sendRecoveryScope();
+    dispatchSend(id);
+}
+
+QString AppController::sendRecoveryEndpoint() const
+{
+    const auto account = m_status.value(QStringLiteral("account")).toObject();
+    return QString::fromUtf8(
+        QJsonDocument(QJsonArray{account.value(QStringLiteral("id")), account.value(QStringLiteral("host")),
+                          account.value(QStringLiteral("port")), selfId()})
+            .toJson(QJsonDocument::Compact));
+}
+
+QString AppController::sendRecoveryScope() const
+{
+    const auto account = m_status.value(QStringLiteral("account")).toObject();
+    const QString manualPin = account.value(QStringLiteral("trusted_fingerprint")).toString();
+    const QString pin = manualPin.isEmpty() ? m_recoveryPeerFingerprints.value(sendRecoveryEndpoint()) : manualPin;
+    return QString::fromUtf8(QJsonDocument(QJsonArray{sendRecoveryEndpoint(), pin}).toJson(QJsonDocument::Compact));
+}
+
+int AppController::currentSendCount() const
+{
+    return static_cast<int>(std::ranges::count_if(m_sendOperations, [this](const auto& operation) {
+        return operation.account == accountId()
+            && (!operation.durable || operation.recoveryScope == sendRecoveryScope());
+    }));
+}
+
+void AppController::refreshSendRecovery()
+{
+    const quint64 request = ++m_sendRecoveryRequest;
+    if (state() != u"connected"
+        || !m_status.value(QStringLiteral("send_recovery")).toObject().value(QStringLiteral("supported")).toBool())
+        return;
+    const QString account = accountId();
+    const QString scope = sendRecoveryScope();
+    const QString user = selfId();
+    const QString pin
+        = m_status.value(QStringLiteral("account")).toObject().value(QStringLiteral("trusted_fingerprint")).toString();
+    m_link.request(
+        QStringLiteral("recovery.list"), {}, [this, request, account, scope, user, pin](const ipc::Reply& reply) {
+            if (scope != sendRecoveryScope()
+                || !m_status.value(QStringLiteral("send_recovery"))
+                    .toObject()
+                    .value(QStringLiteral("supported"))
+                    .toBool()
+                || request != m_sendRecoveryRequest || account != accountId() || user != selfId()
+                || state() != u"connected"
+                || pin
+                    != m_status.value(QStringLiteral("account"))
+                        .toObject()
+                        .value(QStringLiteral("trusted_fingerprint"))
+                        .toString())
+                return;
+            if (!reply.ok) {
+                showNotice(tr("Cannot load saved sends: %1").arg(reply.errorMessage), true);
+                return;
+            }
+            QSet<QString> present;
+            for (const auto& value : reply.result.value(QStringLiteral("records")).toArray()) {
+                const auto record = value.toObject();
+                const QString id = record.value(QStringLiteral("id")).toString();
+                if (id.isEmpty())
+                    continue;
+                present.insert(id);
+                if (m_sendOperations.contains(id) && !m_sendOperations.value(id).restored)
+                    continue;
+                const QString state = record.value(QStringLiteral("state")).toString();
+                SendOperation operation;
+                operation.account = account;
+                operation.channel = record.value(QStringLiteral("channel_id")).toString();
+                operation.content = record.value(QStringLiteral("content")).toString();
+                operation.original = record.value(QStringLiteral("original")).toString();
+                operation.replyTo = record.value(QStringLiteral("reply_to")).toString();
+                operation.action = record.value(QStringLiteral("action")).toBool();
+                operation.pending = state == u"pending";
+                operation.retryable = state == u"rejected";
+                operation.durable = true;
+                operation.restored = true;
+                operation.recoveryScope = sendRecoveryScope();
+                operation.error = operation.retryable
+                    ? tr("The server rejected this send. Review before retrying.")
+                    : tr("Delivery is uncertain. Check the conversation before sending again.");
+                for (const auto& path : record.value(QStringLiteral("files")).toArray())
+                    operation.files.append(QVariantMap{{"path", path.toString()}});
+                m_sendOperations.insert(id, std::move(operation));
+            }
+            m_sendOperations.removeIf([this, &present, &account](const auto& item) {
+                const auto& operation = item.value();
+                return operation.restored && operation.account == account
+                    && operation.recoveryScope == sendRecoveryScope() && !present.contains(item.key());
+            });
+            emit sendOperationsChanged();
+        });
+}
+
+QVariantList AppController::sendOperations() const
+{
+    QVariantList out;
+    for (auto it = m_sendOperations.cbegin(); it != m_sendOperations.cend(); ++it) {
+        const auto& op = it.value();
+        if (op.account == accountId() && op.channel == m_selectedChannel
+            && (!op.durable || op.recoveryScope == sendRecoveryScope()))
+            out.append(QVariantMap{{"id", it.key()}, {"text", op.original}, {"error", op.error},
+                {"pending", op.pending}, {"retryable", op.retryable}});
+    }
+    return out;
+}
+
+int AppController::failedSendCount() const
+{
+    return static_cast<int>(std::ranges::count_if(m_sendOperations, [this](const auto& op) {
+        return op.account == accountId() && !op.pending && (!op.durable || op.recoveryScope == sendRecoveryScope());
+    }));
+}
+
+void AppController::reviewFailedSend()
+{
+    for (const auto& op : m_sendOperations) {
+        if (op.account == accountId() && !op.pending && (!op.durable || op.recoveryScope == sendRecoveryScope())) {
+            selectChannel(op.channel);
+            return;
+        }
+    }
+}
+
+void AppController::dispatchSend(const QString& id)
+{
+    ++m_sendRecoveryRequest;
+    auto& op = m_sendOperations[id];
+    op.pending = true;
+    op.restored = false;
+    op.error.clear();
+    emit sendOperationsChanged();
+    QJsonObject params{{"channel", op.channel}, {"content", op.content}, {"action", op.action}};
+    if (op.durable) {
+        params.insert(QStringLiteral("recovery_id"), id);
+        params.insert(QStringLiteral("original"), op.original);
+    }
+    if (!op.replyTo.isEmpty())
+        params.insert(QStringLiteral("reply_to"), op.replyTo);
     QJsonArray paths;
-    for (const auto& f : files)
+    for (const auto& f : op.files)
         paths.append(f.toMap().value(QStringLiteral("path")).toString());
     if (!paths.isEmpty())
         params.insert(QStringLiteral("files"), paths);
     m_link.request(
         QStringLiteral("message.send"), params,
-        [this, original, files](const ipc::Reply& r) {
-            if (!r.ok) {
-                showNotice(r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage, true);
-                emit composerRestore(original); // never lose what the user typed
-                if (!files.isEmpty() && m_pendingFiles.isEmpty()) {
-                    m_pendingFiles = files; // nor what they attached
-                    emit attachmentsChanged();
-                }
+        [this, id](const ipc::Reply& r) {
+            const auto it = m_sendOperations.find(id);
+            if (it == m_sendOperations.end())
+                return;
+            const bool durable = it->durable;
+            const bool current = it->account == accountId() && (!durable || it->recoveryScope == sendRecoveryScope());
+            if (current)
+                ++m_sendRecoveryRequest;
+            if (r.ok) {
+                m_sendOperations.remove(id);
+            } else {
+                auto& failed = it.value();
+                failed.pending = false;
+                failed.error = r.errorMessage.isEmpty() ? r.errorCode : r.errorMessage;
+                // Only explicit rejection is safe to repeat. A transport failure or
+                // timeout may have lost the acknowledgement after the server saved it.
+                failed.retryable = QStringList{"BadRequest", "PermissionDenied", "NotFound", "RateLimited", "TooLarge",
+                    "StorageError", "AuthenticationError", "Conflict"}
+                                       .contains(r.errorCode);
+                if (failed.durable && (r.errorCode == u"RecoveryError"))
+                    failed.retryable = false;
             }
+            emit sendOperationsChanged();
+            if (durable && current)
+                refreshSendRecovery();
         },
-        files.isEmpty() ? 20000 : 0); // uploads report progress through events
+        op.files.isEmpty() ? 20000 : 0);
+}
+
+void AppController::retrySend(const QString& id)
+{
+    const auto it = m_sendOperations.constFind(id);
+    if (it == m_sendOperations.cend() || it->pending || !it->retryable || it->account != accountId()
+        || (it->durable && it->recoveryScope != sendRecoveryScope()) || it->channel != m_selectedChannel || !canSend()
+        || state() != u"connected" || daemonState() != u"connected")
+        return;
+    dispatchSend(id);
+}
+
+void AppController::dismissSend(const QString& id)
+{
+    const auto it = m_sendOperations.constFind(id);
+    if (it == m_sendOperations.cend() || it->pending || it->account != accountId()
+        || (it->durable && it->recoveryScope != sendRecoveryScope()))
+        return;
+    ++m_sendRecoveryRequest;
+    if (!it->durable) {
+        m_sendOperations.remove(id);
+        emit sendOperationsChanged();
+        return;
+    }
+    const QString account = accountId();
+    m_sendOperations[id].pending = true;
+    emit sendOperationsChanged();
+    m_link.request(QStringLiteral("recovery.dismiss"), {{"id", id}}, [this, id, account](const ipc::Reply& reply) {
+        const auto found = m_sendOperations.find(id);
+        if (found == m_sendOperations.end() || found->account != account)
+            return;
+        if (found->account == accountId() && found->recoveryScope == sendRecoveryScope())
+            ++m_sendRecoveryRequest;
+        if (reply.ok)
+            m_sendOperations.erase(found);
+        else {
+            found->pending = false;
+            found->error = tr("Cannot delete saved send: %1").arg(reply.errorMessage);
+        }
+        emit sendOperationsChanged();
+    });
 }
 
 bool AppController::sendComposer(const QString& text)
 {
+    if (currentSendCount() >= 20) {
+        showNotice(tr("Resolve or dismiss earlier sends before sending more."), true);
+        return false;
+    }
     if (text.trimmed().isEmpty() && m_pendingFiles.isEmpty())
         return false;
     if (auto cmd = !text.trimmed().isEmpty() ? CommandParser::parse(text) : std::nullopt) {
@@ -1000,7 +1113,8 @@ void AppController::createServerFromDiscord(const QString& name, const QVariantL
     m_discordImportBusy = true;
     m_discordImportStatus = tr("Checking Discord exports…");
     emit discordImportChanged();
-    m_link.request(QStringLiteral("server.create_from_discord"), {{"name", name}, {"files", paths}},
+    m_link.request(
+        QStringLiteral("server.create_from_discord"), {{"name", name}, {"files", paths}},
         [this](const ipc::Reply& r) {
             m_discordImportBusy = false;
             if (!r.ok) {
@@ -1017,10 +1131,11 @@ void AppController::createServerFromDiscord(const QString& name, const QVariantL
             loadSnapshot();
             QTimer::singleShot(200, this, [this, id] { selectServer(id); });
             showNotice(tr("Created %1 with %2 imported messages")
-                .arg(s.value(QStringLiteral("name")).toString())
-                .arg(s.value(QStringLiteral("imported")).toInt()));
+                    .arg(s.value(QStringLiteral("name")).toString())
+                    .arg(s.value(QStringLiteral("imported")).toInt()));
             emit discordImportFinished(true);
-        }, 10 * 60 * 1000);
+        },
+        10 * 60 * 1000);
 }
 
 void AppController::joinServer(const QString& invite)
@@ -1061,8 +1176,14 @@ void AppController::deleteServer(const QString& id)
 
 void AppController::updateServerDetails(const QString& id, const QString& name, const QString& description)
 {
-    call(QStringLiteral("server.update"), {{"server", id}, {"name", name.trimmed()}, {"description", description}},
-        [this, id](const QJsonObject&) { emit serverDetailsSaved(id); }, tr("Cannot update server"));
+    call(
+        QStringLiteral("server.update"), {{"server", id}, {"name", name.trimmed()}, {"description", description}},
+        [this, id](const QJsonObject& saved) {
+            emit serverDetailsSaved(id);
+            emit administrationFinished(QStringLiteral("server.update"), id, {}, saved.toVariantMap());
+        },
+        tr("Cannot update server"),
+        [this, id](const QString& error) { emit administrationFinished(QStringLiteral("server.update"), id, error); });
 }
 
 void AppController::setServerArtwork(const QString& id, const QString& kind, const QUrl& fileUrl)
@@ -1076,27 +1197,144 @@ void AppController::setServerArtwork(const QString& id, const QString& kind, con
         tr("Cannot update server image"));
 }
 
+void AppController::duplicateChannel(const QString& id, const QString& name)
+{
+    const quint64 operation = ++m_duplicateOperation;
+    const auto source = channel(id);
+    if (state() != u"connected" || source.isEmpty()
+        || source.value(QStringLiteral("server_id")).toString() != m_selectedServer
+        || !capabilities().contains(QStringLiteral("channel.duplicate.v1"))) {
+        emit administrationFinished(QStringLiteral("channel.duplicate"), id,
+            tr("Connect to a supported server and choose a visible community channel."));
+        return;
+    }
+    const QString originAccount = accountId();
+    const QString originServer = m_selectedServer;
+    const quint64 generation = artworkGeneration();
+    m_link.request(QStringLiteral("channel.duplicate"), {{"channel", id}, {"name", name.trimmed()}},
+        [this, id, originAccount, originServer, generation, operation](const ipc::Reply& reply) {
+            if (operation != m_duplicateOperation || originAccount != accountId() || originServer != m_selectedServer
+                || generation != artworkGeneration())
+                return;
+            if (!reply.ok) {
+                emit administrationFinished(QStringLiteral("channel.duplicate"), id,
+                    reply.errorMessage.isEmpty() ? reply.errorCode : reply.errorMessage,
+                    {{"uncertain",
+                        QStringList{"Timeout", "NetworkError", "NotConnected", "ServerUnavailable", "Internal"}
+                            .contains(reply.errorCode)}});
+                return;
+            }
+            const QString createdId = reply.result.value(QStringLiteral("id")).toString();
+            if (!createdId.isEmpty()) {
+                m_channelsById.insert(createdId, reply.result);
+                rebuildChannels();
+            }
+            emit administrationFinished(QStringLiteral("channel.duplicate"), id, {}, reply.result.toVariantMap());
+        });
+}
+
 void AppController::createChannel(const QString& name, const QString& type, const QString& parentId,
     const QString& topic, const QString& description, const QUrl& iconFile, const QUrl& bannerFile)
 {
-    QJsonObject params{{"server", m_selectedServer}, {"name", name}, {"type", type},
-        {"topic", topic}, {"description", description}};
+    const quint64 operation = ++m_channelCreateGeneration;
+    const QString originAccount = accountId();
+    const QString originServer = m_selectedServer;
+    const quint64 originGeneration = artworkGeneration();
+    auto resolve = [&](const QUrl& url, const QString& kind, QString& path, std::shared_ptr<QTemporaryFile>& owner) {
+        if (url.isEmpty())
+            return true;
+        if (url.isLocalFile()) {
+            path = url.toLocalFile(); // Retain compatibility for direct API callers.
+            return true;
+        }
+        const auto it = m_stagedArtwork.constFind(url.toString());
+        if (it == m_stagedArtwork.cend() || it->kind != kind || it->account != originAccount
+            || it->server != originServer || it->generation != originGeneration || !it->file)
+            return false;
+        owner = it->file;
+        path = owner->fileName();
+        return true;
+    };
+    QString iconPath, bannerPath;
+    QJsonObject iconFraming, bannerFraming;
+    std::shared_ptr<QTemporaryFile> iconOwner, bannerOwner;
+    if (!resolve(iconFile, QStringLiteral("icon"), iconPath, iconOwner)
+        || !resolve(bannerFile, QStringLiteral("banner"), bannerPath, bannerOwner)) {
+        emit administrationFinished(QStringLiteral("channel.create"), {},
+            tr("Artwork access changed. Choose the image again before creating the channel."));
+        return;
+    }
+    if (iconOwner)
+        iconFraming = m_stagedArtwork.value(iconFile.toString()).framing;
+    if (bannerOwner)
+        bannerFraming = m_stagedArtwork.value(bannerFile.toString()).framing;
+    const auto current = [this, originAccount, originServer, originGeneration, operation] {
+        return m_channelCreateGeneration == operation && accountId() == originAccount
+            && m_selectedServer == originServer && artworkGeneration() == originGeneration;
+    };
+    QJsonObject params{
+        {"server", originServer}, {"name", name}, {"type", type}, {"topic", topic}, {"description", description}};
     if (!parentId.isEmpty() && parentId != u"0")
         params.insert(QStringLiteral("parent"), parentId);
     call(
         QStringLiteral("channel.create"), params,
-        [this, iconFile, bannerFile](const QJsonObject& c) {
-            m_channelsById.insert(c.value(QStringLiteral("id")).toString(), c);
+        [this, iconPath, bannerPath, iconOwner, bannerOwner, iconFraming, bannerFraming, current](
+            const QJsonObject& c) {
+            if (!current())
+                return;
+            const QString id = c.value(QStringLiteral("id")).toString();
+            m_channelsById.insert(id, c);
             rebuildChannels();
             if (c.value(QStringLiteral("type")).toString() == u"text")
-                selectChannel(c.value(QStringLiteral("id")).toString());
-            const QString id = c.value(QStringLiteral("id")).toString();
-            if (!iconFile.isEmpty())
-                setChannelArtwork(id, QStringLiteral("icon"), iconFile);
-            if (!bannerFile.isEmpty())
-                setChannelArtwork(id, QStringLiteral("banner"), bannerFile);
+                selectChannel(id);
+            struct UploadResult {
+                int remaining = 0;
+                QStringList errors;
+            };
+            auto result = std::make_shared<UploadResult>();
+            result->remaining = (!iconPath.isEmpty() ? 1 : 0) + (!bannerPath.isEmpty() ? 1 : 0);
+            const auto settle = [this, id, current, result](const QString& error) {
+                if (!current())
+                    return;
+                if (!error.isEmpty())
+                    result->errors.append(error);
+                if (--result->remaining > 0)
+                    return;
+                const QString failure = result->errors.isEmpty()
+                    ? QString()
+                    : tr("Channel created, but artwork could not be saved: %1. Open Channel settings to retry the "
+                         "artwork.")
+                          .arg(result->errors.join("; "));
+                emit administrationFinished(QStringLiteral("channel.create"), id, failure,
+                    {{QStringLiteral("created"), true}, {QStringLiteral("id"), id}});
+            };
+            if (!result->remaining) {
+                emit administrationFinished(QStringLiteral("channel.create"), id, {},
+                    {{QStringLiteral("created"), true}, {QStringLiteral("id"), id}});
+                return;
+            }
+            auto upload = [this, id, settle, current](const QString& kind, const QString& path,
+                              const std::shared_ptr<QTemporaryFile>& owner, const QJsonObject& framing) {
+                if (!current())
+                    return;
+                QJsonObject artworkParams{{"channel", id}, {"kind", kind}, {"file", path}};
+                if (!framing.isEmpty())
+                    artworkParams.insert(QStringLiteral("framing"), framing);
+                call(
+                    QStringLiteral("channel.artwork.set"), artworkParams,
+                    [settle, owner](const QJsonObject&) { settle({}); }, tr("Cannot update channel image"),
+                    [settle, owner](const QString& error) { settle(error); });
+            };
+            if (!iconPath.isEmpty())
+                upload(QStringLiteral("icon"), iconPath, iconOwner, iconFraming);
+            if (!bannerPath.isEmpty())
+                upload(QStringLiteral("banner"), bannerPath, bannerOwner, bannerFraming);
         },
-        tr("Cannot create channel"));
+        tr("Cannot create channel"),
+        [this, current](const QString& error) {
+            if (current())
+                emit administrationFinished(QStringLiteral("channel.create"), {}, error);
+        });
 }
 
 void AppController::deleteChannel(const QString& id)
@@ -1111,23 +1349,94 @@ void AppController::setTopic(const QString& topic)
 }
 
 void AppController::updateChannelDetails(const QString& id, const QString& name, const QString& topic,
-    const QString& description)
+    const QString& description, const QVariantMap& original)
 {
-    call(QStringLiteral("channel.update"),
-        {{"channel", id}, {"name", name.trimmed()}, {"topic", topic}, {"description", description}},
-        [this, id](const QJsonObject&) { emit channelDetailsSaved(id); },
-        tr("Cannot update channel"));
-}
-
-void AppController::setChannelArtwork(const QString& id, const QString& kind, const QUrl& fileUrl)
-{
-    if (!fileUrl.isEmpty() && !fileUrl.isLocalFile()) {
-        showNotice(tr("Choose a local image file."), true);
+    if (!capabilities().contains(QStringLiteral("channel.details.cas.v1"))) {
+        emit administrationFinished(QStringLiteral("channel.update"), id,
+            tr("This server needs an update before checked channel details can be saved."));
         return;
     }
-    call(QStringLiteral("channel.artwork.set"),
-        {{"channel", id}, {"kind", kind}, {"file", fileUrl.isEmpty() ? QString() : fileUrl.toLocalFile()}}, {},
-        tr("Cannot update channel image"));
+    const QString originAccount = accountId();
+    const QString originServer = m_selectedServer;
+    const quint64 originArtwork = artworkGeneration();
+    const quint64 operationGeneration = ++m_channelDetailsGeneration;
+    const QJsonObject baseline = original.isEmpty() ? channel(id) : QJsonObject::fromVariantMap(original);
+    const QJsonObject expected{{"name", baseline.value(QStringLiteral("name")).toString()},
+        {"topic", baseline.value(QStringLiteral("topic")).toString()},
+        {"description", baseline.value(QStringLiteral("description")).toString()}};
+    m_link.request(QStringLiteral("channel.update"),
+        {{"channel", id}, {"name", name.trimmed()}, {"topic", topic}, {"description", description},
+            {"original", expected}},
+        [this, id, originAccount, originServer, originArtwork, operationGeneration](const ipc::Reply& reply) {
+            if (accountId() != originAccount || m_selectedServer != originServer || artworkGeneration() != originArtwork
+                || m_channelDetailsGeneration != operationGeneration)
+                return;
+            if (!reply.ok) {
+                const QString error = reply.errorMessage.isEmpty() ? reply.errorCode : reply.errorMessage;
+                showNotice(tr("Cannot update channel: %1").arg(error), true);
+                emit administrationFinished(QStringLiteral("channel.update"), id, error,
+                    {{QStringLiteral("conflict"), reply.errorCode == u"Conflict"}});
+                return;
+            }
+            emit channelDetailsSaved(id);
+            emit administrationFinished(QStringLiteral("channel.update"), id, {}, reply.result.toVariantMap());
+        });
+}
+
+void AppController::reloadChannelDetails(const QString& id)
+{
+    const QString originAccount = accountId();
+    const QString originServer = m_selectedServer;
+    const quint64 originArtwork = artworkGeneration();
+    const quint64 operationGeneration = ++m_channelDetailsGeneration;
+    const auto current = [this, originAccount, originServer, originArtwork, operationGeneration] {
+        return accountId() == originAccount && m_selectedServer == originServer && artworkGeneration() == originArtwork
+            && m_channelDetailsGeneration == operationGeneration;
+    };
+    m_link.request(
+        QStringLiteral("channel.details.reload"), {{"channel", id}}, [this, id, current](const ipc::Reply& reply) {
+            if (!current())
+                return;
+            if (!reply.ok) {
+                const QString error = reply.errorMessage.isEmpty() ? reply.errorCode : reply.errorMessage;
+                showNotice(tr("Cannot reload channel details: %1").arg(error), true);
+                emit administrationFinished(QStringLiteral("channel.details.reload"), id, error);
+                return;
+            }
+            const auto saved = reply.result;
+            m_channelsById.insert(id, saved);
+            rebuildChannels();
+            emit channelDataChanged(id);
+            emit administrationFinished(QStringLiteral("channel.details.reload"), id, {}, saved.toVariantMap());
+        });
+}
+
+void AppController::setChannelArtwork(
+    const QString& id, const QString& kind, const QUrl& fileUrl, const QVariantMap& original)
+{
+    const auto baseline = original.isEmpty() ? channel(id).toVariantMap() : original;
+    if (!fileUrl.isEmpty() && !fileUrl.isLocalFile()) {
+        emit administrationFinished(QStringLiteral("channel.artwork.set"), id, tr("Choose a local image file."));
+        return;
+    }
+    QJsonObject params{
+        {"channel", id}, {"kind", kind}, {"file", fileUrl.isEmpty() ? QString() : fileUrl.toLocalFile()}};
+    if (capabilities().contains(QStringLiteral("channel.artwork.cas.v1")))
+        params.insert(QStringLiteral("artwork_original"), QJsonObject::fromVariantMap(baseline));
+    const QString account = accountId();
+    const QString server = m_selectedServer;
+    const QString scope = artworkScopeFingerprint();
+    m_link.request(
+        QStringLiteral("channel.artwork.set"), params, [this, id, account, server, scope](const ipc::Reply& reply) {
+            if (account != accountId() || server != m_selectedServer || scope != artworkScopeFingerprint()
+                || channel(id).isEmpty())
+                return;
+            emit administrationFinished(QStringLiteral("channel.artwork.set"), id,
+                reply.ok                           ? QString()
+                    : reply.errorMessage.isEmpty() ? reply.errorCode
+                                                   : reply.errorMessage,
+                reply.ok ? reply.result.toVariantMap() : QVariantMap{{"conflict", reply.errorCode == u"Conflict"}});
+        });
 }
 
 QVariantList AppController::channelCategories() const
@@ -1142,10 +1451,156 @@ QVariantList AppController::channelCategories() const
     return out;
 }
 
+QVariantList AppController::channelPlacementSiblings(const QString& id, const QString& parentId) const
+{
+    const QJsonObject current = channel(id);
+    if (current.isEmpty() || current.value(QStringLiteral("server_id")).toString() != m_selectedServer)
+        return {};
+    const bool category = current.value(QStringLiteral("type")).toString() == u"category";
+    const QString parent = parentId.isEmpty() ? QStringLiteral("0") : parentId;
+    QList<QJsonObject> siblings;
+    for (const auto& candidate : m_channelsById) {
+        const QString candidateParent = candidate.value(QStringLiteral("parent_id")).toString();
+        if (candidate.value(QStringLiteral("id")).toString() == id
+            || candidate.value(QStringLiteral("server_id")).toString() != m_selectedServer
+            || (candidateParent.isEmpty() ? QStringLiteral("0") : candidateParent) != parent
+            || (candidate.value(QStringLiteral("type")).toString() == u"category") != category)
+            continue;
+        siblings.append(candidate);
+    }
+    std::sort(siblings.begin(), siblings.end(), [](const auto& a, const auto& b) {
+        const int pa = a.value(QStringLiteral("position")).toInt();
+        const int pb = b.value(QStringLiteral("position")).toInt();
+        return pa == pb ? a.value(QStringLiteral("id")).toString().toULongLong()
+                < b.value(QStringLiteral("id")).toString().toULongLong()
+                        : pa < pb;
+    });
+    QVariantList out;
+    for (const auto& sibling : siblings)
+        out.append(QVariantMap{{"id", sibling.value(QStringLiteral("id")).toString()},
+            {"name", sibling.value(QStringLiteral("name")).toString()},
+            {"position", sibling.value(QStringLiteral("position")).toInt()}});
+    return out;
+}
+
+void AppController::reloadChannelPlacement(const QString& id)
+{
+    const QString originAccount = accountId();
+    const QString originServer = m_selectedServer;
+    const quint64 generation = artworkGeneration();
+    const quint64 operation = ++m_placementOperation;
+    m_link.request(QStringLiteral("channel.placement.reload"), {{"channel", id}},
+        [this, id, originAccount, originServer, generation, operation](const ipc::Reply& reply) {
+            if (accountId() != originAccount || m_selectedServer != originServer || artworkGeneration() != generation
+                || operation != m_placementOperation)
+                return;
+            if (!reply.ok || reply.result.value("id").toString() != id
+                || reply.result.value("server_id").toString() != originServer) {
+                emit administrationFinished(QStringLiteral("channel.placement.reload"), id,
+                    reply.errorMessage.isEmpty() ? tr("Could not load current positions.") : reply.errorMessage);
+                return;
+            }
+            // state.reset precedes the daemon reply, but the GUI fetches its
+            // snapshot asynchronously. Await that snapshot; never install reply
+            // metadata over a newer snapshot or resurrect a removed channel.
+            auto* pending = new QTimer(this);
+            pending->setInterval(40);
+            const auto accept = [this, id, originAccount, originServer, generation, operation,
+                                    expectedToken = reply.result.value("placement_token").toString(),
+                                    pending](bool expired) {
+                if (accountId() != originAccount || m_selectedServer != originServer
+                    || artworkGeneration() != generation || operation != m_placementOperation) {
+                    pending->stop();
+                    pending->deleteLater();
+                    return;
+                }
+                const auto current = channel(id);
+                const bool authorized = state() == u"connected" && current.value("can_manage").toBool()
+                    && capabilities().contains(QStringLiteral("channel.placement.list.cas.v1"))
+                    && current.value("id").toString() == id && current.value("server_id").toString() == originServer;
+                const bool matches
+                    = !expectedToken.isEmpty() && current.value("placement_token").toString() == expectedToken;
+                if (authorized && !matches && !expired)
+                    return;
+                pending->stop();
+                pending->deleteLater();
+                emit administrationFinished(QStringLiteral("channel.placement.reload"), id,
+                    authorized && matches ? QString() : tr("Placement changed while loading. Reload positions again."),
+                    authorized && matches ? current.toVariantMap() : QVariantMap{});
+            };
+            connect(pending, &QTimer::timeout, pending, [accept] { accept(false); });
+            QTimer::singleShot(3000, pending, [accept] { accept(true); });
+            pending->start();
+            accept(false);
+        });
+}
+
+void AppController::placeChannel(
+    const QString& id, const QString& parentId, const QString& beforeId, const QVariantMap& original)
+{
+    const quint64 operation = ++m_placementOperation;
+    auto reject
+        = [this, &id](const QString& error) { emit administrationFinished(QStringLiteral("channel.move"), id, error); };
+    const QJsonObject current = channel(id);
+    const QString parent = parentId.isEmpty() ? QStringLiteral("0") : parentId;
+    const QString type = current.value(QStringLiteral("type")).toString();
+    if (state() != u"connected"
+        || (current.contains(QStringLiteral("can_manage")) ? !current.value(QStringLiteral("can_manage")).toBool()
+                                                           : !canManageChannels())
+        || !capabilities().contains(QStringLiteral("channel.placement.v1"))) {
+        reject(tr("Connect with channel management permission before moving a channel."));
+        return;
+    }
+    if (current.isEmpty() || current.value(QStringLiteral("server_id")).toString() != m_selectedServer
+        || (type != u"category" && type != u"text" && type != u"voice")) {
+        reject(tr("This channel is no longer available. Reopen placement and try again."));
+        return;
+    }
+    const QJsonObject destination = channel(parent);
+    if ((type == u"category" && parent != u"0")
+        || (parent != u"0"
+            && (destination.value(QStringLiteral("type")).toString() != u"category"
+                || destination.value(QStringLiteral("server_id")).toString() != m_selectedServer))) {
+        reject(tr("The destination category is no longer available. Reopen placement and try again."));
+        return;
+    }
+    const QVariantList siblings = channelPlacementSiblings(id, parent);
+    if (!beforeId.isEmpty()) {
+        bool found = false;
+        for (const auto& sibling : siblings)
+            found = found || sibling.toMap().value(QStringLiteral("id")).toString() == beforeId;
+        if (!found) {
+            reject(tr("The chosen sibling moved or disappeared. Reopen placement and choose a new position."));
+            return;
+        }
+    }
+    const quint64 generation = m_artworkCache.generation();
+    const QString server = m_selectedServer;
+    const QString account = accountId();
+    QJsonObject params{
+        {"channel", id}, {"parent", parent}, {"before", beforeId.isEmpty() ? QStringLiteral("0") : beforeId}};
+    if (capabilities().contains(QStringLiteral("channel.placement.cas.v1")))
+        params.insert(QStringLiteral("placement_original"),
+            QJsonObject::fromVariantMap(original.isEmpty() ? current.toVariantMap() : original));
+    m_link.request(QStringLiteral("channel.update"), params,
+        [this, id, generation, server, account, operation](const ipc::Reply& reply) {
+            if (operation != m_placementOperation || generation != m_artworkCache.generation()
+                || server != m_selectedServer || account != accountId())
+                return;
+            emit administrationFinished(QStringLiteral("channel.move"), id,
+                reply.ok                           ? QString()
+                    : reply.errorMessage.isEmpty() ? reply.errorCode
+                                                   : reply.errorMessage,
+                reply.ok ? reply.result.toVariantMap() : QVariantMap{{"conflict", reply.errorCode == u"Conflict"}});
+        });
+}
+
 void AppController::moveChannelToCategory(const QString& id, const QString& parentId)
 {
-    call(QStringLiteral("channel.update"), {{"channel", id}, {"parent", parentId}}, {},
-        tr("Cannot move channel"));
+    if (capabilities().contains(QStringLiteral("channel.placement.v1")))
+        placeChannel(id, parentId, {});
+    else
+        call(QStringLiteral("channel.update"), {{"channel", id}, {"parent", parentId}}, {}, tr("Cannot move channel"));
 }
 
 void AppController::moveChannelRelative(const QString& id, int delta)
@@ -1174,9 +1629,16 @@ void AppController::moveChannelRelative(const QString& id, int delta)
         if (siblings.at(i).value(QStringLiteral("id")).toString() != id)
             continue;
         const int next = std::clamp(i + delta, 0, static_cast<int>(siblings.size()) - 1);
-        if (next != i)
-            call(QStringLiteral("channel.update"), {{"channel", id}, {"position", next}}, {},
-                tr("Cannot reorder channel"));
+        if (next != i) {
+            if (capabilities().contains(QStringLiteral("channel.placement.v1"))) {
+                const int before = next < i ? next : next + 1;
+                placeChannel(id, parent,
+                    before < siblings.size() ? siblings.at(before).value(QStringLiteral("id")).toString() : QString());
+            } else {
+                call(QStringLiteral("channel.update"), {{"channel", id}, {"position", next}}, {},
+                    tr("Cannot reorder channel"));
+            }
+        }
         return;
     }
 }
@@ -1315,8 +1777,8 @@ void AppController::setPresence(const QString& status)
 
 void AppController::updateProfile(const QString& displayName, const QString& avatarUrl, const QString& bio)
 {
-    call(QStringLiteral("profile.update"),
-        {{"display_name", displayName}, {"avatar_url", avatarUrl}, {"bio", bio}},
+    call(
+        QStringLiteral("profile.update"), {{"display_name", displayName}, {"avatar_url", avatarUrl}, {"bio", bio}},
         [this](const QJsonObject&) { showNotice(tr("Profile saved")); }, tr("Could not save profile"));
 }
 
@@ -1472,6 +1934,31 @@ void AppController::setAudio(const QString& key, const QVariant& value)
         m_audioSettings = r.result.toVariantMap();
         emit audioChanged();
     });
+}
+
+void AppController::setUi(double scale, bool reducedMotion)
+{
+    if (m_uiSaving)
+        return;
+    m_uiSaving = true;
+    m_uiSaveFailed = false;
+    m_uiSaveStatus = tr("Saving appearance…");
+    emit configChanged();
+    m_link.request(QStringLiteral("config.set_ui"), {{"scale", scale}, {"reduced_motion", reducedMotion}},
+        [this](const ipc::Reply& r) {
+            m_uiSaving = false;
+            m_uiSaveFailed = !r.ok;
+            if (r.ok) {
+                m_config.ui.scale = r.result.value(QStringLiteral("scale")).toDouble(1.0);
+                m_config.ui.reducedMotion = r.result.value(QStringLiteral("reduced_motion")).toBool();
+                ThemeProvider::instance()->setScale(m_config.ui.scale);
+                ThemeProvider::instance()->setReducedMotion(m_config.ui.reducedMotion);
+                m_uiSaveStatus = tr("Appearance saved");
+            } else {
+                m_uiSaveStatus = tr("Could not save appearance: %1").arg(r.errorMessage);
+            }
+            emit configChanged();
+        });
 }
 
 void AppController::setNotification(const QString& key, bool enabled)

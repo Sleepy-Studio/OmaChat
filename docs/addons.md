@@ -491,12 +491,11 @@ express.
 
 ## Local receive audio event
 
-The local modified checkout adds an opt-in `voice.audio` event for trusted
-same-user IPC consumers such as the omkaon Discord adapter. A client must
+The local daemon provides an opt-in `voice.audio` event for trusted same-user
+IPC consumers. A client must
 subscribe with the exact `voice.audio` topic; an empty or broad subscription
 does not receive audio. Frames contain 20 ms of the decoded and mixed remote
 call audio as 48 kHz mono float32 little-endian PCM, base64 encoded. The mix is
-decrypted voice and must be treated as sensitive. This interface is a local
-modification and is not currently part of upstream omachat. Consumers should
-not record it and should clearly notify call participants when relaying it to
-another service.
+decrypted voice and must be treated as sensitive. Consumers should not record
+it and should clearly notify call participants when relaying it to another
+service.

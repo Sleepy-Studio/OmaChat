@@ -14,14 +14,214 @@ Rectangle {
     signal openChannelPermissions(string channelId, string name)
     signal openChannelSettings(string channelId)
     signal openChannelDetails(string channelId)
+    signal duplicateChannel(string channelId)
     signal newGroup()
     signal addToGroup(string channelId)
     signal renameGroup(string channelId, string name)
+
+    // Pointer placement never moves delegates or mutates the model locally.
+    // The server resolves the before-id against its current sibling order.
+    readonly property bool placementAllowed: App.ready && !App.homeSelected && App.canManageChannels
+        && App.capabilities.indexOf("channel.placement.v1") >= 0
+    property string dragId: ""
+    property string dragType: ""
+    property string dragServer: ""
+    property string dragAccount: ""
+    property var dragOriginal: ({})
+    property var dragGeneration: 0
+    property point dragStart: Qt.point(0, 0)
+    property point dragPoint: Qt.point(0, 0)
+    property int dragPreviousIndex: -1
+    property bool dragging: false
+    property bool suppressPlacementClick: false
+    property var dropTarget: null
+    property string pendingPlacementId: ""
+    property string placementFeedback: ""
+    property bool placementFailed: false
+
+    function cancelPlacementGesture() {
+        const hadGesture = dragId.length > 0
+        if (dragging) suppressPlacementClick = true
+        dragging = false
+        dragId = ""
+        dragOriginal = ({})
+        dropTarget = null
+        edgeScroll.stop()
+        if (hadGesture && dragPreviousIndex >= -1 && dragPreviousIndex < list.count)
+            list.currentIndex = dragPreviousIndex
+        dragPreviousIndex = -1
+    }
+    function placementContextValid() {
+        return placementAllowed && App.selectedServerId === dragServer && App.accountId === dragAccount
+            && App.artworkGeneration === dragGeneration
+    }
+    function beginPlacement(id, type, point) {
+        suppressPlacementClick = false
+        if (!placementAllowed || pendingPlacementId.length || (type !== "category" && type !== "text" && type !== "voice")) return
+        dragId = id
+        dragType = type
+        dragServer = App.selectedServerId
+        dragAccount = App.accountId
+        dragGeneration = App.artworkGeneration
+        dragOriginal = App.channelDetails(id)
+        dragStart = point
+        dragPoint = point
+        dragPreviousIndex = list.currentIndex
+        // ListView retains currentItem outside its cache. Pin only the pressed
+        // delegate so its mouse grab survives scrolling through a long list.
+        for (let i = 0; i < list.count; ++i) {
+            if (list.model.get(i).itemId === id) { list.currentIndex = i; break }
+        }
+        dropTarget = null
+    }
+    function updatePlacement(point) {
+        if (!dragId.length) return
+        if (!placementContextValid()) { cancelPlacementGesture(); return }
+        if (!dragging && Math.hypot(point.x - dragStart.x, point.y - dragStart.y) < Metrics.px(8)) return
+        dragging = true
+        dragPoint = point
+        suppressPlacementClick = true
+        list.forceActiveFocus()
+        resolvePlacement(point)
+        edgeScroll.running = edgeScrollStep() !== 0
+    }
+    function edgeScrollStep() {
+        if (!dragging || !dragId.length || !placementContextValid() || pendingPlacementId.length
+            || dragPoint.x < 0 || dragPoint.x >= list.width || dragPoint.y < 0 || dragPoint.y >= list.height) return 0
+        const zone = Math.min(Metrics.px(36), list.height / 4)
+        if (zone <= 0) return 0
+        const minimum = list.originY
+        const maximum = minimum + Math.max(0, list.contentHeight - list.height)
+        // One bounded step per tick, proportional to penetration into the edge.
+        if (dragPoint.y < zone && list.contentY > minimum)
+            return -Math.max(1, Metrics.px(12) * (zone - dragPoint.y) / zone)
+        if (dragPoint.y > list.height - zone && list.contentY < maximum)
+            return Math.max(1, Metrics.px(12) * (dragPoint.y - list.height + zone) / zone)
+        return 0
+    }
+    function scrollPlacementEdge() {
+        if (!placementContextValid()) { cancelPlacementGesture(); return }
+        const step = edgeScrollStep()
+        if (!step) { edgeScroll.stop(); return }
+        list.contentY = Math.max(list.originY, Math.min(list.originY + Math.max(0, list.contentHeight - list.height), list.contentY + step))
+        // Layout newly visible delegates before resolving the stationary pointer.
+        list.forceLayout()
+        resolvePlacement(dragPoint)
+        if (!edgeScrollStep()) edgeScroll.stop()
+    }
+    Timer {
+        id: edgeScroll
+        objectName: "channelPlacementEdgeScroll"
+        interval: 30
+        repeat: true
+        onTriggered: sidebar.scrollPlacementEdge()
+    }
+    function resolvePlacement(point) {
+        dropTarget = null
+        // Leaving the viewport neither scrolls nor accepts a drop.
+        if (point.x < 0 || point.x >= list.width || point.y < 0 || point.y >= list.height) return
+        // The final narrow strip also exposes top-level/category end placement
+        // when the last row exactly fills the scrolled viewport.
+        if (point.y + list.contentY >= list.originY + list.contentHeight - Metrics.px(3)) {
+            dropTarget = {parentId: "0", beforeId: "", cueY: Math.min(list.height - 2, list.originY + list.contentHeight - list.contentY),
+                label: dragType === "category" ? qsTr("Category at the end") : qsTr("At the end · Top level")}
+            return
+        }
+        const index = list.indexAt(point.x + list.contentX, point.y + list.contentY)
+        if (index < 0) {
+            // Only the empty space below the final row is a top-level end target.
+            if (point.y + list.contentY >= list.contentHeight)
+                dropTarget = {parentId: "0", beforeId: "", cueY: Math.min(list.height - 2, list.contentHeight - list.contentY),
+                    label: dragType === "category" ? qsTr("Category at the end") : qsTr("At the end · Top level")}
+            return
+        }
+        const row = list.model.get(index)
+        const item = list.itemAtIndex(index)
+        if (!item || row.rowType === "participant" || row.rowType === "dm" || row.rowType === "group_dm" || row.itemId === dragId) return
+        const localY = point.y + list.contentY - item.y
+        if (dragType === "category") {
+            if (row.rowType !== "category") return
+            const after = localY >= item.height / 2
+            const siblings = App.channelPlacementSiblings(dragId, "0")
+            let before = row.itemId
+            if (after) {
+                const i = siblings.findIndex(s => s.id === row.itemId)
+                if (i < 0) return
+                before = i + 1 < siblings.length ? siblings[i + 1].id : ""
+            }
+            dropTarget = {parentId: "0", beforeId: before, cueY: item.y - list.contentY + (after ? item.height : 0),
+                label: after ? qsTr("Category after %1").arg(row.name) : qsTr("Category before %1").arg(row.name)}
+        } else if (row.rowType === "category") {
+            dropTarget = {parentId: row.itemId, beforeId: "", cueY: item.y - list.contentY + item.height,
+                label: qsTr("At the end · %1").arg(row.name)}
+        } else {
+            const details = App.channelDetails(row.itemId)
+            const parentId = details.parent_id || "0"
+            const after = localY >= item.height / 2
+            const siblings = App.channelPlacementSiblings(dragId, parentId)
+            let before = row.itemId
+            if (after) {
+                const i = siblings.findIndex(s => s.id === row.itemId)
+                if (i < 0) return
+                before = i + 1 < siblings.length ? siblings[i + 1].id : ""
+            }
+            dropTarget = {parentId: parentId, beforeId: before, cueY: item.y - list.contentY + (after ? item.height : 0),
+                label: after ? qsTr("After %1").arg(row.name) : qsTr("Before %1").arg(row.name)}
+        }
+    }
+    function finishPlacement(point) {
+        if (!dragging) { cancelPlacementGesture(); return }
+        updatePlacement(point)
+        const id = dragId
+        const target = dropTarget
+        const original = dragOriginal
+        const valid = placementContextValid()
+        cancelPlacementGesture()
+        if (!valid || !target || pendingPlacementId.length) return
+        pendingPlacementId = id
+        placementFailed = false
+        placementFeedback = qsTr("Saving placement…")
+        App.placeChannel(id, target.parentId, target.beforeId, original)
+    }
+    function resetPlacementContext() {
+        cancelPlacementGesture()
+        pendingPlacementId = ""
+        placementFeedback = ""
+        placementFailed = false
+    }
+    onPlacementAllowedChanged: if (!placementAllowed) cancelPlacementGesture()
+    Shortcut {
+        sequence: "Escape"
+        enabled: sidebar.dragId.length > 0
+        onActivated: sidebar.cancelPlacementGesture()
+    }
 
     function focusList() {
         list.forceActiveFocus()
         const i = App.channels.indexOf("itemId", App.selectedChannelId)
         list.currentIndex = i >= 0 ? i : 0
+    }
+
+    function openContextMenu(index, item) {
+        cancelPlacementGesture()
+        if (index < 0 || index >= list.count) return
+        const row = list.model.get(index)
+        if (row.rowType === "participant") return
+        list.currentIndex = index
+        const menu = row.rowType === "category" ? categoryMenu : channelMenu
+        menu.channelId = row.itemId
+        menu.channelName = row.name
+        if (menu === channelMenu) {
+            menu.isVoice = row.rowType === "voice"
+            menu.isGroup = row.rowType === "group_dm"
+            menu.userId = row.userId || ""
+        }
+        if (item) {
+            const point = item.mapToItem(sidebar, 0, item.height)
+            menu.popup(sidebar, point.x, point.y)
+        } else {
+            menu.popup()
+        }
     }
 
     function loadServerBanner() {
@@ -33,7 +233,23 @@ Rectangle {
     Component.onCompleted: loadServerBanner()
     Connections {
         target: App
-        function onSelectionChanged() { sidebar.loadServerBanner() }
+        function onSelectionChanged() {
+            if (App.selectedServerId !== sidebar.dragServer || App.accountId !== sidebar.dragAccount)
+                sidebar.resetPlacementContext()
+            sidebar.loadServerBanner()
+        }
+        function onArtworkGenerationChanged() { sidebar.resetPlacementContext() }
+        function onStatusChanged() {
+            if (App.accountId !== sidebar.dragAccount || App.selectedServerId !== sidebar.dragServer)
+                sidebar.resetPlacementContext()
+            else if (!sidebar.placementAllowed) sidebar.cancelPlacementGesture()
+        }
+        function onAdministrationFinished(operation, id, error, saved) {
+            if (operation !== "channel.move" || id !== sidebar.pendingPlacementId) return
+            sidebar.pendingPlacementId = ""
+            sidebar.placementFailed = error.length > 0
+            sidebar.placementFeedback = error || qsTr("Placement saved.")
+        }
         function onServerDataChanged(id) {
             if (id === App.selectedServerId)
                 sidebar.loadServerBanner()
@@ -47,18 +263,18 @@ Rectangle {
         // Header: server name + actions
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: Theme.px(46)
+            implicitHeight: Metrics.px(46)
             color: headerArea.containsMouse && !App.homeSelected ? Theme.raised : "transparent"
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(14)
-                anchors.rightMargin: Theme.px(6)
+                anchors.leftMargin: Metrics.px(14)
+                anchors.rightMargin: Metrics.px(6)
                 Text {
                     Layout.fillWidth: true
                     text: App.selectedServerName
                     color: Theme.text
-                    font.pixelSize: Theme.px(15)
+                    font.pixelSize: Metrics.px(15)
                     font.bold: true
                     elide: Text.ElideRight
                     Accessible.role: Accessible.Heading
@@ -98,22 +314,25 @@ Rectangle {
             }
         }
 
-        Image {
+        ArtworkBanner {
             id: serverBanner
+            objectName: "serverBanner"
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.px(84)
-            visible: !App.homeSelected && status === Image.Ready
+            Layout.preferredHeight: Metrics.px(84)
+            visible: !App.homeSelected && App.selectedServerBannerId.length > 0 && App.selectedServerBannerId !== "0"
             source: App.selectedServerBannerId && App.selectedServerBannerId !== "0"
                     ? (App.previews[App.selectedServerBannerId] || "") : ""
+            failed: !!App.previewErrors[App.selectedServerBannerId]
+            onRetry: App.requestPreview(App.selectedServerBannerId, "server-banner.png", 0)
             fillMode: Image.PreserveAspectFit
-            asynchronous: true
         }
 
         ListView {
             id: list
+            objectName: "channelList"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.topMargin: Theme.px(6)
+            Layout.topMargin: Metrics.px(6)
             clip: true
             model: App.channels
             boundsBehavior: Flickable.StopAtBounds
@@ -121,16 +340,56 @@ Rectangle {
             highlightFollowsCurrentItem: false
             activeFocusOnTab: true
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            interactive: !sidebar.dragId.length
+
+            Rectangle {
+                objectName: "channelDropCue"
+                z: 10
+                visible: sidebar.dragging && !!sidebar.dropTarget
+                x: Metrics.px(8)
+                y: sidebar.dropTarget ? sidebar.dropTarget.cueY + list.contentY : 0
+                width: list.width - Metrics.px(16)
+                height: Metrics.px(3)
+                color: Theme.focus
+                Rectangle {
+                    y: parent.y - list.contentY < height ? Metrics.px(5) : -height
+                    anchors.right: parent.right
+                    width: Math.min(list.width - Metrics.px(16), cueLabel.implicitWidth + Metrics.px(12))
+                    height: cueLabel.implicitHeight + Metrics.px(8)
+                    color: Theme.raised
+                    border.color: Theme.focus
+                    radius: Metrics.px(3)
+                    Text {
+                        id: cueLabel
+                        anchors.fill: parent
+                        anchors.margins: Metrics.px(4)
+                        text: sidebar.dropTarget ? sidebar.dropTarget.label : ""
+                        textFormat: Text.PlainText
+                        color: Theme.text
+                        font.pixelSize: Metrics.px(12)
+                        elide: Text.ElideRight
+                    }
+                }
+            }
             Accessible.role: Accessible.List
             Accessible.name: App.homeSelected ? qsTr("Direct messages") : qsTr("Channels")
 
             Keys.onReturnPressed: activate(currentIndex)
+            Keys.onEnterPressed: activate(currentIndex)
             Keys.onSpacePressed: activate(currentIndex)
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                    sidebar.openContextMenu(currentIndex, currentItem)
+                    event.accepted = true
+                }
+            }
             function activate(i) {
+                if (i < 0 || i >= count) return
                 const row = model.get(i)
                 if (row.rowType === "participant")
                     return
-                App.selectChannel(row.itemId)
+                if (row.rowType === "category") App.toggleCategory(row.itemId)
+                else App.selectChannel(row.itemId)
             }
 
             delegate: Loader {
@@ -147,54 +406,86 @@ Rectangle {
             // Empty states
             Text {
                 anchors.centerIn: parent
-                width: parent.width - Theme.px(32)
+                width: parent.width - Metrics.px(32)
                 visible: list.count === 0
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 text: App.homeSelected ? qsTr("No conversations yet. Right-click a member to message them, or start a group with +.")
                                        : qsTr("No channels you can see.")
             }
+        }
+        Text {
+            objectName: "channelDragStatus"
+            Layout.fillWidth: true
+            Layout.leftMargin: Metrics.px(8)
+            Layout.rightMargin: Metrics.px(8)
+            Layout.bottomMargin: Metrics.px(6)
+            visible: text.length > 0
+            text: sidebar.placementFeedback
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: sidebar.placementFailed ? Theme.danger : Theme.textMuted
+            font.pixelSize: Metrics.px(12)
+            Accessible.name: text
         }
     }
 
     // ------------------------------------------------------------ row kinds
     Component {
         id: categoryRow
-        Item {
-            implicitHeight: Theme.px(30)
+        Rectangle {
+            objectName: "channelPlacementRow_" + (m ? m.itemId : "")
+            implicitHeight: Metrics.px(30)
+            color: "transparent"
+            border.width: parent && parent.focused ? 2 : 0
+            border.color: Theme.focus
+            radius: Metrics.px(4)
             readonly property var m: parent ? parent.model : null
             Component.onCompleted: if (m && m.iconAttachmentId && m.iconAttachmentId !== "0")
                                        App.requestPreview(m.iconAttachmentId, "category-icon.png", 0)
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(6)
-                anchors.rightMargin: Theme.px(8)
-                anchors.topMargin: Theme.px(8)
-                spacing: Theme.px(2)
+                anchors.leftMargin: Metrics.px(6)
+                anchors.rightMargin: Metrics.px(8)
+                anchors.topMargin: Metrics.px(8)
+                spacing: Metrics.px(2)
                 Icon {
                     name: m && m.collapsed ? "chevron-right" : "chevron-down"
-                    size: Theme.px(12)
+                    size: Metrics.px(12)
                 }
-                Image {
-                    visible: !!(m && m.iconAttachmentId && m.iconAttachmentId !== "0") && status === Image.Ready
-                    source: m ? (App.previews[m.iconAttachmentId] || "") : ""
-                    Layout.preferredWidth: Theme.px(16)
-                    Layout.preferredHeight: Theme.px(16)
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
+                Item {
+                    visible: !!(m && m.iconAttachmentId && m.iconAttachmentId !== "0")
+                    Layout.preferredWidth: Metrics.px(16)
+                    Layout.preferredHeight: Metrics.px(16)
+                    Icon {
+                        anchors.centerIn: parent
+                        name: "hash"
+                        size: Metrics.px(16)
+                        visible: categoryImage.status !== Image.Ready
+                    }
+                    Image {
+                        id: categoryImage
+                        anchors.fill: parent
+                        source: m ? (App.previews[m.iconAttachmentId] || "") : ""
+                        visible: status === Image.Ready
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                    }
                 }
                 SectionLabel {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 0
                     text: m ? m.name.toUpperCase() : ""
+                    textFormat: Text.PlainText
                     color: catArea.containsMouse ? Theme.text : Theme.textMuted
                 }
                 IconButton {
                     visible: App.canManageChannels
-                    implicitWidth: Theme.px(20)
-                    implicitHeight: Theme.px(20)
-                    iconSize: Theme.px(14)
+                    implicitWidth: Metrics.px(20)
+                    implicitHeight: Metrics.px(20)
+                    iconSize: Metrics.px(14)
                     iconName: "plus"
                     tip: qsTr("Create channel")
                     onClicked: sidebar.createChannel(m.itemId)
@@ -203,15 +494,28 @@ Rectangle {
             MouseArea {
                 id: catArea
                 anchors.fill: parent
-                anchors.rightMargin: Theme.px(30)
+                preventStealing: sidebar.dragId.length > 0
+                onPressed: mouse => {
+                    if (mouse.button === Qt.LeftButton)
+                        sidebar.beginPlacement(m.itemId, m.rowType, mapToItem(list, mouse.x, mouse.y))
+                    else sidebar.cancelPlacementGesture()
+                }
+                onPositionChanged: mouse => {
+                    if (pressed && (pressedButtons & Qt.LeftButton))
+                        sidebar.updatePlacement(mapToItem(list, mouse.x, mouse.y))
+                }
+                onReleased: mouse => {
+                    if (mouse.button === Qt.LeftButton)
+                        sidebar.finishPlacement(mapToItem(list, mouse.x, mouse.y))
+                }
+                onCanceled: sidebar.cancelPlacementGesture()
+                anchors.rightMargin: Metrics.px(30)
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
                     if (mouse.button === Qt.RightButton) {
-                        categoryMenu.channelId = m.itemId
-                        categoryMenu.channelName = m.name
-                        categoryMenu.popup()
-                    } else {
+                        sidebar.openContextMenu(parent.parent.index, parent)
+                    } else if (!sidebar.suppressPlacementClick) {
                         App.toggleCategory(m.itemId)
                     }
                 }
@@ -225,6 +529,7 @@ Rectangle {
         id: channelRow
         Rectangle {
             id: row
+            objectName: "channelPlacementRow_" + (m ? m.itemId : "")
             readonly property var m: parent ? parent.model : null
             readonly property bool isVoice: m && m.rowType === "voice"
             readonly property bool isDm: m && m.rowType === "dm"
@@ -233,15 +538,15 @@ Rectangle {
             readonly property string iconId: m && m.iconAttachmentId ? m.iconAttachmentId : ""
             Component.onCompleted: if (iconId.length > 0 && iconId !== "0")
                                        App.requestPreview(iconId, "channel-icon.png", 0)
-            implicitHeight: isDm ? Theme.px(40) : Theme.px(30)
+            implicitHeight: isDm ? Metrics.px(40) : Metrics.px(30)
             anchors.left: parent ? parent.left : undefined
             anchors.right: parent ? parent.right : undefined
-            anchors.leftMargin: Theme.px(8) + (m ? m.depth : 0) * Theme.px(6)
-            anchors.rightMargin: Theme.px(8)
-            radius: Theme.px(4)
+            anchors.leftMargin: Metrics.px(8) + (m ? m.depth : 0) * Metrics.px(6)
+            anchors.rightMargin: Metrics.px(8)
+            radius: Metrics.px(4)
             color: m && m.selected ? Theme.selection : (area.containsMouse ? Theme.raised : "transparent")
             border.width: parent && parent.focused ? 2 : 0
-            border.color: Theme.accent
+            border.color: Theme.focus
 
             Accessible.role: isVoice ? Accessible.Button : Accessible.ListItem
             Accessible.name: (isVoice ? qsTr("Voice channel %1, %n connected", "", m ? m.voiceCount : 0).arg(m ? m.name : "")
@@ -254,39 +559,39 @@ Rectangle {
             Rectangle {
                 visible: m && m.unread && !m.selected
                 anchors.right: parent.left
-                anchors.rightMargin: Theme.px(2)
+                anchors.rightMargin: Metrics.px(2)
                 anchors.verticalCenter: parent.verticalCenter
-                width: Theme.px(4)
-                height: Theme.px(8)
-                radius: Theme.px(2)
+                width: Metrics.px(4)
+                height: Metrics.px(8)
+                radius: Metrics.px(2)
                 color: Theme.text
             }
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(8)
-                anchors.rightMargin: Theme.px(6)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(8)
+                anchors.rightMargin: Metrics.px(6)
+                spacing: Metrics.px(8)
 
                 Avatar {
                     visible: row.isDm
                     userId: m ? m.userId : ""
                     name: m ? m.name : ""
                     status: m ? m.presence : ""
-                    size: Theme.px(26)
+                    size: Metrics.px(26)
                 }
                 Icon {
                     visible: !row.isDm && !channelImage.visible
                     name: row.isGroup ? "users" : row.isVoice ? "speaker" : (m && m.locked ? "lock" : "hash")
-                    size: Theme.px(16)
+                    size: Metrics.px(16)
                     color: row.emphasized ? Theme.text : Theme.textFaint
                 }
                 Image {
                     id: channelImage
                     visible: !row.isDm && row.iconId.length > 0 && row.iconId !== "0" && status === Image.Ready
                     source: App.previews[row.iconId] || ""
-                    Layout.preferredWidth: Theme.px(16)
-                    Layout.preferredHeight: Theme.px(16)
+                    Layout.preferredWidth: Metrics.px(16)
+                    Layout.preferredHeight: Metrics.px(16)
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                 }
@@ -295,13 +600,13 @@ Rectangle {
                     text: m ? m.name : ""
                     elide: Text.ElideRight
                     color: m && m.muted ? Theme.textFaint : (row.emphasized || area.containsMouse ? Theme.text : Theme.textMuted)
-                    font.pixelSize: Theme.px(14)
+                    font.pixelSize: Metrics.px(14)
                     font.bold: m ? m.unread && !m.muted : false
                 }
                 Icon {
                     visible: m ? m.muted : false
                     name: "bell-off"
-                    size: Theme.px(13)
+                    size: Metrics.px(13)
                     color: Theme.textFaint
                 }
                 Badge { count: m ? m.mentions : 0 }
@@ -309,24 +614,34 @@ Rectangle {
                     visible: row.isVoice && m && m.voiceCount > 0
                     text: m ? m.voiceCount : ""
                     color: Theme.textFaint
-                    font.pixelSize: Theme.px(11)
+                    font.pixelSize: Metrics.px(11)
                 }
             }
 
             MouseArea {
                 id: area
                 anchors.fill: parent
+                preventStealing: sidebar.dragId.length > 0
+                onPressed: mouse => {
+                    if (mouse.button === Qt.LeftButton)
+                        sidebar.beginPlacement(m.itemId, m.rowType, mapToItem(list, mouse.x, mouse.y))
+                    else sidebar.cancelPlacementGesture()
+                }
+                onPositionChanged: mouse => {
+                    if (pressed && (pressedButtons & Qt.LeftButton))
+                        sidebar.updatePlacement(mapToItem(list, mouse.x, mouse.y))
+                }
+                onReleased: mouse => {
+                    if (mouse.button === Qt.LeftButton)
+                        sidebar.finishPlacement(mapToItem(list, mouse.x, mouse.y))
+                }
+                onCanceled: sidebar.cancelPlacementGesture()
                 hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 onClicked: mouse => {
                     if (mouse.button === Qt.RightButton) {
-                        channelMenu.channelId = m.itemId
-                        channelMenu.channelName = m.name
-                        channelMenu.isVoice = row.isVoice
-                        channelMenu.isGroup = row.isGroup
-                        channelMenu.userId = m.userId
-                        channelMenu.popup()
-                    } else {
+                        sidebar.openContextMenu(row.parent.index, row)
+                    } else if (!sidebar.suppressPlacementClick) {
                         App.selectChannel(m.itemId)
                     }
                 }
@@ -342,42 +657,42 @@ Rectangle {
         id: participantRow
         Item {
             readonly property var m: parent ? parent.model : null
-            implicitHeight: Theme.px(28)
+            implicitHeight: Metrics.px(28)
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(36) + (m ? m.depth - 1 : 0) * Theme.px(6)
-                anchors.rightMargin: Theme.px(14)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(36) + (m ? m.depth - 1 : 0) * Metrics.px(6)
+                anchors.rightMargin: Metrics.px(14)
+                spacing: Metrics.px(8)
                 Avatar {
                     userId: m ? m.userId : ""
                     name: m ? m.name : ""
                     speaking: m ? m.speaking : false
-                    size: Theme.px(22)
+                    size: Metrics.px(22)
                 }
                 Text {
                     Layout.fillWidth: true
                     text: m ? m.name : ""
                     elide: Text.ElideRight
                     color: m && m.speaking ? Theme.text : Theme.textMuted
-                    font.pixelSize: Theme.px(13)
+                    font.pixelSize: Metrics.px(13)
                 }
                 Rectangle {
                     visible: m ? m.streaming : false
-                    implicitWidth: liveLabel.implicitWidth + Theme.px(8)
-                    implicitHeight: Theme.px(15)
-                    radius: Theme.px(3)
+                    implicitWidth: liveLabel.implicitWidth + Metrics.px(8)
+                    implicitHeight: Metrics.px(15)
+                    radius: Metrics.px(3)
                     color: Theme.danger
                     Text {
                         id: liveLabel
                         anchors.centerIn: parent
                         text: qsTr("LIVE")
-                        color: Theme.accentText
-                        font.pixelSize: Theme.px(9)
+                        color: Theme.dangerText
+                        font.pixelSize: Metrics.px(9)
                         font.bold: true
                     }
                 }
-                Icon { visible: m ? m.userMuted && !m.userDeafened : false; name: "mic-off"; size: Theme.px(13); color: Theme.danger }
-                Icon { visible: m ? m.userDeafened : false; name: "headphones-off"; size: Theme.px(13); color: Theme.danger }
+                Icon { visible: m ? m.userMuted && !m.userDeafened : false; name: "mic-off"; size: Metrics.px(13); color: Theme.danger }
+                Icon { visible: m ? m.userDeafened : false; name: "headphones-off"; size: Metrics.px(13); color: Theme.danger }
             }
             MouseArea {
                 anchors.fill: parent
@@ -408,6 +723,7 @@ Rectangle {
     // --------------------------------------------------------------- menus
     MenuPopup {
         id: serverMenu
+        onAboutToShow: sidebar.cancelPlacementGesture()
         MenuAction { text: qsTr("Create invite link"); enabled: App.canCreateInvites; onTriggered: App.createInvite() }
         MenuAction { text: qsTr("Create channel"); enabled: App.canManageChannels; onTriggered: sidebar.createChannel("") }
         MenuAction {
@@ -432,18 +748,38 @@ Rectangle {
         onConfirmed: App.isServerOwner ? App.deleteServer(App.selectedServerId) : App.leaveServer(App.selectedServerId)
     }
 
+    ChannelPlacementDialog {
+        id: placementDialog
+        onClosed: list.forceActiveFocus()
+    }
+
     MenuPopup {
         id: categoryMenu
+        onAboutToShow: sidebar.cancelPlacementGesture()
+        objectName: "categoryContextMenu"
+        // Restore the list before deferred menu actions open their next popup.
+        onClosed: list.forceActiveFocus()
         property string channelId
         property string channelName
         MenuAction {
+            text: qsTr("Duplicate category…")
+            enabled: App.state === "connected" && App.canManageChannels
+                && App.capabilities.indexOf("channel.duplicate.v1") >= 0
+            onTriggered: Qt.callLater(() => sidebar.duplicateChannel(categoryMenu.channelId))
+        }
+        MenuAction {
             text: qsTr("Category settings")
             enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
-            onTriggered: sidebar.openChannelSettings(categoryMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelSettings(categoryMenu.channelId))
         }
         MenuAction {
             text: qsTr("View details")
-            onTriggered: sidebar.openChannelDetails(categoryMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelDetails(categoryMenu.channelId))
+        }
+        MenuAction {
+            text: qsTr("Place category…")
+            enabled: sidebar.placementAllowed && !sidebar.pendingPlacementId.length
+            onTriggered: Qt.callLater(() => placementDialog.openFor(categoryMenu.channelId))
         }
         MenuAction {
             text: qsTr("Move up")
@@ -456,25 +792,36 @@ Rectangle {
             onTriggered: App.moveChannelRelative(categoryMenu.channelId, 1)
         }
         MenuAction {
-            text: qsTr("Permissions")
-            enabled: App.canManageRoles
-            onTriggered: sidebar.openChannelPermissions(categoryMenu.channelId, categoryMenu.channelName)
+            text: qsTr("Access and permissions")
+            enabled: App.ready
+            onTriggered: Qt.callLater(() => sidebar.openChannelPermissions(categoryMenu.channelId, categoryMenu.channelName))
         }
         MenuAction {
             text: qsTr("Delete category")
             danger: true
             enabled: App.canManageChannels
-            onTriggered: { channelConfirm.channelId = categoryMenu.channelId; channelConfirm.open() }
+            onTriggered: { categoryConfirm.channelId = categoryMenu.channelId; Qt.callLater(() => categoryConfirm.open()) }
         }
     }
 
     MenuPopup {
         id: channelMenu
+        onAboutToShow: sidebar.cancelPlacementGesture()
+        objectName: "channelContextMenu"
+        // Restore the list before deferred menu actions open their next popup.
+        onClosed: list.forceActiveFocus()
         property string channelId
         property string channelName
         property bool isVoice
         property bool isGroup
         property string userId
+        MenuAction {
+            text: qsTr("Duplicate channel…")
+            enabled: App.state === "connected" && App.canManageChannels
+                && channelMenu.userId.length === 0 && !channelMenu.isGroup
+                && App.capabilities.indexOf("channel.duplicate.v1") >= 0
+            onTriggered: Qt.callLater(() => sidebar.duplicateChannel(channelMenu.channelId))
+        }
         MenuAction {
             text: channelMenu.isVoice ? qsTr("Join voice") : qsTr("Open")
             onTriggered: App.selectChannel(channelMenu.channelId)
@@ -482,7 +829,7 @@ Rectangle {
         MenuAction {
             text: qsTr("View details")
             enabled: channelMenu.userId.length === 0 && !channelMenu.isGroup
-            onTriggered: sidebar.openChannelDetails(channelMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelDetails(channelMenu.channelId))
         }
         MenuAction {
             text: App.channelMuted(channelMenu.channelId) ? qsTr("Unmute notifications") : qsTr("Mute notifications")
@@ -492,24 +839,30 @@ Rectangle {
         MenuAction {
             text: qsTr("Add people")
             enabled: channelMenu.isGroup
-            onTriggered: sidebar.addToGroup(channelMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.addToGroup(channelMenu.channelId))
         }
         MenuAction {
             text: qsTr("Rename conversation")
             enabled: channelMenu.isGroup
-            onTriggered: sidebar.renameGroup(channelMenu.channelId, channelMenu.channelName)
+            onTriggered: Qt.callLater(() => sidebar.renameGroup(channelMenu.channelId, channelMenu.channelName))
         }
         MenuAction {
             text: qsTr("Leave conversation")
             danger: true
             enabled: channelMenu.isGroup
-            onTriggered: { leaveGroupConfirm.channelId = channelMenu.channelId; leaveGroupConfirm.open() }
+            onTriggered: { leaveGroupConfirm.channelId = channelMenu.channelId; Qt.callLater(() => leaveGroupConfirm.open()) }
         }
         MenuAction {
             text: qsTr("Channel settings")
             enabled: App.canManageChannels && App.capabilities.indexOf("channel.identity.v1") >= 0
                      && channelMenu.userId.length === 0 && !channelMenu.isGroup
-            onTriggered: sidebar.openChannelSettings(channelMenu.channelId)
+            onTriggered: Qt.callLater(() => sidebar.openChannelSettings(channelMenu.channelId))
+        }
+        MenuAction {
+            text: qsTr("Place channel…")
+            enabled: sidebar.placementAllowed && !sidebar.pendingPlacementId.length
+                     && channelMenu.userId.length === 0 && !channelMenu.isGroup
+            onTriggered: Qt.callLater(() => placementDialog.openFor(channelMenu.channelId))
         }
         MenuAction {
             text: qsTr("Move up")
@@ -524,9 +877,9 @@ Rectangle {
             onTriggered: App.moveChannelRelative(channelMenu.channelId, 1)
         }
         MenuAction {
-            text: qsTr("Permissions")
-            enabled: App.canManageRoles && channelMenu.userId.length === 0
-            onTriggered: sidebar.openChannelPermissions(channelMenu.channelId, channelMenu.channelName)
+            text: qsTr("Access and permissions")
+            enabled: App.ready && channelMenu.userId.length === 0 && !channelMenu.isGroup
+            onTriggered: Qt.callLater(() => sidebar.openChannelPermissions(channelMenu.channelId, channelMenu.channelName))
         }
         MenuAction {
             text: qsTr("Copy channel ID")
@@ -536,7 +889,7 @@ Rectangle {
             text: qsTr("Delete channel")
             danger: true
             enabled: App.canManageChannels && channelMenu.userId.length === 0
-            onTriggered: { channelConfirm.channelId = channelMenu.channelId; channelConfirm.open() }
+            onTriggered: { channelConfirm.channelId = channelMenu.channelId; Qt.callLater(() => channelConfirm.open()) }
         }
     }
 
@@ -548,6 +901,17 @@ Rectangle {
         confirmText: qsTr("Leave")
         destructive: true
         onConfirmed: App.leaveGroup(channelId)
+    }
+
+    ConfirmDialog {
+        id: categoryConfirm
+        objectName: "categoryDeleteConfirmation"
+        property string channelId
+        title: qsTr("Delete category?")
+        message: qsTr("Its channels move to the end of the top-level list. Channels, messages and their own permission overrides are kept. If this category has inherited permission overrides, review and move its channels before deleting it.")
+        confirmText: qsTr("Delete category")
+        destructive: true
+        onConfirmed: App.deleteChannel(channelId)
     }
 
     ConfirmDialog {
@@ -571,16 +935,16 @@ Rectangle {
             y = sidebar.height / 3
             open()
         }
-        width: Theme.px(220)
-        padding: Theme.px(12)
-        background: Rectangle { color: Theme.raised; radius: Theme.px(6); border.color: Theme.border }
+        width: Metrics.px(220)
+        padding: Metrics.px(12)
+        background: Rectangle { color: Theme.raised; radius: Metrics.px(6); border.color: Theme.border }
         ColumnLayout {
             anchors.fill: parent
-            spacing: Theme.px(6)
+            spacing: Metrics.px(6)
             Text {
                 text: qsTr("Volume for %1").arg(volumePopup.userName)
                 color: Theme.text
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 font.bold: true
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -598,8 +962,8 @@ Rectangle {
                 Text {
                     text: Math.round(slider.value) + "%"
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
-                    Layout.preferredWidth: Theme.px(38)
+                    font.pixelSize: Metrics.px(12)
+                    Layout.preferredWidth: Metrics.px(38)
                 }
             }
             FlatButton {

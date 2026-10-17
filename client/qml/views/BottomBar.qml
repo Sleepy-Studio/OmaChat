@@ -8,40 +8,57 @@ Rectangle {
     id: bar
     signal openSettings()
     signal openVoiceboard()
-    signal openOmkaonInbox()
-    signal openOmkaonDiscord()
-    readonly property bool compact: width < Theme.px(900)
+    signal openChannelDetails(string channelId)
+    readonly property bool compact: width < Metrics.px(900)
+    property string voiceIconId: ""
+    property bool voiceDetailsAvailable: false
+    function refreshVoiceArtwork(force) {
+        const channel = App.voiceJoined || App.voicePending ? App.channelDetails(App.voiceChannelId) : ({})
+        voiceDetailsAvailable = !!channel.server_id && channel.server_id === App.selectedServerId
+        const previous = voiceIconId
+        voiceIconId = channel.icon_attachment_id || ""
+        if ((force || previous !== voiceIconId) && voiceIconId.length > 0 && voiceIconId !== "0")
+            App.requestPreview(voiceIconId, "channel-icon.png", 0)
+    }
+    Component.onCompleted: refreshVoiceArtwork()
+    Connections {
+        target: App
+        function onVoiceChanged() { bar.refreshVoiceArtwork() }
+        function onSelectionChanged() { bar.refreshVoiceArtwork() }
+        function onChannelDataChanged(id) { if (id === App.voiceChannelId) bar.refreshVoiceArtwork() }
+        function onArtworkGenerationChanged() { bar.refreshVoiceArtwork(true) }
+    }
 
-    implicitHeight: Theme.px(52)
+    implicitHeight: Metrics.px(52)
     color: Theme.surfaceAlt
 
     Rectangle { width: parent.width; height: 1; color: Theme.border }
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: Theme.px(10)
-        anchors.rightMargin: Theme.px(10)
-        spacing: Theme.px(12)
+        anchors.leftMargin: Metrics.px(10)
+        anchors.rightMargin: Metrics.px(10)
+        spacing: Metrics.px(12)
 
         // Identity + presence
         Rectangle {
-            Layout.preferredWidth: bar.compact ? Theme.px(46) : Theme.px(220)
+            Layout.preferredWidth: bar.compact ? Metrics.px(46) : Metrics.px(220)
             Layout.fillHeight: true
-            Layout.topMargin: Theme.px(6)
-            Layout.bottomMargin: Theme.px(6)
-            radius: Theme.px(6)
+            Layout.topMargin: Metrics.px(6)
+            Layout.bottomMargin: Metrics.px(6)
+            radius: Metrics.px(6)
             color: idArea.containsMouse ? Theme.raised : "transparent"
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(6)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(6)
+                spacing: Metrics.px(8)
                 Avatar {
                     userId: App.selfId
                     name: App.selfName
                     avatarUrl: App.selfAvatarUrl
                     status: App.selfStatus
                     speaking: App.transmitting
-                    size: Theme.px(32)
+                    size: Metrics.px(32)
                 }
                 ColumnLayout {
                     visible: !bar.compact
@@ -51,7 +68,7 @@ Rectangle {
                         Layout.fillWidth: true
                         text: App.selfName
                         color: Theme.text
-                        font.pixelSize: Theme.px(13)
+                        font.pixelSize: Metrics.px(13)
                         font.bold: true
                         elide: Text.ElideRight
                     }
@@ -61,7 +78,7 @@ Rectangle {
                             : App.selfStatus === "idle" ? qsTr("Idle")
                             : App.selfStatus === "online" ? qsTr("Online") : qsTr("Offline")
                         color: Theme.textMuted
-                        font.pixelSize: Theme.px(11)
+                        font.pixelSize: Metrics.px(11)
                         elide: Text.ElideRight
                     }
                 }
@@ -78,22 +95,46 @@ Rectangle {
 
         // Voice session
         Rectangle {
+            objectName: "voiceSessionIdentity"
             visible: App.voiceJoined || App.voicePending
             Layout.fillHeight: true
-            Layout.topMargin: Theme.px(6)
-            Layout.bottomMargin: Theme.px(6)
-            Layout.preferredWidth: bar.compact ? Math.min(Theme.px(300), bar.width * 0.5) : Theme.px(300)
-            radius: Theme.px(6)
+            Layout.topMargin: Metrics.px(6)
+            Layout.bottomMargin: Metrics.px(6)
+            Layout.preferredWidth: bar.compact ? Math.min(Metrics.px(300), bar.width * 0.5) : Metrics.px(300)
+            radius: Metrics.px(6)
             color: Theme.surface
             border.color: Theme.border
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: Theme.px(10)
-                anchors.rightMargin: Theme.px(4)
-                spacing: Theme.px(8)
+                anchors.leftMargin: Metrics.px(10)
+                anchors.rightMargin: Metrics.px(4)
+                spacing: Metrics.px(8)
+                Item {
+                    Layout.preferredWidth: Metrics.px(20)
+                    Layout.preferredHeight: Metrics.px(20)
+                    Icon {
+                        objectName: "voiceChannelIconFallback"
+                        anchors.centerIn: parent
+                        visible: voiceImage.status !== Image.Ready
+                        name: "speaker"
+                        size: Metrics.px(20)
+                        Accessible.ignored: true
+                    }
+                    Image {
+                        id: voiceImage
+                        objectName: "voiceChannelIcon"
+                        anchors.fill: parent
+                        visible: status === Image.Ready
+                        source: bar.voiceIconId.length > 0 && bar.voiceIconId !== "0"
+                            ? App.previews[bar.voiceIconId] || "" : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        Accessible.ignored: true
+                    }
+                }
                 Rectangle {
-                    width: Theme.px(8)
+                    width: Metrics.px(8)
                     height: width
                     radius: width / 2
                     color: App.voiceConnected ? Theme.success : Theme.warning
@@ -106,7 +147,7 @@ Rectangle {
                         text: App.voicePending ? qsTr("Joining voice…")
                             : App.voiceConnected ? qsTr("Voice connected") : qsTr("Voice connecting…")
                         color: App.voiceConnected ? Theme.success : Theme.warning
-                        font.pixelSize: Theme.px(12)
+                        font.pixelSize: Metrics.px(12)
                         font.bold: true
                         elide: Text.ElideRight
                     }
@@ -115,7 +156,8 @@ Rectangle {
                         text: App.voiceChannelName + (App.voiceServerName.length > 0 ? " / " + App.voiceServerName : "")
                               + (App.inputMode === "ptt" ? (App.pttActive ? qsTr(" · transmitting") : qsTr(" · push to talk")) : "")
                         color: Theme.textMuted
-                        font.pixelSize: Theme.px(11)
+                        textFormat: Text.PlainText
+                        font.pixelSize: Metrics.px(11)
                         elide: Text.ElideRight
                     }
                 }
@@ -134,13 +176,21 @@ Rectangle {
                     }
                     IconButton {
                         visible: !App.sharingScreen
-                        implicitWidth: Theme.px(18)
+                        implicitWidth: Metrics.px(18)
                         iconName: "chevron-down"
-                        iconSize: Theme.px(10)
+                        iconSize: Metrics.px(10)
                         tip: qsTr("Screen share options")
                         enabled: !App.shareStarting
                         onClicked: shareOptionsMenu.popup()
                     }
+                }
+                IconButton {
+                    objectName: "voiceChannelDetailsAction"
+                    visible: App.voiceJoined
+                    iconName: "info"
+                    enabled: bar.voiceDetailsAvailable
+                    tip: enabled ? qsTr("Voice room details") : qsTr("Select the voice room’s server to view details")
+                    onClicked: bar.openChannelDetails(App.voiceChannelId)
                 }
                 IconButton {
                     iconName: "hangup"
@@ -175,41 +225,6 @@ Rectangle {
             iconName: "message"
             tip: qsTr("Voiceboard (Ctrl+Shift+V)")
             onClicked: bar.openVoiceboard()
-        }
-        IconButton {
-            iconName: "speaker"
-            tip: qsTr("omkaon Discord bridge")
-            onClicked: bar.openOmkaonDiscord()
-        }
-        Item {
-            implicitWidth: inboxButton.implicitWidth
-            implicitHeight: inboxButton.implicitHeight
-            IconButton {
-                id: inboxButton
-                anchors.fill: parent
-                iconName: "message"
-                tip: qsTr("omkaon inbox · %1 saved messages").arg(App.omkaonInbox.length)
-                onClicked: bar.openOmkaonInbox()
-            }
-            Rectangle {
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.rightMargin: -Theme.px(2)
-                anchors.topMargin: -Theme.px(2)
-                width: Math.max(Theme.px(15), countText.implicitWidth + Theme.px(6))
-                height: Theme.px(15)
-                radius: height / 2
-                visible: App.omkaonInbox.length > 0
-                color: Theme.accent
-                Text {
-                    id: countText
-                    anchors.centerIn: parent
-                    text: App.omkaonInbox.length > 99 ? "99+" : App.omkaonInbox.length
-                    color: Theme.accentText
-                    font.pixelSize: Theme.px(9)
-                    font.bold: true
-                }
-            }
         }
         IconButton {
             iconName: "settings"

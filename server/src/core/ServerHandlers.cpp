@@ -50,9 +50,8 @@ void ChatServer::handleSync(Session& s, std::uint64_t rid)
             const ChannelRecord* c = m_state.channel(cid);
             if (!c)
                 continue;
-            // Categories are visible if any child is; keep it simple and
-            // always ship categories, filtering leaf channels by permission.
-            if (c->kind != ChannelKind::Category && !m_state.can(cid, s.userId, ViewChannel))
+            // Restricted category metadata follows the same visibility rule as leaves.
+            if (!m_state.can(cid, s.userId, ViewChannel))
                 continue;
             *st->add_channels() = toProto(*c, s.userId);
             if (c->kind == ChannelKind::Voice)
@@ -72,6 +71,10 @@ void ChatServer::handleSync(Session& s, std::uint64_t rid)
     for (const auto& [uid, v] : m_voice) {
         if (visibleVoiceChannels.contains(v.channelId))
             *st->add_voice_states() = toProto(uid, v);
+    }
+    for (const auto& marker : m_store.readMarkers(s.userId)) {
+        if (m_state.can(marker.channel_id(), s.userId, ViewChannel | ReadHistory))
+            *st->add_read_markers() = marker;
     }
     st->set_last_sequence(m_events.lastSequence());
     reply(s, rid, std::move(env));
@@ -417,8 +420,8 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
     if (m.set_description()) {
         const auto description = validation::serverDescription(QString::fromStdString(m.description()));
         if (!description) {
-            replyError(s, rid, proto::ERROR_BAD_REQUEST,
-                QStringLiteral("server descriptions are at most 2000 characters"));
+            replyError(
+                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("server descriptions are at most 2000 characters"));
             return;
         }
         updated.description = *description;
@@ -426,7 +429,7 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
     // Server artwork reuses the channel upload pipeline: the attachment is
     // uploaded with channel_artwork=true against any channel of this server,
     // then referenced here. This keeps image normalization in one place.
-    const auto applyArtwork = [&](Id assetId, Id& destination) {
+    const auto applyArtwork = [&](Id assetId, Id& destination, proto::ArtworkFraming::Kind kind) {
         if (assetId == destination)
             return true;
         if (!assetId) {
@@ -435,28 +438,33 @@ void ChatServer::handleUpdateServer(Session& s, std::uint64_t rid, const proto::
         }
         const auto asset = m_store.attachment(assetId);
         if (!asset || !asset->artwork || asset->uploaderId != s.userId || asset->messageId
-            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId)
-            || m_store.artworkServer(assetId))
+            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId) || m_store.artworkServer(assetId))
             return false;
         const ChannelRecord* carrier = m_state.channel(asset->channelId);
         if (!carrier || carrier->serverId != srv->id)
             return false;
+        if (!asset->artworkFraming.isEmpty()) {
+            proto::ArtworkFraming framing;
+            if (!framing.ParseFromString(asset->artworkFraming.toStdString()) || framing.kind() != kind)
+                return false;
+        }
         QImageReader reader(attachmentPath(assetId));
         reader.setDecideFormatFromContent(true);
         const QByteArray format = reader.format().toLower();
         const QSize size = reader.size();
-        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid()
-            || size.width() > 6000 || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000
-            || reader.imageCount() > 1 || reader.read().isNull())
+        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid() || size.width() > 6000
+            || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000 || reader.imageCount() > 1
+            || reader.read().isNull())
             return false;
         destination = assetId;
         return true;
     };
-    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId)) {
+    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId, proto::ArtworkFraming::ICON)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid server icon image"));
         return;
     }
-    if (m.set_banner() && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId)) {
+    if (m.set_banner()
+        && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId, proto::ArtworkFraming::BANNER)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid server banner image"));
         return;
     }
@@ -687,8 +695,8 @@ void ChatServer::handleCreateChannel(Session& s, std::uint64_t rid, const proto:
         if (c && c->parentId == parent)
             position = std::max(position, c->position + 1);
     }
-    ChannelRecord c{m_ids.next(), srv->id, *name, static_cast<ChannelKind>(type), parent, position,
-        *topic, {}, *description};
+    ChannelRecord c{
+        m_ids.next(), srv->id, *name, static_cast<ChannelKind>(type), parent, position, *topic, {}, *description};
     if (!m_store.insertChannel(c, now())) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not create channel"));
         return;
@@ -696,17 +704,94 @@ void ChatServer::handleCreateChannel(Session& s, std::uint64_t rid, const proto:
     m_state.putChannel(c);
     proto::Event e;
     *e.mutable_channel_create() = toProto(c, 0);
-    std::vector<Id> audience;
-    if (c.kind == ChannelKind::Category) {
-        for (const auto& [uid, mem] : m_state.server(c.serverId)->members)
-            audience.push_back(uid);
-    } else {
-        audience = m_state.channelAudience(c.id);
-    }
-    publish(e, audience);
+    publish(e, m_state.channelAudience(c.id));
+    publishPermissionsChanged(c.serverId);
 
     proto::Envelope env;
     *env.mutable_channel() = toProto(c, s.userId);
+    reply(s, rid, std::move(env));
+}
+
+void ChatServer::handleDuplicateChannel(Session& s, std::uint64_t rid, const proto::DuplicateChannelRequest& m)
+{
+    const ChannelRecord* source = m_state.channel(m.channel_id());
+    if (!source || !m_state.can(source->id, s.userId, ViewChannel)) {
+        replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("channel not found"));
+        return;
+    }
+    if (!source->serverId
+        || (source->kind != ChannelKind::Text && source->kind != ChannelKind::Voice
+            && source->kind != ChannelKind::Category)) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("only server channels can be duplicated"));
+        return;
+    }
+    const ServerRecord* srv = m_state.server(source->serverId);
+    if (!srv || !m_state.can(source->id, s.userId, ManageChannel)
+        || (!m_state.canInServer(srv->id, s.userId, CreateChannel)
+            && !m_state.canInServer(srv->id, s.userId, ManageChannel))) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot duplicate this channel"));
+        return;
+    }
+    QString raw = QString::fromStdString(m.name());
+    if (source->kind == ChannelKind::Text)
+        raw = normalizeTextChannelName(raw);
+    const auto name = validation::channelName(raw);
+    if (!name || srv->channels.size() >= 500) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel name or channel limit reached"));
+        return;
+    }
+    const Id parent = m.set_parent() ? m.parent_id() : source->parentId;
+    if (parent) {
+        const ChannelRecord* destination = m_state.channel(parent);
+        if (source->kind == ChannelKind::Category || !destination || destination->serverId != srv->id
+            || destination->kind != ChannelKind::Category) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid parent category"));
+            return;
+        }
+        if (!m_state.can(parent, s.userId, ViewChannel | ManageChannel)) {
+            replyError(
+                s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage the destination category"));
+            return;
+        }
+    }
+    ChannelRecord copy = *source;
+    copy.id = m_ids.next();
+    copy.name = *name;
+    copy.parentId = parent;
+    copy.recipients.clear();
+    copy.position = 0;
+    for (Id id : srv->channels) {
+        const auto* sibling = m_state.channel(id);
+        if (sibling && sibling->parentId == parent)
+            copy.position = std::max(copy.position, sibling->position + 1);
+    }
+    auto overrides = m_state.overridesFor(source->id);
+    for (auto& override : overrides)
+        override.channelId = copy.id;
+    if (!m_store.begin()) {
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not start channel duplication"));
+        return;
+    }
+    bool stored = m_store.insertChannel(copy, now());
+    for (const auto& override : overrides)
+        if (stored)
+            stored = m_store.upsertOverride(override);
+    if (!stored || !m_store.commit()) {
+        m_store.rollback();
+        replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not duplicate channel"));
+        return;
+    }
+    // No event, snapshot, or permission check can observe the intermediate state:
+    // this synchronous handler installs all restrictions before publishing.
+    m_state.putChannel(copy);
+    for (const auto& override : overrides)
+        m_state.putOverride(override);
+    proto::Event event;
+    *event.mutable_channel_create() = toProto(copy, 0);
+    publish(event, m_state.channelAudience(copy.id));
+    publishPermissionsChanged(copy.serverId);
+    proto::Envelope env;
+    *env.mutable_channel() = toProto(copy, s.userId);
     reply(s, rid, std::move(env));
 }
 
@@ -722,6 +807,60 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
     if (groupDm ? m.set_topic() : (c->serverId == 0 || !m_state.can(c->id, s.userId, ManageChannel))) {
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot manage this channel"));
         return;
+    }
+    if (m.check_artwork()) {
+        if (groupDm || m.check_details() || m.check_placement() || m.check_placement_list() || !m.name().empty()
+            || m.set_topic() || m.set_description() || m.set_parent() || m.set_position() || m.set_before()
+            || (!m.set_icon() && !m.set_banner())) {
+            replyError(
+                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked artwork requires an artwork-only update"));
+            return;
+        }
+        if (c->iconAttachmentId != m.expected_icon_attachment_id()
+            || c->bannerAttachmentId != m.expected_banner_attachment_id()) {
+            replyError(s, rid, proto::ERROR_CONFLICT,
+                QStringLiteral("Channel artwork changed elsewhere. Reload latest and review your retained image before "
+                               "applying."));
+            return;
+        }
+    }
+    if (m.check_placement() || m.check_placement_list()) {
+        if (groupDm || m.check_details() || m.check_artwork() || !m.name().empty() || m.set_topic()
+            || m.set_description() || m.set_icon() || m.set_banner()
+            || (!m.set_parent() && !m.set_position() && !m.set_before())) {
+            replyError(
+                s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked placement requires a placement-only update"));
+            return;
+        }
+        if (m.check_placement_list() && m.expected_placement_token().empty()) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("checked placement requires a list token"));
+            return;
+        }
+        if ((m.check_placement() && (c->parentId != m.expected_parent_id() || c->position != m.expected_position()))
+            || (m.check_placement_list()
+                && QString::fromStdString(m.expected_placement_token()) != m_state.placementToken(c->serverId))) {
+            replyError(s, rid, proto::ERROR_CONFLICT,
+                QStringLiteral("Channel placement changed elsewhere. Reload latest and review your retained "
+                               "destination before moving."));
+            return;
+        }
+    }
+    if (m.check_details()) {
+        if (m.set_icon() || m.set_banner() || m.set_parent() || m.set_position() || m.set_before()) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                QStringLiteral("checked details cannot be combined with artwork or placement"));
+            return;
+        }
+        // This handler runs synchronously on the server thread: comparison and
+        // persistence cannot interleave with another channel update.
+        if (c->name != QString::fromStdString(m.expected_name())
+            || c->topic != QString::fromStdString(m.expected_topic())
+            || c->description != QString::fromStdString(m.expected_description())) {
+            replyError(s, rid, proto::ERROR_CONFLICT,
+                QStringLiteral(
+                    "Channel details changed elsewhere. Reload latest, review your retained edits, then save again."));
+            return;
+        }
     }
     ChannelRecord updated = *c;
     if (!m.name().empty()) {
@@ -751,7 +890,7 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         }
         updated.description = *description;
     }
-    const auto applyArtwork = [&](Id assetId, Id& destination) {
+    const auto applyArtwork = [&](Id assetId, Id& destination, proto::ArtworkFraming::Kind kind) {
         if (assetId == destination)
             return true;
         if (!assetId) {
@@ -760,34 +899,42 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
         }
         const auto asset = m_store.attachment(assetId);
         if (!asset || !asset->artwork || asset->channelId != c->id || asset->uploaderId != s.userId || asset->messageId
-            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId)
-            || m_store.artworkServer(assetId))
+            || asset->size > 2 * 1024 * 1024 || m_store.artworkChannel(assetId) || m_store.artworkServer(assetId))
             return false;
+        if (!asset->artworkFraming.isEmpty()) {
+            proto::ArtworkFraming framing;
+            if (!framing.ParseFromString(asset->artworkFraming.toStdString()) || framing.kind() != kind)
+                return false;
+        }
         QImageReader reader(attachmentPath(assetId));
         reader.setDecideFormatFromContent(true);
         const QByteArray format = reader.format().toLower();
         const QSize size = reader.size();
-        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid()
-            || size.width() > 6000 || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000
-            || reader.imageCount() > 1 || reader.read().isNull())
+        if ((format != "png" && format != "jpeg" && format != "webp") || !size.isValid() || size.width() > 6000
+            || size.height() > 6000 || qint64(size.width()) * size.height() > 12000000 || reader.imageCount() > 1
+            || reader.read().isNull())
             return false;
         destination = assetId;
         return true;
     };
-    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId)) {
+    if (m.set_icon() && !applyArtwork(m.icon_attachment_id(), updated.iconAttachmentId, proto::ArtworkFraming::ICON)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel icon image"));
         return;
     }
-    if (m.set_banner() && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId)) {
+    if (m.set_banner()
+        && !applyArtwork(m.banner_attachment_id(), updated.bannerAttachmentId, proto::ArtworkFraming::BANNER)) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid channel banner image"));
         return;
     }
-    if (m.set_parent() || m.set_position()) {
+    if (m.set_before() && m.set_position()) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("before and position are mutually exclusive"));
+        return;
+    }
+    if (m.set_parent() || m.set_position() || m.set_before()) {
         if (m.set_parent()) {
             const Id parent = m.parent_id();
             const ChannelRecord* category = parent ? m_state.channel(parent) : nullptr;
-            if ((parent && (!category || category->serverId != c->serverId
-                                   || category->kind != ChannelKind::Category))
+            if ((parent && (!category || category->serverId != c->serverId || category->kind != ChannelKind::Category))
                 || (c->kind == ChannelKind::Category && parent)) {
                 replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("invalid destination category"));
                 return;
@@ -827,8 +974,17 @@ void ChatServer::handleUpdateChannel(Session& s, std::uint64_t rid, const proto:
             }
         }
         auto destination = siblings(updated.parentId, categories);
-        const size_t insertAt = m.set_position() ? std::min<size_t>(m.position(), destination.size())
-                                                 : destination.size();
+        size_t insertAt = m.set_position() ? std::min<size_t>(m.position(), destination.size()) : destination.size();
+        if (m.set_before() && m.before_id()) {
+            const auto target = std::find_if(destination.begin(), destination.end(),
+                [&](const auto& sibling) { return sibling.id == m.before_id(); });
+            if (target == destination.end() || !m_state.can(target->id, s.userId, ViewChannel)) {
+                replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                    QStringLiteral("the chosen sibling is no longer available in this destination"));
+                return;
+            }
+            insertAt = static_cast<size_t>(std::distance(destination.begin(), target));
+        }
         destination.insert(destination.begin() + static_cast<std::ptrdiff_t>(insertAt), updated);
         for (size_t i = 0; i < destination.size(); ++i) {
             destination[i].position = static_cast<std::uint32_t>(i);
@@ -887,6 +1043,75 @@ void ChatServer::handleDeleteChannel(Session& s, std::uint64_t rid, const proto:
     }
     const Id channelId = c->id;
     const Id serverId = c->serverId;
+    if (c->kind == ChannelKind::Category) {
+        std::vector<ChannelRecord> children;
+        std::vector<ChannelRecord> topLevel;
+        for (Id id : m_state.server(serverId)->channels) {
+            const ChannelRecord* item = m_state.channel(id);
+            if (!item || item->id == channelId)
+                continue;
+            if (item->parentId == channelId) {
+                if (!m_state.can(item->id, s.userId, ManageChannel)
+                    && !m_state.canInServer(serverId, s.userId, ManageChannel)) {
+                    replyError(s, rid, proto::ERROR_PERMISSION_DENIED,
+                        QStringLiteral("you must be able to manage every channel in this category"));
+                    return;
+                }
+                children.push_back(*item);
+            } else if (!item->parentId && item->kind != ChannelKind::Category) {
+                topLevel.push_back(*item);
+            }
+        }
+        // Reparenting removes the inherited permission layer. Do not silently
+        // expose private children or drop inherited restrictions during deletion.
+        if (!children.empty() && !m_state.overridesFor(channelId).empty()) {
+            replyError(s, rid, proto::ERROR_BAD_REQUEST,
+                QStringLiteral("this category has inherited permission overrides; review and move its channels before "
+                               "deleting it"));
+            return;
+        }
+        const auto byPosition = [](const auto& a, const auto& b) {
+            return a.position != b.position ? a.position < b.position : a.id < b.id;
+        };
+        std::sort(topLevel.begin(), topLevel.end(), byPosition);
+        std::sort(children.begin(), children.end(), byPosition);
+        for (auto& child : children) {
+            child.parentId = 0;
+            topLevel.push_back(child);
+        }
+        if (!m_store.begin()) {
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not start category deletion"));
+            return;
+        }
+        for (size_t i = 0; i < topLevel.size(); ++i) {
+            topLevel[i].position = static_cast<std::uint32_t>(i);
+            if (!m_store.updateChannel(topLevel[i])) {
+                m_store.rollback();
+                replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not move category channels"));
+                return;
+            }
+        }
+        if (!m_store.deleteChannel(channelId) || !m_store.commit()) {
+            m_store.rollback();
+            replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not delete category"));
+            return;
+        }
+        // Publish only after the complete storage mutation succeeds.
+        for (const auto& item : topLevel)
+            m_state.putChannel(item);
+        m_state.removeChannel(channelId);
+        std::vector<Id> audience;
+        for (const auto& [uid, member] : m_state.server(serverId)->members)
+            audience.push_back(uid);
+        proto::Event e;
+        auto* deleted = e.mutable_channel_delete();
+        deleted->set_channel_id(channelId);
+        deleted->set_server_id(serverId);
+        publish(e, audience);
+        publishPermissionsChanged(serverId);
+        replyOk(s, rid);
+        return;
+    }
     std::vector<Id> inVoice;
     for (const auto& [uid, v] : m_voice) {
         if (v.channelId == channelId)
@@ -908,6 +1133,7 @@ void ChatServer::handleDeleteChannel(Session& s, std::uint64_t rid, const proto:
     d->set_channel_id(channelId);
     d->set_server_id(serverId);
     publish(e, audience);
+    publishPermissionsChanged(serverId);
     replyOk(s, rid);
 }
 

@@ -58,9 +58,7 @@ void ChatServer::handleImportDiscordBatch(Session& s, std::uint64_t rid, const p
         *event.mutable_channel_create() = toProto(c, 0);
         publish(event, audience());
     };
-    const auto fail = [&](const QString& reason) {
-        replyError(s, rid, proto::ERROR_INTERNAL, reason);
-    };
+    const auto fail = [&](const QString& reason) { replyError(s, rid, proto::ERROR_INTERNAL, reason); };
 
     Id parent = 0;
     if (!m.category_id().empty()) {
@@ -214,11 +212,13 @@ void ChatServer::handleImportDiscordBatch(Session& s, std::uint64_t rid, const p
             attachment.filename = *filename;
             attachment.mimeType = validation::mimeType(QString::fromStdString(asset.mime_type()));
             attachment.size = static_cast<std::uint64_t>(asset.data().size());
-            attachment.sha256 = QCryptographicHash::hash(QByteArray::fromStdString(asset.data()), QCryptographicHash::Sha256);
+            attachment.sha256
+                = QCryptographicHash::hash(QByteArray::fromStdString(asset.data()), QCryptographicHash::Sha256);
             attachment.createdAt = message.createdAt;
             const QString path = attachmentPath(attachment.id);
             QFile file(path);
-            if (!file.open(QIODevice::WriteOnly) || file.write(asset.data().data(), static_cast<qint64>(asset.data().size()))
+            if (!file.open(QIODevice::WriteOnly)
+                || file.write(asset.data().data(), static_cast<qint64>(asset.data().size()))
                     != static_cast<qint64>(asset.data().size())
                 || !file.flush() || !m_store.insertAttachment(attachment)) {
                 QFile::remove(path);
@@ -235,8 +235,8 @@ void ChatServer::handleImportDiscordBatch(Session& s, std::uint64_t rid, const p
             return;
         }
         if (!input.reply_discord_id().empty()
-            && !m_store.rememberDiscordReply(m.server_id(), message.id,
-                QString::fromStdString(input.reply_discord_id()))) {
+            && !m_store.rememberDiscordReply(
+                m.server_id(), message.id, QString::fromStdString(input.reply_discord_id()))) {
             fail(QStringLiteral("could not store imported reply"));
             return;
         }

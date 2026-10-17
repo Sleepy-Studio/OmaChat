@@ -17,6 +17,8 @@ qt_add_executable(omachat
     src/main.cpp
 )
 
+set_source_files_properties(qml/Metrics.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(omachat
     URI OmaChat
     VERSION 1.0
@@ -30,14 +32,19 @@ qt_add_qml_module(omachat
         src/models/RowListModel.hpp src/models/RowListModel.cpp
         src/models/MessageListModel.hpp src/models/MessageListModel.cpp
         src/platform/ThemeProvider.hpp src/platform/ThemeProvider.cpp
+        src/platform/ArtworkCache.hpp src/platform/ArtworkCache.cpp
+        src/platform/ArtworkCrop.hpp src/platform/ArtworkCrop.cpp
+        src/platform/ArtworkCropMemory.hpp src/platform/ArtworkCropMemory.cpp
         src/platform/SingleInstance.hpp src/platform/SingleInstance.cpp
         src/views/VideoFrameItem.hpp src/views/VideoFrameItem.cpp
         src/views/AudioLevels.hpp src/views/AudioLevels.cpp
     QML_FILES
+        qml/Metrics.qml
         qml/Main.qml
         qml/components/Icon.qml
         qml/components/IconButton.qml
         qml/components/Avatar.qml
+        qml/components/ArtworkBanner.qml
         qml/components/PresenceDot.qml
         qml/components/Badge.qml
         qml/components/FlatButton.qml
@@ -73,17 +80,18 @@ qt_add_qml_module(omachat
         qml/dialogs/TextPromptDialog.qml
         qml/dialogs/CreateServerDialog.qml
         qml/dialogs/CreateChannelDialog.qml
+        qml/dialogs/DuplicateChannelDialog.qml
         qml/dialogs/CommandHelp.qml
         qml/dialogs/SearchPanel.qml
         qml/dialogs/ConfirmDialog.qml
         qml/dialogs/ServerSettingsDialog.qml
         qml/dialogs/InstanceConsoleDialog.qml
         qml/dialogs/VoiceboardDialog.qml
-        qml/dialogs/OmkaonInboxDialog.qml
-        qml/dialogs/OmkaonDiscordDialog.qml
         qml/dialogs/PeoplePickerDialog.qml
         qml/dialogs/SafetyDialog.qml
         qml/dialogs/ChannelPermissionsDialog.qml
+        qml/dialogs/ChannelPlacementDialog.qml
+        qml/dialogs/ArtworkCropDialog.qml
         qml/dialogs/ChannelSettingsDialog.qml
         qml/dialogs/ChannelDetailsDialog.qml
     RESOURCES

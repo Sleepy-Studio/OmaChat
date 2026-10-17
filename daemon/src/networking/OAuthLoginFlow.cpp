@@ -23,7 +23,8 @@ QString randomUrlSafeToken(int bytes)
     const int words = bytes / 4 + 1;
     QByteArray buf(words * 4, Qt::Uninitialized);
     QRandomGenerator::global()->fillRange(reinterpret_cast<quint32*>(buf.data()), words);
-    return QString::fromLatin1(buf.left(bytes).toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+    return QString::fromLatin1(
+        buf.left(bytes).toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
 }
 
 QString pkceChallenge(const QString& verifier)
@@ -52,8 +53,8 @@ OAuthLoginFlow::OAuthLoginFlow(ServerConnection& conn, proto::OAuthProvider prov
 
 void OAuthLoginFlow::awaitLoginPrompt()
 {
-    const auto wanted = m_mode == Mode::Login ? ServerConnection::State::LoginRequired
-                                               : ServerConnection::State::Connected;
+    const auto wanted
+        = m_mode == Mode::Login ? ServerConnection::State::LoginRequired : ServerConnection::State::Connected;
     if (m_conn.state() == wanted) {
         beginBrowserFlow();
         return;
@@ -199,8 +200,7 @@ void OAuthLoginFlow::exchangeCode(const QString& code)
         creds.oauthCode = code;
         creds.oauthCodeVerifier = m_codeVerifier;
         creds.oauthRedirectUri = m_redirectUri;
-        creds.done
-            = [this](bool ok, const QString& errCode, const QString& message) { finish(ok, errCode, message); };
+        creds.done = [this](bool ok, const QString& errCode, const QString& message) { finish(ok, errCode, message); };
         m_conn.login(std::move(creds));
         return;
     }
@@ -212,13 +212,16 @@ void OAuthLoginFlow::exchangeCode(const QString& code)
     link->set_code(code.toStdString());
     link->set_code_verifier(m_codeVerifier.toStdString());
     link->set_redirect_uri(m_redirectUri.toStdString());
-    m_conn.request(std::move(env), [this](const proto::Envelope& reply) {
-        if (reply.has_error()) {
-            finish(false, ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
-            return;
-        }
-        finish(true, QString(), QString());
-    }, 30000);
+    m_conn.request(
+        std::move(env),
+        [this](const proto::Envelope& reply) {
+            if (reply.has_error()) {
+                finish(false, ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
+                return;
+            }
+            finish(true, QString(), QString());
+        },
+        30000);
 }
 
 void OAuthLoginFlow::finish(bool ok, const QString& code, const QString& message)

@@ -26,7 +26,13 @@
 
 namespace omachat::server {
 
-namespace auth { struct OAuthProfile; }
+namespace artwork {
+struct Images;
+}
+
+namespace auth {
+struct OAuthProfile;
+}
 
 class ChatServer : public QObject {
     Q_OBJECT
@@ -72,6 +78,8 @@ private:
         Id userId = 0;
         Id channelId = 0;
         bool channelArtwork = false;
+        proto::ArtworkFraming framing;
+        bool preparing = false;
         QString filename;
         QString mimeType;
         std::uint64_t size = 0;
@@ -88,6 +96,8 @@ private:
     };
 
     struct VoiceRec {
+        Id ownerSessionId = 0;
+        quint64 ownerConnId = 0;
         Id channelId = 0;
         bool selfMute = false;
         bool selfDeaf = false;
@@ -128,12 +138,17 @@ private:
     proto::UserStatus statusOf(Id userId) const;
 
     // ---- handlers: auth (AuthHandlers.cpp)
+    void handleGetUnreadSummary(Session& s, std::uint64_t rid, const proto::GetUnreadSummaryRequest& m);
+    void handleSetReadMarker(Session& s, std::uint64_t rid, const proto::SetReadMarkerRequest& m);
     void handleHello(Session& s, std::uint64_t rid, const proto::Hello& m);
     void handleRegister(Session& s, std::uint64_t rid, const proto::RegisterRequest& m);
     void handleLogin(Session& s, std::uint64_t rid, const proto::LoginRequest& m);
     void handleRefresh(Session& s, std::uint64_t rid, const proto::RefreshRequest& m);
     void handleResume(Session& s, std::uint64_t rid, const proto::ResumeRequest& m);
     void handleLogout(Session& s, std::uint64_t rid);
+    void handleListLoginSessions(Session& s, std::uint64_t rid, Id beforeId);
+    void handleRevokeLoginSession(Session& s, std::uint64_t rid, Id sessionId);
+    void invalidateLoginSession(Id userId, Id sessionId);
     void completeAuth(Session& s, std::uint64_t rid, Id userId, Id sessionId, const QString& refreshToken);
     void attachUser(Session& s, Id userId, Id sessionId, const QString& accessToken);
 
@@ -164,6 +179,7 @@ private:
     void handleCreateInvite(Session& s, std::uint64_t rid, const proto::CreateInviteRequest& m);
     void handleListInvites(Session& s, std::uint64_t rid, const proto::ListInvitesRequest& m);
     void handleJoinInvite(Session& s, std::uint64_t rid, const proto::JoinInviteRequest& m);
+    void handleDuplicateChannel(Session& s, std::uint64_t rid, const proto::DuplicateChannelRequest& m);
     void handleCreateChannel(Session& s, std::uint64_t rid, const proto::CreateChannelRequest& m);
     void handleUpdateChannel(Session& s, std::uint64_t rid, const proto::UpdateChannelRequest& m);
     void handleDeleteChannel(Session& s, std::uint64_t rid, const proto::DeleteChannelRequest& m);
@@ -204,6 +220,8 @@ private:
     void handleDeleteEmoji(Session& s, std::uint64_t rid, const proto::DeleteEmojiRequest& m);
     void handleListEmoji(Session& s, std::uint64_t rid, const proto::ListEmojiRequest& m);
     void detachUploadsOf(quint64 connId);
+    void finishPreparedUpload(
+        Session& s, std::uint64_t rid, Id id, const QByteArray& digest, const artwork::Images& images);
     void removeAttachmentFiles(const std::vector<Id>& ids);
     void collectAttachmentGarbage();
     QString attachmentPath(Id id) const;
@@ -229,6 +247,7 @@ private:
     void handleDeleteRole(Session& s, std::uint64_t rid, const proto::DeleteRoleRequest& m);
     void handleAssignRole(Session& s, std::uint64_t rid, const proto::AssignRoleRequest& m);
     void handleSetOverride(Session& s, std::uint64_t rid, const proto::SetOverrideRequest& m);
+    void handlePermissionPreview(Session& s, std::uint64_t rid, const proto::PermissionPreviewRequest& m);
     void handleListOverrides(Session& s, std::uint64_t rid, const proto::ListOverridesRequest& m);
     void removeMemberFromServer(Id serverId, Id userId, const QString& reason);
     void publishPermissionsChanged(Id serverId);
@@ -259,6 +278,7 @@ private:
     std::map<Id, QTimer*> m_offlineTimers;
     QHash<QString, int> m_connectionsPerIp;
     std::map<Id, Upload> m_uploads;
+    int m_artworkJobs = 0;
 
     // Brute-force protection, keyed by peer address and by username.
     std::map<QString, TokenBucket> m_authByIp;

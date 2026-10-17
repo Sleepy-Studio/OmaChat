@@ -10,13 +10,13 @@ Rectangle {
 
     ColumnLayout {
         anchors.centerIn: parent
-        width: Math.min(parent.width - Theme.px(48), Theme.px(460))
-        spacing: Theme.px(14)
+        width: Math.min(parent.width - Metrics.px(48), Metrics.px(460))
+        spacing: Metrics.px(14)
 
         Icon {
             Layout.alignment: Qt.AlignHCenter
             name: App.daemonState === "unavailable" ? "alert" : "server"
-            size: Theme.px(40)
+            size: Metrics.px(40)
             color: App.daemonState === "unavailable" ? Theme.danger : Theme.textMuted
         }
 
@@ -24,7 +24,7 @@ Rectangle {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             color: Theme.text
-            font.pixelSize: Theme.px(18)
+            font.pixelSize: Metrics.px(18)
             font.bold: true
             text: App.daemonState === "unavailable" ? qsTr("OmaChat service unavailable")
                 : App.daemonState === "launching" ? qsTr("Starting the OmaChat service…")
@@ -37,7 +37,7 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             color: Theme.textMuted
-            font.pixelSize: Theme.px(13)
+            font.pixelSize: Metrics.px(13)
             text: App.daemonState === "unavailable" ? App.daemonError
                 : qsTr("omachatd keeps your connection and voice alive even when this window is closed.")
         }
@@ -46,8 +46,8 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
             visible: App.daemonState !== "unavailable"
             running: visible
-            implicitWidth: Theme.px(28)
-            implicitHeight: Theme.px(28)
+            implicitWidth: Metrics.px(28)
+            implicitHeight: Metrics.px(28)
         }
 
         FlatButton {

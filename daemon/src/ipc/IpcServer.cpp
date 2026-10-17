@@ -20,14 +20,30 @@ Responder::Responder(IpcServer* server, QLocalSocket* socket, qint64 id)
 {
 }
 
+Responder Responder::intercept(Success success, Failure failure) const
+{
+    auto copy = *this;
+    copy.m_success = std::move(success);
+    copy.m_failure = std::move(failure);
+    return copy;
+}
+
 void Responder::ok(const QJsonObject& result) const
 {
+    if (m_success) {
+        m_success(result);
+        return;
+    }
     if (m_server && m_socket)
         m_server->send(m_socket, ipc::makeResult(m_id, result));
 }
 
 void Responder::error(const QString& code, const QString& message) const
 {
+    if (m_failure) {
+        m_failure(code, message);
+        return;
+    }
     if (m_server && m_socket)
         m_server->send(m_socket, ipc::makeError(m_id, code, message));
 }

@@ -10,8 +10,8 @@ Item {
     id: root
 
     property bool membersRequested: true
-    readonly property bool compactChannels: width < Theme.px(850)
-    readonly property bool dockMembers: width >= Theme.px(1080) && membersRequested
+    readonly property bool compactChannels: width < Metrics.px(850)
+    readonly property bool dockMembers: width >= Metrics.px(1080) && membersRequested
 
     function openChannels() {
         if (compactChannels)
@@ -24,7 +24,7 @@ Item {
     }
 
     function toggleMembers() {
-        if (width < Theme.px(1080)) {
+        if (width < Metrics.px(1080)) {
             if (membersDrawer.opened)
                 membersDrawer.close()
             else
@@ -55,6 +55,7 @@ Item {
             onOpenChannelPermissions: (id, name) => channelPermissions.openFor(id, name)
             onOpenChannelSettings: id => channelSettings.openFor(id)
             onOpenChannelDetails: id => channelDetails.openFor(id)
+            onDuplicateChannel: id => duplicateChannelDialog.openFor(id)
         }
     }
 
@@ -92,7 +93,7 @@ Item {
             ServerRail {
                 id: rail
                 Layout.fillHeight: true
-                Layout.preferredWidth: Theme.px(62)
+                Layout.preferredWidth: Metrics.px(62)
                 onCreateServer: createServerDialog.open()
                 onJoinServer: joinServerDialog.open()
             }
@@ -101,7 +102,7 @@ Item {
                 id: sidebarDock
                 active: !root.compactChannels
                 Layout.fillHeight: true
-                Layout.preferredWidth: Theme.px(236)
+                Layout.preferredWidth: Metrics.px(236)
                 visible: active
                 sourceComponent: sidebarContent
             }
@@ -140,7 +141,7 @@ Item {
 
             MemberList {
                 Layout.fillHeight: true
-                Layout.preferredWidth: Theme.px(220)
+                Layout.preferredWidth: Metrics.px(220)
                 visible: root.dockMembers
             }
         }
@@ -150,14 +151,7 @@ Item {
             Layout.fillWidth: true
             onOpenSettings: settingsDialog.open()
             onOpenVoiceboard: voiceboardDialog.open()
-            onOpenOmkaonInbox: {
-                App.refreshOmkaonInbox()
-                omkaonInbox.open()
-            }
-            onOpenOmkaonDiscord: {
-                App.refreshOmkaonDiscord()
-                omkaonDiscord.open()
-            }
+            onOpenChannelDetails: id => channelDetails.openFor(id)
         }
     }
 
@@ -230,10 +224,12 @@ Item {
     // --------------------------------------------------------------- dialogs
     Popup {
         id: channelsDrawer
+        objectName: "channelsDrawer"
+        onClosed: chat.focusComposer()
         parent: Overlay.overlay
-        x: Theme.px(62)
+        x: Metrics.px(62)
         y: statusBanner.height
-        width: Math.min(Theme.px(280), root.width - x - Theme.px(24))
+        width: Math.min(Metrics.px(280), root.width - x - Metrics.px(24))
         height: root.height - y - bottomBar.height
         padding: 0
         focus: true
@@ -253,26 +249,27 @@ Item {
     }
     Popup {
         id: membersDrawer
+        objectName: "membersDrawer"
+        onOpened: Qt.callLater(() => { if (membersDrawer.opened) memberDrawerContent.focusList() })
+        onClosed: chat.focusComposer()
         parent: Overlay.overlay
         x: root.width - width
         y: statusBanner.height
-        width: Math.min(Theme.px(250), root.width - Theme.px(80))
+        width: Math.min(Metrics.px(250), root.width - Metrics.px(80))
         height: root.height - y - bottomBar.height
         padding: 0
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle { color: Theme.surface; border.color: Theme.border }
-        contentItem: MemberList {}
+        contentItem: MemberList { id: memberDrawerContent }
         enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animationMs } }
         exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationMs } }
     }
     QuickSwitcher { id: switcher }
-    OmkaonInboxDialog { id: omkaonInbox }
-    OmkaonDiscordDialog { id: omkaonDiscord }
-    SettingsDialog { id: settingsDialog }
+    SettingsDialog { id: settingsDialog; objectName: "settingsDialog" }
     CommandHelp { id: commandHelp }
     SearchPanel { id: searchPanel }
-    ServerSettingsDialog { id: serverSettings }
+    ServerSettingsDialog { id: serverSettings; objectName: "serverSettings" }
     InstanceConsoleDialog { id: instanceConsole }
     VoiceboardDialog { id: voiceboardDialog }
     Connections {
@@ -288,10 +285,19 @@ Item {
         acceptText: qsTr("Rename")
         onAccepted: value => App.renameGroup(channelId, value)
     }
-    ChannelPermissionsDialog { id: channelPermissions }
-    ChannelSettingsDialog { id: channelSettings }
-    ChannelDetailsDialog { id: channelDetails; onEditRequested: id => channelSettings.openFor(id) }
+    ChannelPermissionsDialog {
+        id: channelPermissions
+        objectName: "channelPermissionsDialog"
+        onClosed: { if (channelSettings.visible) channelSettings.contentItem.forceActiveFocus() }
+    }
+    ChannelSettingsDialog {
+        id: channelSettings
+        objectName: "channelSettingsDialog"
+        onOpenPermissionsRequested: (id, name) => channelPermissions.openFor(id, name)
+    }
+    ChannelDetailsDialog { id: channelDetails; objectName: "channelDetailsDialog"; onEditRequested: id => channelSettings.openFor(id) }
     CreateChannelDialog { id: createChannelDialog }
+    DuplicateChannelDialog { id: duplicateChannelDialog }
 
     CreateServerDialog {
         id: createServerDialog

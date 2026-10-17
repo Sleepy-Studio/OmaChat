@@ -137,10 +137,10 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: Theme.px(8)
-            Layout.rightMargin: Theme.px(4)
-            implicitHeight: Theme.px(36)
-            spacing: Theme.px(4)
+            Layout.leftMargin: Metrics.px(8)
+            Layout.rightMargin: Metrics.px(4)
+            implicitHeight: Metrics.px(36)
+            spacing: Metrics.px(4)
 
             Repeater {
                 model: panel.tabs
@@ -149,9 +149,9 @@ Rectangle {
                     required property var modelData
                     readonly property bool active: panel.current
                         && (modelData.self ? panel.current.self : panel.current.userId === modelData.userId)
-                    implicitHeight: Theme.px(26)
-                    implicitWidth: tabRow.implicitWidth + Theme.px(12)
-                    radius: Theme.px(4)
+                    implicitHeight: Metrics.px(26)
+                    implicitWidth: tabRow.implicitWidth + Metrics.px(12)
+                    radius: Metrics.px(4)
                     color: active ? Theme.selection : tabArea.containsMouse ? Theme.raised : "transparent"
                     Behavior on color { ColorAnimation { duration: Theme.animationMs } }
                     MouseArea {
@@ -163,26 +163,26 @@ Rectangle {
                     Row {
                         id: tabRow
                         anchors.centerIn: parent
-                        spacing: Theme.px(6)
+                        spacing: Metrics.px(6)
                         Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
-                            width: liveText.implicitWidth + Theme.px(6)
-                            height: Theme.px(14)
-                            radius: Theme.px(3)
+                            width: liveText.implicitWidth + Metrics.px(6)
+                            height: Metrics.px(14)
+                            radius: Metrics.px(3)
                             color: tab.modelData.self ? Theme.accent : Theme.danger
                             Text {
                                 id: liveText
                                 anchors.centerIn: parent
                                 text: tab.modelData.self ? qsTr("YOU") : qsTr("LIVE")
                                 color: Theme.accentText
-                                font.pixelSize: Theme.px(9)
+                                font.pixelSize: Metrics.px(9)
                                 font.bold: true
                             }
                         }
                         Rectangle {
                             visible: !tab.modelData.self && tab.modelData.quality === "poor"
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Theme.px(7)
+                            width: Metrics.px(7)
                             height: width
                             radius: width / 2
                             color: Theme.warning
@@ -192,14 +192,14 @@ Rectangle {
                             anchors.verticalCenter: parent.verticalCenter
                             text: tab.modelData.name
                             color: Theme.text
-                            font.pixelSize: Theme.px(12)
+                            font.pixelSize: Metrics.px(12)
                         }
                         IconButton {
                             visible: !panel.poppedOut[panel.keyFor(tab.modelData)]
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitWidth: Theme.px(18)
-                            implicitHeight: Theme.px(18)
-                            iconSize: Theme.px(11)
+                            implicitWidth: Metrics.px(18)
+                            implicitHeight: Metrics.px(18)
+                            iconSize: Metrics.px(11)
                             iconName: "pop-out"
                             tip: qsTr("Pop out into its own window")
                             onClicked: panel.popOut(panel.keyFor(tab.modelData))
@@ -207,9 +207,9 @@ Rectangle {
                         IconButton {
                             visible: !tab.modelData.self
                             anchors.verticalCenter: parent.verticalCenter
-                            implicitWidth: Theme.px(18)
-                            implicitHeight: Theme.px(18)
-                            iconSize: Theme.px(11)
+                            implicitWidth: Metrics.px(18)
+                            implicitHeight: Metrics.px(18)
+                            iconSize: Metrics.px(11)
                             iconName: "x"
                             tip: qsTr("Stop watching")
                             onClicked: App.unwatchStream(tab.modelData.userId)
@@ -225,19 +225,19 @@ Rectangle {
                     : panel.streamState === "stalled" ? qsTr("Picture frozen")
                     : qsTr("Poor connection")
                 color: Theme.warning
-                font.pixelSize: Theme.px(11)
+                font.pixelSize: Metrics.px(11)
             }
             IconButton {
                 visible: panel.current && !panel.current.self
                 iconName: "speaker"
-                iconSize: Theme.px(14)
+                iconSize: Metrics.px(14)
                 tip: qsTr("Volume for %1's stream").arg(panel.current ? panel.current.name : "")
                 onClicked: streamVolumePopup.popup()
             }
             IconButton {
                 visible: panel.current && panel.current.self
                 iconName: "pointer"
-                iconSize: Theme.px(14)
+                iconSize: Metrics.px(14)
                 checkable: true
                 checked: panel.pointerMode
                 iconColor: checked ? Theme.accent : Theme.textMuted
@@ -249,11 +249,11 @@ Rectangle {
                 text: video.frameSize.width + "×" + video.frameSize.height
                       + (video.zoom > 1.01 ? " · " + Math.round(video.zoom * 100) + "%" : "")
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(11)
+                font.pixelSize: Metrics.px(11)
             }
             IconButton {
                 iconName: panel.expanded ? "minimize" : "maximize"
-                iconSize: Theme.px(15)
+                iconSize: Metrics.px(15)
                 tip: panel.expanded ? qsTr("Show the chat") : qsTr("Hide the chat")
                 onClicked: panel.toggleExpanded()
             }
@@ -293,7 +293,7 @@ Rectangle {
                     return qsTr("Waiting for %1's screen…").arg(c.name)
                 }
                 color: "#bbbbbb"
-                font.pixelSize: Theme.px(13)
+                font.pixelSize: Metrics.px(13)
             }
             // Video decoding stalled but packets are still arriving, which in
             // practice is the best we can tell apart from a hard drop: the
@@ -302,17 +302,17 @@ Rectangle {
                 visible: video.hasFrame && panel.streamState === "stalled"
                 anchors.top: parent.top
                 anchors.horizontalCenter: parent.horizontalCenter
-                anchors.topMargin: Theme.px(10)
-                width: stalledText.implicitWidth + Theme.px(16)
-                height: Theme.px(24)
-                radius: Theme.px(12)
+                anchors.topMargin: Metrics.px(10)
+                width: stalledText.implicitWidth + Metrics.px(16)
+                height: Metrics.px(24)
+                radius: Metrics.px(12)
                 color: Qt.rgba(0, 0, 0, 0.6)
                 Text {
                     id: stalledText
                     anchors.centerIn: parent
                     text: qsTr("Picture frozen — reconnecting…")
                     color: "#eeeeee"
-                    font.pixelSize: Theme.px(11)
+                    font.pixelSize: Metrics.px(11)
                 }
             }
             Accessible.role: Accessible.Graphic
@@ -323,12 +323,12 @@ Rectangle {
             Rectangle {
                 id: pip
                 visible: panel.showSelfPip
-                width: Theme.px(168)
-                height: Theme.px(94)
+                width: Metrics.px(168)
+                height: Metrics.px(94)
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.margins: Theme.px(10)
-                radius: Theme.px(6)
+                anchors.margins: Metrics.px(10)
+                radius: Metrics.px(6)
                 color: "black"
                 border.color: Theme.border
                 border.width: 1
@@ -347,22 +347,22 @@ Rectangle {
                     visible: !pipVideo.hasFrame
                     text: qsTr("Your screen")
                     color: "#bbbbbb"
-                    font.pixelSize: Theme.px(11)
+                    font.pixelSize: Metrics.px(11)
                 }
                 Rectangle {
                     anchors.top: parent.top
                     anchors.left: parent.left
-                    anchors.margins: Theme.px(4)
-                    width: youLabel.implicitWidth + Theme.px(6)
-                    height: Theme.px(14)
-                    radius: Theme.px(3)
+                    anchors.margins: Metrics.px(4)
+                    width: youLabel.implicitWidth + Metrics.px(6)
+                    height: Metrics.px(14)
+                    radius: Metrics.px(3)
                     color: Theme.accent
                     Text {
                         id: youLabel
                         anchors.centerIn: parent
                         text: qsTr("YOU")
                         color: Theme.accentText
-                        font.pixelSize: Theme.px(9)
+                        font.pixelSize: Metrics.px(9)
                         font.bold: true
                     }
                 }
@@ -386,19 +386,19 @@ Rectangle {
         function popup() {
             volumeSlider.value = App.userVolume(userId)
             x = (panel.width - width) / 2
-            y = Theme.px(40)
+            y = Metrics.px(40)
             open()
         }
-        width: Theme.px(220)
-        padding: Theme.px(12)
-        background: Rectangle { color: Theme.raised; radius: Theme.px(6); border.color: Theme.border }
+        width: Metrics.px(220)
+        padding: Metrics.px(12)
+        background: Rectangle { color: Theme.raised; radius: Metrics.px(6); border.color: Theme.border }
         ColumnLayout {
             anchors.fill: parent
-            spacing: Theme.px(6)
+            spacing: Metrics.px(6)
             Text {
                 text: qsTr("Volume for %1").arg(streamVolumePopup.userName)
                 color: Theme.text
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 font.bold: true
                 elide: Text.ElideRight
                 Layout.fillWidth: true
@@ -416,8 +416,8 @@ Rectangle {
                 Text {
                     text: Math.round(volumeSlider.value) + "%"
                     color: Theme.textMuted
-                    font.pixelSize: Theme.px(12)
-                    Layout.preferredWidth: Theme.px(38)
+                    font.pixelSize: Metrics.px(12)
+                    Layout.preferredWidth: Metrics.px(38)
                 }
             }
         }

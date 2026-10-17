@@ -99,6 +99,11 @@ bool RawClient::connect()
     socket->setSslConfiguration(tls);
     m_conn = new protocol::ProtocolConnection(socket);
     QObject::connect(m_conn, &protocol::ProtocolConnection::envelopeReceived, [this](const proto::Envelope& e) {
+        if (m_dropNextReply && e.request_id() != 0) {
+            m_dropNextReply = false;
+            m_conn->abort();
+            return;
+        }
         if (e.has_event())
             m_events.push_back(e.event());
         else
@@ -118,6 +123,12 @@ void RawClient::abort()
 {
     if (m_conn)
         m_conn->abort();
+}
+
+std::optional<proto::Envelope> RawClient::callDroppingReply(proto::Envelope env)
+{
+    m_dropNextReply = true;
+    return call(std::move(env));
 }
 
 std::optional<proto::Envelope> RawClient::call(proto::Envelope env, int timeoutMs)

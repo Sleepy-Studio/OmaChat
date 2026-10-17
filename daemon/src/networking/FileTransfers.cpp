@@ -59,11 +59,19 @@ QJsonObject FileTransfers::json(const Transfer& t) const
 
 void FileTransfers::send(quint64 id, proto::Envelope env, Reply onReply)
 {
+    if (auto* transfer = find(id); transfer && transfer->identityGeneration != m_conn.identityGeneration()) {
+        fail(id, e::NotConnected, QStringLiteral("transfer account identity changed"));
+        return;
+    }
     const quint64 generation = m_conn.linkGeneration();
     m_conn.request(std::move(env), [this, id, generation, onReply = std::move(onReply)](const proto::Envelope& reply) {
         Transfer* t = find(id);
         if (!t || t->waitingSinceMs != 0)
             return;
+        if (t->identityGeneration != m_conn.identityGeneration()) {
+            fail(id, e::NotConnected, QStringLiteral("transfer account identity changed"));
+            return;
+        }
         if (reply.has_error() && generation != m_conn.linkGeneration()) {
             // The connection went away underneath this request: wait for it.
             t->waitingSinceMs = QDateTime::currentMSecsSinceEpoch();
@@ -88,6 +96,10 @@ void FileTransfers::onReconnected()
         Transfer* t = find(id);
         if (!t)
             continue;
+        if (t->identityGeneration != m_conn.identityGeneration()) {
+            fail(id, e::NotConnected, QStringLiteral("transfer account identity changed"));
+            continue;
+        }
         t->waitingSinceMs = 0;
         OMA_INFO("transfer", "continuing after reconnect", {"name", t->name});
         if (!t->upload) {
@@ -96,6 +108,7 @@ void FileTransfers::onReconnected()
                 t->inFlight = 1;
                 proto::Envelope env;
                 env.mutable_download()->set_attachment_id(t->attachmentId);
+                env.mutable_download()->set_artwork_variant(t->variant);
                 env.mutable_download()->set_offset(0);
                 send(id, std::move(env), [this, id](Transfer&, const proto::Envelope& r) { onDownloadChunk(id, r); });
             } else {
@@ -202,7 +215,8 @@ void FileTransfers::fail(quint64 id, const QString& code, const QString& message
         return;
     Transfer t = std::move(it->second);
     m_transfers.erase(it);
-    if (t.upload && t.attachmentId && m_conn.state() == ServerConnection::State::Connected) {
+    if (t.upload && t.attachmentId && m_conn.state() == ServerConnection::State::Connected
+        && t.identityGeneration == m_conn.identityGeneration()) {
         // Best effort: the server usually dropped it already.
         proto::Envelope env;
         env.mutable_cancel_upload()->set_attachment_id(t.attachmentId);
@@ -246,7 +260,8 @@ bool FileTransfers::cancel(quint64 transferId)
 
 // ------------------------------------------------------------------ upload
 
-quint64 FileTransfers::upload(quint64 channelId, const QString& path, Done done, bool channelArtwork)
+quint64 FileTransfers::upload(
+    quint64 channelId, const QString& path, Done done, bool channelArtwork, const proto::ArtworkFraming& framing)
 {
     const quint64 id = m_nextId++;
     const QFileInfo info(path);
@@ -268,8 +283,10 @@ quint64 FileTransfers::upload(quint64 channelId, const QString& path, Done done,
 
     Transfer t;
     t.id = id;
+    t.identityGeneration = m_conn.identityGeneration();
     t.upload = true;
     t.channelArtwork = channelArtwork;
+    t.framing = framing;
     t.channelId = channelId;
     t.name = info.fileName();
     t.path = info.absoluteFilePath();
@@ -307,6 +324,8 @@ void FileTransfers::beginUpload(quint64 id)
     b->set_mime_type(t->mimeType.toStdString());
     b->set_size(t->total);
     b->set_channel_artwork(t->channelArtwork);
+    if (t->framing.kind() != proto::ArtworkFraming::NONE)
+        *b->mutable_artwork_framing() = t->framing;
     send(id, std::move(env), [this, id](Transfer& live, const proto::Envelope& reply) {
         if (reply.has_error()) {
             fail(id, ipcErrorCode(reply.error().code()), QString::fromStdString(reply.error().message()));
@@ -384,17 +403,21 @@ void FileTransfers::finishUpload(quint64 id)
 
 // ---------------------------------------------------------------- download
 
-quint64 FileTransfers::download(quint64 attachmentId, const QString& destination, Done done)
+quint64 FileTransfers::download(
+    quint64 attachmentId, const QString& destination, Done done, proto::DownloadRequest::ArtworkVariant variant)
 {
     const quint64 id = m_nextId++;
     Transfer t;
     t.id = id;
+    t.identityGeneration = m_conn.identityGeneration();
     t.upload = false;
+    t.variant = variant;
     t.attachmentId = attachmentId;
     t.path = destination;
     t.name = QFileInfo(destination).fileName();
     t.file = std::make_unique<QFile>(destination + QStringLiteral(".part"));
-    if (!t.file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    if (!t.file->open(QIODevice::WriteOnly | QIODevice::Truncate)
+        || !t.file->setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
         if (done)
             done(Result{false, e::StorageError,
                 QStringLiteral("cannot write %1: %2").arg(t.file->fileName(), t.file->errorString()), {}, {}});
@@ -408,6 +431,7 @@ quint64 FileTransfers::download(quint64 attachmentId, const QString& destination
     ref.inFlight = 1;
     proto::Envelope env;
     env.mutable_download()->set_attachment_id(attachmentId);
+    env.mutable_download()->set_artwork_variant(variant);
     env.mutable_download()->set_offset(0);
     send(id, std::move(env), [this, id](Transfer&, const proto::Envelope& reply) { onDownloadChunk(id, reply); });
     return id;
@@ -423,6 +447,8 @@ void FileTransfers::onDownloadChunk(quint64 id, const proto::Envelope& reply)
         return;
     }
     const auto& c = reply.file_chunk();
+    if (c.has_artwork_framing())
+        t->framing = c.artwork_framing();
     t->inFlight -= 1;
     if (t->total == 0) {
         t->total = c.total_size();
@@ -449,6 +475,8 @@ void FileTransfers::onDownloadChunk(quint64 id, const proto::Envelope& reply)
         }
         Result r;
         r.path = t->path;
+        if (t->framing.kind() != proto::ArtworkFraming::NONE)
+            *r.attachment.mutable_artwork_framing() = t->framing;
         succeed(id, std::move(r));
         return;
     }
@@ -462,6 +490,7 @@ void FileTransfers::pumpDownload(quint64 id)
     while (t && t->inFlight < kWindow && t->queued < t->total) {
         proto::Envelope env;
         env.mutable_download()->set_attachment_id(t->attachmentId);
+        env.mutable_download()->set_artwork_variant(t->variant);
         env.mutable_download()->set_offset(t->queued);
         env.mutable_download()->set_length(t->chunk);
         t->queued += std::min<std::uint64_t>(t->chunk, t->total - t->queued);

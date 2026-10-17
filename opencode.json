@@ -1,0 +1,46 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": false,
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "git commit *": "allow",
+      "git push *": "deny",
+      "gh pr create *": "deny",
+      "gh release create *": "deny",
+      "gh repo create *": "deny",
+      "npm publish *": "deny",
+      "cargo publish *": "deny",
+      "twine upload *": "deny",
+      "rsync *": "deny",
+      "scp *": "deny",
+      "curl * -X POST *": "deny",
+      "curl * -X PUT *": "deny",
+      "curl * -X DELETE *": "deny",
+      "wget *": "deny",
+      "omarchy *": "deny",
+      "systemctl *": "deny",
+      "sudo *": "deny"
+    },
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow",
+      "*.key": "deny",
+      "*.pem": "deny",
+      "wallets/*": "deny"
+    },
+    "edit": {
+      "*": "allow"
+    },
+    "webfetch": "allow",
+    "websearch": "allow",
+    "external_directory": {
+      "*": "ask",
+      "~/ombrella/**": "allow",
+      "~/Projects/lib/**": "allow"
+    },
+    "doom_loop": "ask"
+  }
+}

@@ -93,6 +93,7 @@ private:
     std::map<std::pair<Id, Id>, proto::Member> m_members; // (server, user)
     std::map<Id, proto::User> m_users;
     Decryptor m_decryptor;
+    std::map<Id, proto::ReadMarker> m_readMarkers;
     std::map<Id, proto::VoiceState> m_voice; // by user
     std::map<Id, std::uint64_t> m_serverPermissions;
     std::uint64_t m_lastSequence = 0;

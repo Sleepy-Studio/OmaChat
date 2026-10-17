@@ -111,3 +111,58 @@ TEST(Permissions, PresetsAreNested)
     EXPECT_EQ(kModeratorDefaults & kAdminDefaults, kModeratorDefaults);
     EXPECT_FALSE(has(kGuestDefaults, SendMessages));
 }
+
+TEST(Permissions, NamedContributorsFollowWinningOverrideAndClearAtUserAndVisibilityLayers)
+{
+    const std::vector<Bits> roles{ManageMessages, ManageMessages};
+    const std::vector<std::uint64_t> ids{10, 20};
+    ResolveInput::Layer layer;
+    layer.memberRoles = {{0, ManageMessages}, {ManageMessages, 0}};
+    layer.memberRoleIds = ids;
+    std::vector<ResolveInput::Layer> layers{layer};
+    ResolveInput input;
+    input.defaultRole = ViewChannel;
+    input.defaultRoleId = 1;
+    input.memberRoles = roles;
+    input.memberRoleIds = ids;
+    input.layers = layers;
+    input.channelScope = true;
+    auto row = [](const Explanation& e, Bits bit) {
+        for (const auto& entry : e.permissions)
+            if (entry.permission == bit)
+                return entry;
+        return PermissionSource{};
+    };
+    auto result = explain(input);
+    EXPECT_EQ(result.effective, resolve(input));
+    EXPECT_EQ(row(result, ManageMessages).roles, std::vector<std::uint64_t>{20});
+    EXPECT_EQ(row(result, ViewChannel).roles, std::vector<std::uint64_t>{1});
+    layers[0].memberRoles[1] = {0, ManageMessages};
+    result = explain(input);
+    EXPECT_EQ(row(result, ManageMessages).roles, ids);
+    EXPECT_FALSE(row(result, ManageMessages).allowed);
+    layers[0].user = {ManageMessages, 0};
+    result = explain(input);
+    EXPECT_TRUE(row(result, ManageMessages).roles.empty());
+    EXPECT_TRUE(row(result, ManageMessages).allowed);
+    layers[0].user = {0, ViewChannel};
+    result = explain(input);
+    EXPECT_EQ(result.effective, 0u);
+    EXPECT_TRUE(row(result, ManageMessages).roles.empty());
+}
+
+TEST(Permissions, AdministratorContributorsIdentifyOnlyAdministratorRoles)
+{
+    const std::vector<Bits> roles{ManageMessages, Administrator, Administrator};
+    const std::vector<std::uint64_t> ids{10, 20, 30};
+    ResolveInput input;
+    input.memberRoles = roles;
+    input.memberRoleIds = ids;
+    auto result = explain(input);
+    for (const auto& entry : result.permissions)
+        EXPECT_EQ(entry.roles, (std::vector<std::uint64_t>{20, 30}));
+    input.isOwner = true;
+    result = explain(input);
+    for (const auto& entry : result.permissions)
+        EXPECT_TRUE(entry.roles.empty());
+}

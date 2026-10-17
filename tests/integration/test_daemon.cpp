@@ -4,6 +4,7 @@
 
 #include "Harness.hpp"
 
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -60,6 +61,43 @@ struct DaemonFixture : ::testing::Test {
 };
 
 } // namespace
+
+TEST_F(DaemonFixture, AppearanceSettingsValidateAndPersist)
+{
+    auto saved = alice->call(QStringLiteral("config.set_ui"), {{"scale", 1.5}, {"reduced_motion", true}});
+    ASSERT_TRUE(saved.ok) << saved.errorMessage.toStdString();
+    EXPECT_DOUBLE_EQ(saved.result.value("scale").toDouble(), 1.5);
+    EXPECT_TRUE(saved.result.value("reduced_motion").toBool());
+    const auto before = alice->call(QStringLiteral("config.get")).result;
+    for (const auto& invalid : {QJsonObject{{"scale", 4.0}}, QJsonObject{{"scale", "1.5"}}, QJsonObject{{"scale", 0.0}},
+             QJsonObject{{"scale", 1.0}, {"reduced_motion", "yes"}}}) {
+        const auto reply = alice->call(QStringLiteral("config.set_ui"), invalid);
+        EXPECT_FALSE(reply.ok);
+        EXPECT_EQ(reply.errorCode, QStringLiteral("BadRequest"));
+        EXPECT_EQ(alice->call(QStringLiteral("config.get")).result, before);
+    }
+    // Reload from disk, proving settings survived the IPC call and were saved.
+    ASSERT_TRUE(alice->call(QStringLiteral("config.reload")).ok);
+    EXPECT_EQ(alice->call(QStringLiteral("config.get")).result, before);
+    ASSERT_TRUE(alice->call(QStringLiteral("config.set_ui"), {{"reduced_motion", false}}).ok);
+    auto ui = alice->call(QStringLiteral("config.get")).result.value("ui").toObject();
+    EXPECT_DOUBLE_EQ(ui.value("scale").toDouble(), 1.5);
+    EXPECT_FALSE(ui.value("reduced_motion").toBool());
+    ASSERT_TRUE(alice->call(QStringLiteral("config.set_ui"), {{"scale", 1.0}}).ok);
+}
+
+TEST_F(DaemonFixture, AppearanceSaveFailureKeepsExistingSettings)
+{
+    const auto config = alice->call(QStringLiteral("config.get")).result;
+    const auto path = config.value("path").toString();
+    // A directory at the config pathname makes atomic replacement fail.
+    ASSERT_TRUE(QFile::remove(path) || !QFileInfo::exists(path));
+    ASSERT_TRUE(QDir().mkdir(path));
+    const auto reply = alice->call(QStringLiteral("config.set_ui"), {{"scale", 1.5}, {"reduced_motion", true}});
+    EXPECT_FALSE(reply.ok);
+    EXPECT_EQ(reply.errorCode, QStringLiteral("StorageError"));
+    EXPECT_EQ(alice->call(QStringLiteral("config.get")).result, config);
+}
 
 TEST_F(DaemonFixture, NotConfiguredStateIsExplicit)
 {
@@ -128,12 +166,11 @@ TEST_F(DaemonFixture, CreateServerFromDiscordExport)
     ASSERT_EQ(asset.write("archived attachment"), 19);
     asset.close();
     const QString exportPath = dir.filePath(QStringLiteral("channel.json"));
-    QJsonObject message{{"id", "100"}, {"timestamp", "2020-01-01T00:00:00.000Z"},
-        {"content", "old message"}, {"author", QJsonObject{{"id", "111"}, {"name", "Former member"}}},
+    QJsonObject message{{"id", "100"}, {"timestamp", "2020-01-01T00:00:00.000Z"}, {"content", "old message"},
+        {"author", QJsonObject{{"id", "111"}, {"name", "Former member"}}},
         {"attachments", QJsonArray{QJsonObject{{"url", "photo.txt"}, {"fileName", "photo.txt"}}}}};
     QJsonObject data{{"guild", QJsonObject{{"id", "999"}}},
-        {"channel", QJsonObject{{"id", "888"}, {"name", "old-chat"}}},
-        {"messages", QJsonArray{message}}};
+        {"channel", QJsonObject{{"id", "888"}, {"name", "old-chat"}}}, {"messages", QJsonArray{message}}};
     QFile exportFile(exportPath);
     ASSERT_TRUE(exportFile.open(QIODevice::WriteOnly));
     QJsonObject missingMessage = message;
@@ -141,8 +178,8 @@ TEST_F(DaemonFixture, CreateServerFromDiscordExport)
     data["messages"] = QJsonArray{missingMessage};
     exportFile.write(QJsonDocument(data).toJson());
     exportFile.close();
-    const QJsonObject params{{"name", "Imported place"},
-        {"files", QJsonArray{QUrl::fromLocalFile(exportPath).toString()}}};
+    const QJsonObject params{
+        {"name", "Imported place"}, {"files", QJsonArray{QUrl::fromLocalFile(exportPath).toString()}}};
     const auto refused = alice->call(QStringLiteral("server.create_from_discord"), params);
     EXPECT_FALSE(refused.ok);
     EXPECT_TRUE(alice->call(QStringLiteral("server.list")).result.value("servers").toArray().isEmpty());
@@ -180,15 +217,18 @@ TEST_F(DaemonFixture, ProfileUpdateFlowsThroughIpcAndRefreshesSelf)
             {"bio", "Building omachat"}});
     ASSERT_TRUE(result.ok) << result.errorMessage.toStdString();
     auto event = bob->waitEvent(QStringLiteral("user.updated"), [](const QJsonObject& user) {
-        return user.value("username").toString() == u"alice"
-            && user.value("display_name").toString() == u"Alice New";
+        return user.value("username").toString() == u"alice" && user.value("display_name").toString() == u"Alice New";
     });
     ASSERT_TRUE(event.has_value());
     EXPECT_EQ(event->value("avatar_url").toString(), QStringLiteral("https://example.org/alice.png"));
     EXPECT_EQ(event->value("bio").toString(), QStringLiteral("Building omachat"));
     ASSERT_TRUE(waitFor([&] {
         return alice->call(QStringLiteral("daemon.status"))
-                   .result.value("user").toObject().value("display_name").toString() == u"Alice New";
+                   .result.value("user")
+                   .toObject()
+                   .value("display_name")
+                   .toString()
+            == u"Alice New";
     }));
 }
 

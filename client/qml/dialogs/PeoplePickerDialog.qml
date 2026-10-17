@@ -15,7 +15,7 @@ Dialog {
     readonly property bool creating: channelId.length === 0
     readonly property int maxPick: creating ? 9 : Math.max(0, 10 - exclude.length)
     title: creating ? qsTr("New group conversation") : qsTr("Add people")
-    height: Math.min(Theme.px(560), (parent ? parent.height : 600) - Theme.px(40))
+    height: Math.min(Metrics.px(560), (parent ? parent.height : 600) - Metrics.px(40))
 
     function openCreate() {
         channelId = ""
@@ -43,14 +43,14 @@ Dialog {
     onOpened: filter.input.forceActiveFocus()
 
     contentItem: ColumnLayout {
-        spacing: Theme.px(10)
+        spacing: Metrics.px(10)
 
-        Text { text: dialog.title; color: Theme.text; font.pixelSize: Theme.px(16); font.bold: true }
+        Text { text: dialog.title; color: Theme.text; font.pixelSize: Metrics.px(16); font.bold: true }
         Text {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             color: Theme.textMuted
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
             text: dialog.creating ? qsTr("Pick 2 to 9 people you share a server with.")
                                   : qsTr("You can add %n more.", "", dialog.maxPick)
         }
@@ -64,7 +64,7 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            spacing: Theme.px(2)
+            spacing: Metrics.px(2)
             delegate: Rectangle {
                 id: person
                 required property var modelData
@@ -74,23 +74,23 @@ Dialog {
                 readonly property bool chosen: dialog.picked.indexOf(modelData.userId) >= 0
                 visible: matches
                 width: ListView.view.width
-                height: matches ? Theme.px(36) : 0
-                radius: Theme.px(4)
+                height: matches ? Metrics.px(36) : 0
+                radius: Metrics.px(4)
                 color: chosen ? Theme.selection : pickArea.containsMouse ? Theme.raised : "transparent"
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: Theme.px(8)
-                    anchors.rightMargin: Theme.px(8)
-                    spacing: Theme.px(8)
-                    Avatar { userId: person.modelData.userId; name: person.modelData.name; status: person.modelData.status; size: Theme.px(24) }
+                    anchors.leftMargin: Metrics.px(8)
+                    anchors.rightMargin: Metrics.px(8)
+                    spacing: Metrics.px(8)
+                    Avatar { userId: person.modelData.userId; name: person.modelData.name; status: person.modelData.status; size: Metrics.px(24) }
                     Text {
                         Layout.fillWidth: true
                         text: person.modelData.name
                         color: Theme.text
-                        font.pixelSize: Theme.px(13)
+                        font.pixelSize: Metrics.px(13)
                         elide: Text.ElideRight
                     }
-                    Text { text: "@" + person.modelData.username; color: Theme.textFaint; font.pixelSize: Theme.px(11) }
+                    Text { text: "@" + person.modelData.username; color: Theme.textFaint; font.pixelSize: Metrics.px(11) }
                     Check {
                         checked: person.chosen
                         enabled: person.chosen || dialog.picked.length < dialog.maxPick
@@ -100,7 +100,7 @@ Dialog {
                 MouseArea {
                     id: pickArea
                     anchors.fill: parent
-                    anchors.rightMargin: Theme.px(36)
+                    anchors.rightMargin: Metrics.px(36)
                     hoverEnabled: true
                     onClicked: dialog.toggle(person.modelData.userId, !person.chosen)
                 }
@@ -115,7 +115,7 @@ Dialog {
         }
         RowLayout {
             Layout.alignment: Qt.AlignRight
-            spacing: Theme.px(8)
+            spacing: Metrics.px(8)
             FlatButton { text: qsTr("Cancel"); onClicked: dialog.close() }
             FlatButton {
                 primary: true

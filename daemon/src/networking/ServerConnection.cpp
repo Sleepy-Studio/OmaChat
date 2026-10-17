@@ -165,8 +165,18 @@ void ServerConnection::setState(State s, const QString& code, const QString& mes
     }
 }
 
+void ServerConnection::updateAccount(const Account& account)
+{
+    if (account.id != m_account.id || account.host.compare(m_account.host, Qt::CaseInsensitive) != 0
+        || account.port != m_account.port || account.username != m_account.username
+        || account.trustedFingerprint != m_account.trustedFingerprint)
+        ++m_identityGeneration;
+    m_account = account;
+}
+
 void ServerConnection::start(const Account& account, Credentials credentials)
 {
+    ++m_identityGeneration;
     const bool sameAccount = account.id == m_account.id;
     teardownSocket();
     failPending(QStringLiteral("connection restarted"));
@@ -186,6 +196,7 @@ void ServerConnection::start(const Account& account, Credentials credentials)
 
 void ServerConnection::stop()
 {
+    ++m_identityGeneration;
     m_wantConnected = false;
     m_reconnectTimer.stop();
     teardownSocket();
@@ -278,8 +289,20 @@ void ServerConnection::connectNow()
     socket->connectToHostEncrypted(m_account.host, m_account.port);
 }
 
+QString ServerConnection::verifiedPeerFingerprint() const
+{
+    if (!m_socket || !m_socket->isEncrypted())
+        return {};
+    const auto peer = m_socket->peerCertificate();
+    return peer.isNull() ? QString() : fingerprintOf(peer);
+}
+
 void ServerConnection::onEncrypted()
 {
+    const auto peer = verifiedPeerFingerprint();
+    if (!m_authenticatedPeerFingerprint.isEmpty() && m_authenticatedPeerFingerprint != peer)
+        ++m_identityGeneration;
+    m_authenticatedPeerFingerprint = peer;
     m_connectTimeout.stop();
     m_serverAddress = m_socket->peerAddress();
     proto::Envelope env;
@@ -387,6 +410,7 @@ void ServerConnection::sendRefresh(const QString& token)
 
 void ServerConnection::login(Credentials credentials)
 {
+    ++m_identityGeneration;
     m_pendingCredentials = std::move(credentials);
     if (m_state == State::LoginRequired && m_conn) {
         sendCredentials();
@@ -447,6 +471,9 @@ void ServerConnection::handleAuthReply(const proto::Envelope& reply, AuthCallbac
         return;
     }
     const auto& r = reply.auth_result();
+    if (m_authenticatedUserId != 0 && m_authenticatedUserId != r.user().id())
+        ++m_identityGeneration;
+    m_authenticatedUserId = r.user().id();
     m_lastAuthUsername = QString::fromStdString(r.user().username());
     m_accessToken = QString::fromStdString(r.access_token());
     m_sessionId = r.session_id();
@@ -497,6 +524,9 @@ void ServerConnection::resync(std::function<void(bool)> done)
                     m_conn->abort();
                 return;
             }
+            if (m_authenticatedUserId != 0 && m_authenticatedUserId != reply.sync_state().self().id())
+                ++m_identityGeneration;
+            m_authenticatedUserId = reply.sync_state().self().id();
             m_model.reset(reply.sync_state());
             m_everConnected = true;
             m_backoff.reset();
@@ -516,6 +546,7 @@ void ServerConnection::resync(std::function<void(bool)> done)
 
 void ServerConnection::logout(AuthCallback done)
 {
+    ++m_identityGeneration;
     m_credentials.remove(refreshKey(), {});
     m_accessToken.clear();
     m_sessionId = 0;

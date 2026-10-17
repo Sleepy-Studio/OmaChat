@@ -58,6 +58,7 @@ inline const QString ProtocolMismatch = QStringLiteral("ProtocolMismatch");
 inline const QString CertificateError = QStringLiteral("CertificateError");
 inline const QString ServerUnavailable = QStringLiteral("ServerUnavailable");
 inline const QString MediaDeviceUnavailable = QStringLiteral("MediaDeviceUnavailable");
+inline const QString RecoveryError = QStringLiteral("RecoveryError");
 inline const QString StorageError = QStringLiteral("StorageError");
 inline const QString Timeout = QStringLiteral("Timeout");
 inline const QString TooLarge = QStringLiteral("TooLarge");

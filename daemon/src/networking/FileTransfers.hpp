@@ -38,10 +38,12 @@ public:
 
     // Uploads a local file as a pending attachment in `channelId`. Returns
     // the transfer id used in progress events.
-    quint64 upload(quint64 channelId, const QString& path, Done done, bool channelArtwork = false);
+    quint64 upload(quint64 channelId, const QString& path, Done done, bool channelArtwork = false,
+        const proto::ArtworkFraming& framing = {});
     // Downloads an attachment to `destination`, writing `<destination>.part`
     // first so a partial file never looks complete.
-    quint64 download(quint64 attachmentId, const QString& destination, Done done);
+    quint64 download(quint64 attachmentId, const QString& destination, Done done,
+        proto::DownloadRequest::ArtworkVariant variant = proto::DownloadRequest::FULL);
     bool cancel(quint64 transferId);
     QJsonArray activeJson() const;
 
@@ -57,8 +59,11 @@ signals:
 private:
     struct Transfer {
         quint64 id = 0;
+        quint64 identityGeneration = 0;
         bool upload = true;
         bool channelArtwork = false;
+        proto::ArtworkFraming framing;
+        proto::DownloadRequest::ArtworkVariant variant = proto::DownloadRequest::FULL;
         quint64 channelId = 0;
         quint64 attachmentId = 0;
         QString name;

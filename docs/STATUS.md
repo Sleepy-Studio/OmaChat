@@ -4,7 +4,7 @@ Updated: 2026-10-17
 
 ## Current scope and implementation
 
-omachat is now located at `/home/omka/ombrella/omachat` as an independently rooted Git repository. It retains the Qt client, daemon, server, CLI, and existing local work. The seven required spoke documents exist and are tailored to the existing project. A dark landing and an ombrand-rendered identity review page are present; three editable proposals are listed and none is adopted. Optional integration contracts with omkaon, omatube, omban, and omavb are documented. Local IPC remains same-user and opt-in for voice audio.
+omachat is located at `/home/omka/ombrella/omachat` as an independently rooted Git repository. It contains the Qt client, daemon, server, and CLI. The seven required spoke documents exist and are tailored to the project. A dark landing and an ombrand-rendered identity review page are present; three editable proposals are listed and none is adopted. Optional integration contracts with omatube, omban, and omavb are documented. Local IPC remains same-user and opt-in for voice audio.
 
 Known limits: live external integration calls were not exercised, and landing-page content has not had screenshot-based manual review. The pre-existing uncommitted README delta was overwritten during scaffold drafting; the committed README was restored and supplemented, but that original local README delta could not be recovered.
 

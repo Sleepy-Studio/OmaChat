@@ -283,6 +283,62 @@ void ChatServer::handleSetOverride(Session& s, std::uint64_t rid, const proto::S
     replyOk(s, rid);
 }
 
+void ChatServer::handlePermissionPreview(Session& s, std::uint64_t rid, const proto::PermissionPreviewRequest& m)
+{
+    const auto* c = m.new_channel() ? nullptr : m_state.channel(m.channel_id());
+    const Id sid = m.new_channel() ? m.server_id() : (c ? c->serverId : 0);
+    const Id target = m.role_id() ? 0 : (m.user_id() ? m.user_id() : s.userId);
+    const Id parentId = m.new_channel() ? m.parent_id() : (c ? c->parentId : 0);
+    const bool manager = sid && m_state.canInServer(sid, s.userId, ManageRoles);
+    const auto* parent = parentId ? m_state.channel(parentId) : nullptr;
+    const auto* role = m.role_id() ? m_state.role(m.role_id()) : nullptr;
+    bool valid = sid && m_state.member(sid, s.userId) && !(m.role_id() && m.user_id());
+    if (m.new_channel()) {
+        valid = valid && !m.channel_id()
+            && (m_state.canInServer(sid, s.userId, CreateChannel) || m_state.canInServer(sid, s.userId, ManageChannel))
+            && (m.channel_type() == proto::CHANNEL_TYPE_TEXT || m.channel_type() == proto::CHANNEL_TYPE_VOICE
+                || m.channel_type() == proto::CHANNEL_TYPE_CATEGORY)
+            && (!parentId
+                || (parent && parent->serverId == sid && parent->kind == ChannelKind::Category
+                    && m_state.can(parentId, s.userId, ViewChannel)))
+            && (m.channel_type() != proto::CHANNEL_TYPE_CATEGORY || !parentId);
+    } else {
+        valid = valid && c && m_state.can(c->id, s.userId, ViewChannel);
+    }
+    valid = valid
+        && (m.role_id() ? (manager && role && role->serverId == sid)
+                        : ((target == s.userId || manager) && m_state.member(sid, target)));
+    if (!valid) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot preview these permissions"));
+        return;
+    }
+    const auto explanation = m_state.permissionPreview(sid, c ? c->id : 0, parentId, target, m.role_id());
+    proto::Envelope env;
+    auto* preview = env.mutable_permission_preview();
+    preview->set_channel_id(c ? c->id : 0);
+    preview->set_server_id(sid);
+    preview->set_parent_id(parentId);
+    preview->set_role_id(m.role_id());
+    preview->set_new_channel(m.new_channel());
+    preview->set_user_id(target);
+    preview->set_effective_permissions(explanation.effective);
+    preview->set_can_preview_members(manager);
+    for (const auto& entry : explanation.permissions) {
+        auto* source = preview->add_permissions();
+        source->set_permission(entry.permission);
+        source->set_allowed(entry.allowed);
+        source->set_source(std::string(entry.source));
+        if (manager)
+            for (Id roleId : entry.roles)
+                if (const auto* contributor = m_state.role(roleId)) {
+                    auto* named = source->add_roles();
+                    named->set_id(roleId);
+                    named->set_name(contributor->name.toStdString());
+                }
+    }
+    reply(s, rid, std::move(env));
+}
+
 void ChatServer::handleListOverrides(Session& s, std::uint64_t rid, const proto::ListOverridesRequest& m)
 {
     const ChannelRecord* c = m_state.channel(m.channel_id());

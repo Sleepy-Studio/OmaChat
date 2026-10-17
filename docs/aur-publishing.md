@@ -51,7 +51,7 @@ a few minutes. From then on, anyone can install with
 
 ## Every future release
 
-After tagging a new version in the main repo (see `docs/status.md` →
+After tagging a new version in the main repo (see `docs/STATUS.md` →
 "Next" for the release process), repeat just the AUR half:
 
 ```bash

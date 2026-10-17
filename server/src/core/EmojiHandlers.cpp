@@ -12,7 +12,7 @@ using namespace omachat::permissions;
 namespace {
 constexpr int kMaxEmojiPerServer = 50;
 constexpr std::uint64_t kMaxEmojiBytes = 256 * 1024;
-}
+} // namespace
 
 void ChatServer::handleCreateEmoji(Session& s, std::uint64_t rid, const proto::CreateEmojiRequest& m)
 {

@@ -161,3 +161,7 @@ Limits, stated plainly:
 Forward secrecy and end-to-end media are future protocol work, not properties
 of the current build. The threat model and acceptance gates are in
 `docs/security-roadmap.md`.
+
+## Android implementation security boundary
+
+The current Android build has community text only; private ciphertext support and independent installation keys are pending. It blocks private sends rather than weakening encryption. TLS trust is scoped to the selected endpoint with explicit self-signed fingerprint confirmation; changed pins stop the connection. Tokens are Keystore-wrapped, backups disabled, and screens protected from capture. The app-private Room cache stores community plaintext. See [Android security and limitations](android.md#security-and-limitations); no Android security audit is claimed.

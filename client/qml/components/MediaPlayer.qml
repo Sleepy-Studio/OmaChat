@@ -12,7 +12,7 @@ Item {
     property string thumbnail: ""
     property bool thumbnailFailed: false
     property bool isVideo: false
-    property real maxWidth: Theme.px(400)
+    property real maxWidth: Metrics.px(400)
     property bool pendingPlay: false
     property alias volume: volumeSlider.value
     property bool muted: false
@@ -24,9 +24,9 @@ Item {
                         : videoOutput.sourceRect.width / videoOutput.sourceRect.height)
         : 16 / 9
 
-    implicitWidth: root.isVideo ? Math.min(Theme.px(400), root.maxWidth, Theme.px(300) * videoAspect)
-                                : Math.min(Theme.px(320), root.maxWidth)
-    implicitHeight: root.isVideo ? implicitWidth / videoAspect : Theme.px(98)
+    implicitWidth: root.isVideo ? Math.min(Metrics.px(400), root.maxWidth, Metrics.px(300) * videoAspect)
+                                : Math.min(Metrics.px(320), root.maxWidth)
+    implicitHeight: root.isVideo ? implicitWidth / videoAspect : Metrics.px(98)
 
     // Emitted so the attachment card can trigger the daemon download; the
     // player itself has no network/IPC knowledge.
@@ -50,7 +50,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: Theme.px(6)
+        radius: Metrics.px(6)
         color: Theme.surface
         border.color: Theme.border
         clip: true
@@ -105,11 +105,11 @@ Item {
         Text {
             visible: root.isVideo && root.thumbnail.length === 0 && !videoOutput.visible
             anchors.centerIn: parent
-            width: parent.width - Theme.px(20)
+            width: parent.width - Metrics.px(20)
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideMiddle
             color: Theme.textMuted
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
             text: root.thumbnailFailed ? root.filename : qsTr("Loading video preview…")
         }
 
@@ -119,8 +119,8 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: Theme.px(10)
-            height: Theme.px(44)
+            anchors.margins: Metrics.px(10)
+            height: Metrics.px(44)
 
             Text {
                 anchors.left: parent.left
@@ -128,7 +128,7 @@ Item {
                 anchors.top: parent.top
                 elide: Text.ElideMiddle
                 color: Theme.textMuted
-                font.pixelSize: Theme.px(11)
+                font.pixelSize: Metrics.px(11)
                 text: root.filename
             }
 
@@ -137,16 +137,16 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                height: Theme.px(25)
-                spacing: Theme.px(3)
+                height: Metrics.px(25)
+                spacing: Metrics.px(3)
 
                 Repeater {
                     model: 32
                     delegate: Rectangle {
                         required property int index
                         readonly property real amplitude: levels.bars[index] || 0
-                        width: Math.max(Theme.px(2), (audioBars.width - 31 * audioBars.spacing) / 32)
-                        height: Theme.px(3 + 22 * amplitude)
+                        width: Math.max(Metrics.px(2), (audioBars.width - 31 * audioBars.spacing) / 32)
+                        height: Metrics.px(3 + 22 * amplitude)
                         anchors.verticalCenter: parent.verticalCenter
                         radius: width / 2
                         color: Theme.accent
@@ -172,21 +172,21 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.margins: root.isVideo ? Theme.px(8) : 0
-            height: root.isVideo ? Theme.px(36) : Theme.px(40)
+            anchors.margins: root.isVideo ? Metrics.px(8) : 0
+            height: root.isVideo ? Metrics.px(36) : Metrics.px(40)
             z: 2
 
             Rectangle {
                 visible: root.isVideo
                 anchors.fill: parent
-                radius: Theme.px(4)
+                radius: Metrics.px(4)
                 color: Qt.rgba(0, 0, 0, 0.55)
             }
 
             IconButton {
                 id: playButton
                 anchors.left: parent.left
-                anchors.leftMargin: Theme.px(6)
+                anchors.leftMargin: Metrics.px(6)
                 anchors.verticalCenter: parent.verticalCenter
                 iconName: player.playbackState === Multimedia.MediaPlayer.PlayingState ? "pause" : "play"
                 tip: player.playbackState === Multimedia.MediaPlayer.PlayingState ? qsTr("Pause") : qsTr("Play")
@@ -206,11 +206,11 @@ Item {
 
             Text {
                 anchors.left: playButton.right
-                anchors.leftMargin: Theme.px(8)
+                anchors.leftMargin: Metrics.px(8)
                 anchors.verticalCenter: parent.verticalCenter
                 visible: !root.ready
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(12)
+                font.pixelSize: Metrics.px(12)
                 text: root.pendingPlay ? qsTr("Loading…") : qsTr("Play in chat")
             }
 
@@ -218,9 +218,9 @@ Item {
                 id: seek
                 visible: root.ready
                 anchors.left: playButton.right
-                anchors.leftMargin: Theme.px(8)
+                anchors.leftMargin: Metrics.px(8)
                 anchors.right: timeLabel.left
-                anchors.rightMargin: Theme.px(8)
+                anchors.rightMargin: Metrics.px(8)
                 anchors.verticalCenter: parent.verticalCenter
                 from: 0
                 to: Math.max(player.duration, 1)
@@ -232,17 +232,17 @@ Item {
                 id: volumeControls
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                width: Theme.px(98)
-                height: Theme.px(32)
+                width: Metrics.px(98)
+                height: Metrics.px(32)
 
                 IconButton {
                     id: muteButton
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Theme.px(28)
+                    width: Metrics.px(28)
                     height: width
                     iconName: "speaker"
-                    iconSize: Theme.px(16)
+                    iconSize: Metrics.px(16)
                     iconColor: root.muted || root.volume === 0 ? Theme.textFaint : Theme.textMuted
                     tip: root.muted ? qsTr("Unmute") : qsTr("Mute")
                     onClicked: {
@@ -255,7 +255,7 @@ Item {
                 Slider {
                     id: volumeSlider
                     anchors.left: muteButton.right
-                    anchors.leftMargin: Theme.px(2)
+                    anchors.leftMargin: Metrics.px(2)
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     from: 0
@@ -276,10 +276,10 @@ Item {
                 id: timeLabel
                 visible: root.ready
                 anchors.right: volumeControls.left
-                anchors.rightMargin: Theme.px(6)
+                anchors.rightMargin: Metrics.px(6)
                 anchors.verticalCenter: parent.verticalCenter
                 color: Theme.textFaint
-                font.pixelSize: Theme.px(11)
+                font.pixelSize: Metrics.px(11)
                 text: App.formatDuration(player.position) + " / " + App.formatDuration(player.duration)
             }
         }
@@ -288,7 +288,7 @@ Item {
             visible: player.error !== Multimedia.MediaPlayer.NoError && root.ready
             anchors.centerIn: parent
             color: Theme.danger
-            font.pixelSize: Theme.px(12)
+            font.pixelSize: Metrics.px(12)
             text: qsTr("Can't play this file")
         }
     }

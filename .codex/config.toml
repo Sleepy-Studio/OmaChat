@@ -1,0 +1,32 @@
+# Shared Codex defaults for projects inside ombrella workspace.
+#
+# Norm: an agent working in this tree runs unattended. It does not stop for
+# approval, and it is not sandboxed to the project directory.
+#
+# Both of those are load-bearing, so read this before changing either line.
+#
+# `approval_policy = "never"` — the projects here are checked by agents running
+# headless suites. An approval prompt is a hang, and a hung check is a check
+# nobody trusts.
+#
+# `sandbox_mode = "danger-full-access"` — real work crosses project boundaries by
+# design. Every README in this workspace links to a sibling's CLI, a shared
+# contract, or `~/Projects/lib`. A workspace-write sandbox would turn ordinary
+# ombrella work into a wall of denials.
+#
+# What this grants is scoped by rules that no sandbox can express, and they live
+# in each project's own AGENTS.md. The two that matter most:
+#
+#   Nothing here may put something on the user's screen. The user runs six or
+#   more other processes and has asked three times, in as many words, that
+#   testing not take their screen, keyboard, mouse, or focus. See the parent's
+#   AGENTS.md and ~/Projects/lib/lint-no-visible-surfaces.js.
+#
+#   Nothing here publishes. No account is created, no remote is pushed, no
+#   record is written, no money is spent, and no external account is contacted
+#   without the user asking for that specific step in that specific message.
+#
+# The opencode equivalent of this file is templates/opencode/opencode.json, and
+# the two are deliberately NOT equivalent — see that file's header.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
