@@ -10,17 +10,13 @@ Item {
     id: root
 
     property bool membersRequested: true
-    readonly property bool compactChannels: width < Metrics.px(850)
+    property bool serverRailCollapsed: false
     readonly property bool dockMembers: width >= Metrics.px(1080) && membersRequested
 
     function openChannels() {
-        if (compactChannels)
-            channelsDrawer.open()
-        else {
-            const currentSidebar = sidebarDock.item as ChannelSidebar
-            if (currentSidebar)
-                currentSidebar.focusList()
-        }
+        const currentSidebar = sidebarDock.item as ChannelSidebar
+        if (currentSidebar)
+            currentSidebar.focusList()
     }
 
     function toggleMembers() {
@@ -34,7 +30,6 @@ Item {
         }
     }
 
-    onCompactChannelsChanged: if (!compactChannels) channelsDrawer.close()
     onDockMembersChanged: if (dockMembers) membersDrawer.close()
 
     Component {
@@ -61,7 +56,7 @@ Item {
 
     Connections {
         target: App
-        function onSelectionChanged() { channelsDrawer.close(); membersDrawer.close() }
+        function onSelectionChanged() { membersDrawer.close() }
     }
 
     // Application-focused push-to-talk: key events bubble up here from any
@@ -92,18 +87,20 @@ Item {
 
             ServerRail {
                 id: rail
+                collapsed: root.serverRailCollapsed
                 Layout.fillHeight: true
-                Layout.preferredWidth: Metrics.px(62)
+                Layout.preferredWidth: Metrics.px(root.serverRailCollapsed ? 30 : 62)
+                onToggleCollapsed: root.serverRailCollapsed = !root.serverRailCollapsed
                 onCreateServer: createServerDialog.open()
                 onJoinServer: joinServerDialog.open()
             }
 
             Loader {
                 id: sidebarDock
-                active: !root.compactChannels
+                active: true
                 Layout.fillHeight: true
                 Layout.preferredWidth: Metrics.px(236)
-                visible: active
+                visible: true
                 sourceComponent: sidebarContent
             }
 
@@ -125,7 +122,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     membersVisible: root.dockMembers || membersDrawer.opened
-                    showChannelsButton: root.compactChannels
+                    showChannelsButton: false
                     onToggleChannels: root.openChannels()
                     onBrowseChannels: {
                         if (App.homeSelected)
@@ -222,31 +219,6 @@ Item {
     }
 
     // --------------------------------------------------------------- dialogs
-    Popup {
-        id: channelsDrawer
-        objectName: "channelsDrawer"
-        onClosed: chat.focusComposer()
-        parent: Overlay.overlay
-        x: Metrics.px(62)
-        y: statusBanner.height
-        width: Math.min(Metrics.px(280), root.width - x - Metrics.px(24))
-        height: root.height - y - bottomBar.height
-        padding: 0
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: Theme.surface; border.color: Theme.border }
-        contentItem: Loader {
-            active: channelsDrawer.visible
-            sourceComponent: sidebarContent
-            onLoaded: {
-                const currentSidebar = item as ChannelSidebar
-                if (currentSidebar)
-                    currentSidebar.focusList()
-            }
-        }
-        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animationMs } }
-        exit: Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.animationMs } }
-    }
     Popup {
         id: membersDrawer
         objectName: "membersDrawer"

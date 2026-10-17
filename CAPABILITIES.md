@@ -13,4 +13,4 @@
 
 | Capability | Design or issue | Current state |
 |---|---|---|
-| Product roadmap: optional integrations and extensions, voice/media and cross-workspace notification improvements, richer messages and presentation, local file workflows, and profile/community features. | [GitHub issue index in BUILD.md](BUILD.md#product-work-tracked-on-github), issues #4–#20. | Planned only. Each issue contains its own scope and acceptance criteria; check its current state before treating work as started or complete. |
+| Product roadmap: optional integrations and extensions, voice/media and cross-workspace notification improvements, richer messages and presentation, local file workflows, and profile/community features. | [GitHub issue index in BUILD.md](BUILD.md#product-work-tracked-on-github), issues #4–#21. | Planned only. Each open issue has scope, acceptance criteria, and an end-to-end implementation-plan comment. Execute its ordered phases continuously in one work run, verifying checkpoints as you go. |

@@ -10,7 +10,7 @@ Read [README.md](README.md), [IDEA.md](IDEA.md), [ARCHITECTURE.md](ARCHITECTURE.
 - Do not publish, push, deploy, contact external services, spend funds, or install/update system packages unless the user asks for that specific action.
 - Keep `docs/STATUS.md` current after meaningful changes; record actual verification and Git state.
 - Keep local voice/audio IPC opt-in and same-user; never expose it on the network.
-- Keep planned product work indexed in [BUILD.md](BUILD.md#product-work-tracked-on-github) and [CAPABILITIES.md](CAPABILITIES.md#planned). The current GitHub roadmap is issues #4–#20; treat each as planned until its issue is completed and the capability is verified. Keep README claims about current behavior accurate and link to the roadmap for planned behavior.
+- Keep planned product work indexed in [BUILD.md](BUILD.md#product-work-tracked-on-github) and [CAPABILITIES.md](CAPABILITIES.md#planned). The current GitHub roadmap is issues #4–#21; treat each as planned until its issue is completed and the capability is verified. Each open issue has an ordered implementation-plan comment. When implementing one, follow all phases continuously in order in the same work run, verify each checkpoint, and continue without waiting for a separate prompt. Pause only for a genuine external blocker, record it, and complete independent work. Keep README claims about current behavior accurate and link to the roadmap for planned behavior.
 
 ## Desktop integrations
 

@@ -7,7 +7,7 @@ omachat is a standalone local-first chat and voice platform with a Qt client, da
 ## Entry points
 
 - Build and tests: [Build](#build) and [Development](#development).
-- Planned work: [GitHub roadmap issues #4–#20](BUILD.md#product-work-tracked-on-github).
+- Planned work: [GitHub roadmap issues #4–#21](BUILD.md#product-work-tracked-on-github). Open issues include end-to-end phased implementation plans; follow the phases continuously in one work run.
 - GUI: `omachat`; daemon: `omachatd`; CLI: `omachatctl`.
 - Development instance: `scripts/dev-instance.sh start`.
 - Local IPC contract: [docs/protocol.md](docs/protocol.md#local-ipc-omachatd--gui-cli-plugin).

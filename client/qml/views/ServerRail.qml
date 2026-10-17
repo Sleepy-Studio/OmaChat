@@ -12,6 +12,8 @@ Rectangle {
     signal createServer()
     signal joinServer()
     signal openInstanceConsole()
+    signal toggleCollapsed()
+    property bool collapsed: false
 
     ColumnLayout {
         anchors.fill: parent
@@ -19,10 +21,30 @@ Rectangle {
         anchors.bottomMargin: Metrics.px(8)
         spacing: Metrics.px(6)
 
+        IconButton {
+            Layout.alignment: Qt.AlignHCenter
+            implicitWidth: rail.collapsed ? Metrics.px(26) : Metrics.px(42)
+            implicitHeight: Metrics.px(32)
+            iconName: "chevron-right"
+            iconSize: Metrics.px(16)
+            tip: rail.collapsed ? qsTr("Expand server list") : qsTr("Collapse server list")
+            onClicked: rail.toggleCollapsed()
+            contentItem: Item {
+                Icon {
+                    anchors.centerIn: parent
+                    name: "chevron-right"
+                    size: Metrics.px(16)
+                    color: Theme.textMuted
+                    rotation: rail.collapsed ? 0 : 180
+                }
+            }
+        }
+
         ListView {
             id: list
             Layout.fillWidth: true
             Layout.fillHeight: true
+            visible: !rail.collapsed
             model: App.servers
             spacing: Metrics.px(6)
             clip: true
@@ -173,10 +195,12 @@ Rectangle {
             implicitWidth: Metrics.px(30)
             implicitHeight: 1
             color: Theme.border
+            visible: !rail.collapsed
         }
 
         IconButton {
             Layout.alignment: Qt.AlignHCenter
+            visible: !rail.collapsed
             implicitWidth: Metrics.px(42)
             implicitHeight: Metrics.px(42)
             iconName: "plus"
@@ -189,6 +213,7 @@ Rectangle {
         Item {
             Layout.alignment: Qt.AlignHCenter
             Layout.bottomMargin: Metrics.px(8)
+            visible: !rail.collapsed
             implicitWidth: Metrics.px(42)
             implicitHeight: Metrics.px(42)
             Avatar {

@@ -74,8 +74,15 @@ main contributor.
 | Local mute-others and per-user voice mute controls | [#18](https://github.com/Sleepy-Studio/OmaChat/issues/18) |
 | Alternating background treatment for consecutive author groups | [#19](https://github.com/Sleepy-Studio/OmaChat/issues/19) |
 | Cross-workspace screen-share preview notification | [#20](https://github.com/Sleepy-Studio/OmaChat/issues/20) |
+| Detect and surface upstream updates while Omachat is running | [#21](https://github.com/Sleepy-Studio/OmaChat/issues/21) |
 
-Issues #4–#20 are plans, not claims that the features are implemented. Check
-each issue for current scope and status before starting related work. The
-completed local updater and startup splash provenance is recorded in
-[#3](https://github.com/Sleepy-Studio/OmaChat/issues/3).
+Issues #4–#21 are plans, not claims that the features are implemented. Each
+open issue has an implementation-plan comment with an ordered, end-to-end
+sequence, gotchas, agent guidance, and alternatives with a recommendation.
+When taking one on, execute its phases continuously in order in the same work
+run, verify at each checkpoint, and continue rather than stopping for a new
+prompt between phases. Pause only for a genuine external blocker; document it
+and continue independent work. Check the issue for current scope and status
+before starting. The completed launch updater and startup splash are recorded
+in [#3](https://github.com/Sleepy-Studio/OmaChat/issues/3); running-session
+update detection is planned separately in [#21](https://github.com/Sleepy-Studio/OmaChat/issues/21).

@@ -4,12 +4,17 @@ Updated: 2026-10-17
 
 ## Product roadmap index
 
-`BUILD.md` now indexes the current GitHub-tracked product plans (#4–#20) and
+`BUILD.md` now indexes the current GitHub-tracked product plans (#4–#21) and
 identifies [@HowieDuhzit](https://github.com/HowieDuhzit) as the main
 contributor. The entries link to the issue acceptance criteria; they do not
 claim those features are implemented. `CAPABILITIES.md`, `README.md`, and
 `AGENTS.md` link to the same roadmap and keep planned work distinct from
-implemented behavior.
+implemented behavior. Every open issue from #4 through #21 now has a comment
+with an ordered, end-to-end implementation sequence, gotchas, agent guidance,
+and alternatives with a recommendation. The comments direct implementers to
+execute all phases in sequence during one continuous work run, verify each
+checkpoint, and continue without pausing for a separate trigger unless a
+genuine external blocker prevents progress.
 
 ## Current behavior
 
@@ -54,16 +59,20 @@ window-close behavior, and the planned avatar-generation integration. Historical
 session and implementation handoffs are labeled as dated snapshots; their
 recorded branch, deployment, and test results should not be read as current.
 
-The roadmap index in `BUILD.md` covers open product issues #4–#20. It is linked
+The roadmap index in `BUILD.md` covers open product issues #4–#21. It is linked
 from `CAPABILITIES.md` and `README.md`; `AGENTS.md` asks future changes to keep
-the index and current capability claims aligned. These issues are plans, not
+the index and current capability claims aligned, and to execute issue plans
+continuously through their ordered phases. These issues are plans, not
 implemented features.
 
 ## Verification and repository snapshot
 
-- `git diff --check` — passed for this documentation-only update.
-- No source changes, build, tests, launch, deployment, commit, or push were
-  performed for this audit.
-- At inspection, `HEAD` and the local `origin/main` tracking ref both point to
-  `c0afee9` (`Add hands-off main updater to local launch`). The worktree has
-  uncommitted documentation changes only.
+- GitHub implementation-plan comments were added to all currently open issues
+  #4–#21. These are planning comments; no feature implementation is claimed.
+- The latest UI changes in `client/qml/views/MainView.qml` and
+  `client/qml/views/ServerRail.qml` keep the channel column visible at narrow
+  widths and add a collapsible server rail; they remain uncommitted.
+- `git diff --check` — passed after the roadmap and UI updates.
+- No build or tests were run for these documentation and QML changes.
+- At inspection, `HEAD` and `origin/main` both point to `34b87e0`; the worktree
+  contains the documentation updates and the uncommitted QML layout change.
