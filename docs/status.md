@@ -18,7 +18,9 @@ Handoff notes for whoever picks this up next (human or agent). Last updated
 - Verification on `review/omachat-standalone`: clean CMake configure and
   `cmake --build /tmp/omachat-pr-build --target omachat omachatd -j2` passed.
   No tests run. The complete worktree remains preserved on
-  `holding/omachat-complete-worktree`.
+  `holding/omachat-complete-worktree`. PR #2 is open against `main` from
+  `review/omachat-standalone` at commit `7d8227f`; workspace-local untracked
+  files were not published.
 
 ## 0.2.2 conversation UI release
 
