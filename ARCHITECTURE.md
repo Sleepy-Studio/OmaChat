@@ -7,10 +7,10 @@ omachat owns a self-hostable chat and voice system: server, desktop GUI, daemon,
 ## Components and data flow
 
 ```text
-omachat-server ⇄ TLS/protobuf ⇄ omachatd ⇄ same-user JSON IPC ⇄ GUI / omachatctl / plugins
+omachat-server ⇄ TLS/protobuf ⇄ omachatd ⇄ same-user JSON IPC ⇄ GUI / omachatctl / local integrations
 ```
 
-The server persists shared state. `omachatd` holds the live client model and voice engine; the GUI and CLI use its local socket. Optional plugin integrations consume documented local APIs. Voice audio events are opt-in and delivered only to authorized same-user local IPC clients.
+The server persists shared state. `omachatd` holds the live client model and voice engine; the GUI and CLI use its local socket. The Omarchy bar widget and local integrations consume documented local APIs; a general plugin system is not implemented ([design issue #6](https://github.com/Sleepy-Studio/OmaChat/issues/6)). Voice audio events are opt-in and delivered only to authorized same-user local IPC clients.
 
 ## Data and integrations
 
@@ -48,4 +48,4 @@ revert commit on `main`, which the normal source updater can consume safely.
 
 ## Decisions
 
-Keep GUI and plugins dependent on the daemon's local public IPC contract; the daemon does not know about a particular plugin. Keep the application independent from ombrella runtime services.
+Keep the GUI and local integrations dependent on the daemon's local public IPC contract; the daemon does not know about a particular integration. Keep the application independent from ombrella runtime services. Closing the GUI currently leaves the daemon and call running; leave-on-close and stale-session recovery are planned in [issue #17](https://github.com/Sleepy-Studio/OmaChat/issues/17). The daemon normally rejoins after full synchronization, but same-device reclaim after a stale voice owner is also part of that issue.

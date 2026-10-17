@@ -1,8 +1,12 @@
 # OmaChat feature expansion handoff
 
 Updated: 2026-10-14. Full user-capability audit + expansion backlog.
-Resume from this file. Source of truth for behavior is the working tree;
-roadmap docs remain the scope record.
+
+**Historical checkpoint.** Test, branch, deployment, and installation details
+below describe the repository and environment on the dates shown; do not treat
+them as current. For current repository state see [docs/STATUS.md](STATUS.md).
+The active product roadmap is indexed in [BUILD.md](../BUILD.md#product-work-tracked-on-github)
+and its issue acceptance criteria.
 
 
 ## CI permission regression repaired — 2026-10-14
@@ -138,11 +142,10 @@ QML lints and independent review pass. All **127 installed/runtime artifacts**
 match, zero pacman alterations; connected/visible. Backend **83441d0** is pushed
 and its matching Docker image published. All five exact-SHA CI/Android/Docker workflows pass.
 
-**Hosted rollout is pending deploy access.** The live endpoint lacks the new
-capability; health is good. No deploy tool/browser is available, and the local
-MCP credential cannot authenticate to the deploy API. Resume the latest section
-of [desktop-session-handoff.md](desktop-session-handoff.md). Later phases and
-human acceptance remain open; client edits/transcript are preserved.
+**Hosted rollout was pending deploy access on 2026-10-13.** The live endpoint
+then lacked the new capability. Recheck current deployment state before acting;
+the [desktop-session-handoff.md](desktop-session-handoff.md) is historical.
+Later phases and human acceptance remained open at that checkpoint.
 
 ## Device-local crop memory installed — 2026-10-13
 

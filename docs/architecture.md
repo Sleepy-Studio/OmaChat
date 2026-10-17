@@ -17,10 +17,11 @@ omachat is four native programs plus an optional shell plugin.
    Qt Quick GUI  CLI / scripts  Quickshell plugin
 ```
 
-Dependency direction is strictly downward: the plugin and GUI depend on the
-daemon's public IPC contract; nothing in the daemon or server knows the
-plugin exists. Closing the GUI leaves the daemon — and your voice call —
-running.
+Dependency direction is strictly downward: the Omarchy bar widget and GUI
+depend on the daemon's public IPC contract; nothing in the daemon or server
+knows the widget exists. Closing the GUI currently leaves the daemon and voice
+call running. Planned leave-on-close and stale-session recovery are tracked in
+[issue #17](https://github.com/Sleepy-Studio/OmaChat/issues/17).
 
 ## Repository layout
 

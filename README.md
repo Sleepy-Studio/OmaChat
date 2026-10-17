@@ -2,11 +2,12 @@
 
 ## Current scope
 
-omachat is a standalone local-first chat and voice platform with a Qt client, daemon, CLI, and self-hostable server. Current implementation details are summarized below. The current checkout has pending local changes; its CMake build and CTest suite have been run for this enrollment, while live external integrations remain environment-dependent. omachat does not require ombrella services at runtime.
+omachat is a standalone local-first chat and voice platform with a Qt client, daemon, CLI, and self-hostable server. Current implementation details are summarized below; verification and repository state are recorded in [docs/STATUS.md](docs/STATUS.md). omachat does not require ombrella services at runtime.
 
 ## Entry points
 
 - Build and tests: [Build](#build) and [Development](#development).
+- Planned work: [GitHub roadmap issues #4–#20](BUILD.md#product-work-tracked-on-github).
 - GUI: `omachat`; daemon: `omachatd`; CLI: `omachatctl`.
 - Development instance: `scripts/dev-instance.sh start`.
 - Local IPC contract: [docs/protocol.md](docs/protocol.md#local-ipc-omachatd--gui-cli-plugin).
@@ -17,8 +18,9 @@ keyboard-first control, and self-hostable infrastructure — no browser runtime.
 
 IRC simplicity + TeamSpeak latency + Discord usability, as native Linux
 software: C++20, Qt 6 / Qt Quick, PipeWire, Opus, SQLite, TLS 1.3.
-omachat is a communication tool, not an AI product: it contains no
-assistants, bots or LLM features.
+The core product has no built-in assistant, bot, or model-routing features.
+Optional third-party image generation for profile avatars is a proposed
+integration, tracked in [issue #11](https://github.com/Sleepy-Studio/OmaChat/issues/11).
 
 ![omachat main window](docs/screenshots/main.png)
 
@@ -47,7 +49,8 @@ assistants, bots or LLM features.
   raw HTML is always shown literally
 - Voice: Opus 48 kHz mono, 20 ms frames, adaptive jitter buffers, FEC/PLC,
   voice activity / push-to-talk / always-on, mute and deafen, per-user local
-  volume, RNNoise noise suppression, device hot-plug via PipeWire
+  volume, RNNoise noise suppression, device hot-plug via PipeWire. Local
+  mute-others and per-user voice mute controls are planned in [issue #18](https://github.com/Sleepy-Studio/OmaChat/issues/18).
 - Screen sharing in voice channels: the desktop's own screen/window picker
   (xdg-desktop-portal), H.264 on the GPU (NVENC, AMF) or CPU (x264), up to
   1440p60, with other applications' sound; people choose whether to watch
@@ -59,7 +62,8 @@ assistants, bots or LLM features.
   for channel messages, DMs, and @mentions that respect DND and muted channels
 - Profiles with editable display name, bio and HTTPS avatar image; view a
   member's profile from the member list
-- `omachatd` keeps your session and voice call alive when the window closes
+- Closing the window currently leaves the daemon and voice call running; planned
+  leave-on-close and stale-session recovery are tracked in [issue #17](https://github.com/Sleepy-Studio/OmaChat/issues/17).
 - `omachatctl` for scripts and compositor keybindings, with stable JSON
 - IRC-style commands: `/join /leave /msg /reply /me /mute /unmute /deafen
   /undeafen /topic /invite /kick /ban /status /help`
@@ -157,8 +161,9 @@ entry. Uninstalling never deletes your data.
 
 omachat registers `omachat://`, so any script, keybind, browser or other
 application can focus or join something. It is a small, declarative
-integration surface — useful precisely because omachat has no plugin
-system (see [docs/addons.md](docs/addons.md)).
+integration surface. Omachat has no general runtime plugin system today;
+the design is tracked in [issue #6](https://github.com/Sleepy-Studio/OmaChat/issues/6)
+and described in [docs/addons.md](docs/addons.md).
 
 | URL | Effect | Asks first? |
 |---|---|---|
@@ -171,10 +176,9 @@ omachat "omachat://join/230912986460459015"   # from a script or keybind
 omachatctl channel list                         # where the IDs come from
 ```
 
-> **Known gap:** there is no GUI affordance for discovering an ID yet — no
-> "Copy ID" on a channel, and `channel list` is the only place they appear.
-> Anyone wiring up a keybind has to look them up by hand. A "Copy link"
-> action in the channel menu is the obvious fix and is not implemented.
+> **Known gap:** channel menus provide **Copy channel ID**, but there is no
+> **Copy link** action yet. A channel link could use the registered
+> `omachat://join/<channelId>` scheme; a future action should copy that URI.
 
 The second invocation never opens a second window: it hands the URL to the
 running one over a local socket. Anything that mutates state, captures a
@@ -329,7 +333,7 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
 `v0.2.2` is the latest tag; see [the development status](docs/STATUS.md) for
 its verification and release plan.
 
-Working and tested (see `ctest`): accounts, sessions and resume, TLS with
+Implemented capabilities include accounts, sessions and resume, TLS with
 explicit certificate trust, servers, invites, categories, text and voice
 channels, history, edits, deletes, replies, mentions, reactions, channel
 and server-wide search, DMs and group conversations, presence, typing,
@@ -351,7 +355,8 @@ Not done yet — be aware:
   yet (the rest of the video path is tested). Shared sound is opt-in,
   mono, and comes from all other applications, not only the shared window.
   The GUI confirms each share with sound.
-- See [docs/STATUS.md](docs/STATUS.md) for the current list.
+- Current verification limits and repository state are recorded in
+  [docs/STATUS.md](docs/STATUS.md).
 
 ## License
 

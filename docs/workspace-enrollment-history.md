@@ -1,6 +1,7 @@
 # omachat status
 
-Updated: 2026-10-17
+Updated: 2026-10-17. Historical record of the spoke enrollment; for current
+branch and worktree state see [docs/STATUS.md](STATUS.md).
 
 ## Current scope and implementation
 

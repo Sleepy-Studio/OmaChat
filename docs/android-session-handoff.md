@@ -1,6 +1,9 @@
 # OmaChat Android — session handoff
 
-Updated: 2026-10-02. This is the entry point for the next engineering session.
+Updated: 2026-10-02. Historical Android session handoff; it is not the current
+engineering entry point. Account, branch, device, deployment, and test details
+below are dated snapshots. Use [Android implementation status](android-implementation-status.md),
+[docs/STATUS.md](STATUS.md), and the current task's issue for present state.
 The user reports the current slice works and requests continuation in a new session.
 The complete Android application is **not finished**. Continue implementation;
 do not replace the remaining work with a proposal or call this a production release.

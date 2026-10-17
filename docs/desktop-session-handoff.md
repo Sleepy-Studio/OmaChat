@@ -1,6 +1,12 @@
 # OmaChat desktop session handoff
 
-Updated: 2026-10-14. Resume desktop development from this file.
+Updated: 2026-10-14. Historical desktop-session handoff.
+
+Branch, deployment, process, and test observations below are snapshots from the
+dates recorded and may have changed. Use [docs/STATUS.md](STATUS.md) for the
+current repository state and [BUILD.md](../BUILD.md#product-work-tracked-on-github)
+for the current product roadmap. Resume work from its issue or current task,
+not from the dated instructions below.
 
 ## CI permission regression repaired — 2026-10-14
 

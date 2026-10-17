@@ -1,7 +1,9 @@
 # Shared artwork hosted rollout
 
-Prepared 2026-10-14. This is an execution checklist, not evidence of deployment.
-Resume from [desktop-session-handoff.md](desktop-session-handoff.md).
+Prepared 2026-10-14. This is a dated execution checklist, not evidence of
+current deployment. Verify its environment-specific facts before acting. See
+[docs/STATUS.md](STATUS.md) for current checkout state and the
+[desktop-session-handoff](desktop-session-handoff.md) as a historical record.
 
 ## Target and current evidence
 

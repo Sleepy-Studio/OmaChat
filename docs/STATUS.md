@@ -2,6 +2,15 @@
 
 Updated: 2026-10-17
 
+## Product roadmap index
+
+`BUILD.md` now indexes the current GitHub-tracked product plans (#4–#20) and
+identifies [@HowieDuhzit](https://github.com/HowieDuhzit) as the main
+contributor. The entries link to the issue acceptance criteria; they do not
+claim those features are implemented. `CAPABILITIES.md`, `README.md`, and
+`AGENTS.md` link to the same roadmap and keep planned work distinct from
+implemented behavior.
+
 ## Current behavior
 
 omachat contains the Qt desktop client, per-user daemon, CLI, self-hostable
@@ -37,24 +46,24 @@ the theme configuration are not changed by fetching or building.
 - Android project: `android/`.
 - Local IPC contract: `docs/protocol.md`.
 
-## Verification for this update
+## Current documentation audit
 
-- `bash -n scripts/dev-instance.sh run-local.sh` — passed.
-- Python syntax compilation of `scripts/startup-splash.py` — passed.
-- `git diff --check` — passed.
-- GTK 4.22 is available on this machine; the splash UI was not launched.
-- No tests, build, fetch-and-launch, or desktop interaction was run.
+The project-wide documentation review corrected stale README claims about
+current checkout/test state, plugin availability, channel ID copying, voice
+window-close behavior, and the planned avatar-generation integration. Historical
+session and implementation handoffs are labeled as dated snapshots; their
+recorded branch, deployment, and test results should not be read as current.
 
-## Repository snapshot
+The roadmap index in `BUILD.md` covers open product issues #4–#20. It is linked
+from `CAPABILITIES.md` and `README.md`; `AGENTS.md` asks future changes to keep
+the index and current capability claims aligned. These issues are plans, not
+implemented features.
 
-At the last fetch, `main` and `origin/main` both pointed to `59ceb93`. The
-worktree has uncommitted updater, splash, and documentation changes. No commit
-or push has been made for this update yet.
+## Verification and repository snapshot
 
-## Next steps
-
-After these changes are pushed to `main`, a fresh clone gets the updater and
-delayed themed splash directly from the repository. The next normal launch
-fetches the remote tip and builds matching runtime binaries; subsequent
-launches with no new push or source edit reuse that build and focus the existing
-client.
+- `git diff --check` — passed for this documentation-only update.
+- No source changes, build, tests, launch, deployment, commit, or push were
+  performed for this audit.
+- At inspection, `HEAD` and the local `origin/main` tracking ref both point to
+  `c0afee9` (`Add hands-off main updater to local launch`). The worktree has
+  uncommitted documentation changes only.

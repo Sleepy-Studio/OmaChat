@@ -47,3 +47,35 @@ The installed GUI and CLI are `omachat` and `omachatctl`.
 See `docs/development.md` for focused test and full-suite commands, and
 `docs/STATUS.md` for checks actually run on the current changes. The landing
 link check and static route checks are run as part of spoke setup.
+
+## Product work tracked on GitHub
+
+Feature plans and follow-up designs live in GitHub issues so implementation,
+discussion, and acceptance criteria stay reviewable. The active roadmap is
+maintained by [@HowieDuhzit](https://github.com/HowieDuhzit), the project's
+main contributor.
+
+| Area | Issue |
+|---|---|
+| GitHub integration with user attribution and multi-repo routing | [#4](https://github.com/Sleepy-Studio/OmaChat/issues/4) |
+| Multi-forge routing and Omachat-associated Gitea exploration | [#5](https://github.com/Sleepy-Studio/OmaChat/issues/5) |
+| Optional extensions, integrations, and plugins | [#6](https://github.com/Sleepy-Studio/OmaChat/issues/6) |
+| Optional soundboard, libraries, and permissions | [#7](https://github.com/Sleepy-Studio/OmaChat/issues/7) |
+| Configurable local event sounds and server sound policies | [#8](https://github.com/Sleepy-Studio/OmaChat/issues/8) |
+| Voice-channel stage, sidechat, and multi-share viewing | [#9](https://github.com/Sleepy-Studio/OmaChat/issues/9) |
+| Optional meme picker, creator, and shared collections | [#10](https://github.com/Sleepy-Studio/OmaChat/issues/10) |
+| Optional image-generation API for profile avatars | [#11](https://github.com/Sleepy-Studio/OmaChat/issues/11) |
+| @mention autocomplete, ranking, and personal shortcuts | [#12](https://github.com/Sleepy-Studio/OmaChat/issues/12) |
+| Extensible message references, tags, links, and task actions | [#13](https://github.com/Sleepy-Studio/OmaChat/issues/13) |
+| Expanded safe Markdown formatting | [#14](https://github.com/Sleepy-Studio/OmaChat/issues/14) |
+| Local file search, pinned folders, palette action, and file-manager sharing | [#15](https://github.com/Sleepy-Studio/OmaChat/issues/15) |
+| Optional local microphone self-monitor | [#16](https://github.com/Sleepy-Studio/OmaChat/issues/16) |
+| Voice leave-on-close and stale-session recovery | [#17](https://github.com/Sleepy-Studio/OmaChat/issues/17) |
+| Local mute-others and per-user voice mute controls | [#18](https://github.com/Sleepy-Studio/OmaChat/issues/18) |
+| Alternating background treatment for consecutive author groups | [#19](https://github.com/Sleepy-Studio/OmaChat/issues/19) |
+| Cross-workspace screen-share preview notification | [#20](https://github.com/Sleepy-Studio/OmaChat/issues/20) |
+
+Issues #4–#20 are plans, not claims that the features are implemented. Check
+each issue for current scope and status before starting related work. The
+completed local updater and startup splash provenance is recorded in
+[#3](https://github.com/Sleepy-Studio/OmaChat/issues/3).

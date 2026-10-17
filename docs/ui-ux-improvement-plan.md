@@ -1,5 +1,11 @@
 # omachat UI/UX improvement plan
 
+**Historical implementation and acceptance log.** Evidence and installed,
+deployment, and test claims below apply to the dates stated in each section and
+are not a current environment snapshot. See [docs/STATUS.md](STATUS.md) for the
+current checkout and [BUILD.md](../BUILD.md#product-work-tracked-on-github) for
+the active feature roadmap.
+
 
 ## Shared framing continuation — local install, rollout pending (2026-10-13)
 
@@ -12,11 +18,10 @@ QML lints and independent review pass. All **127 installed/runtime artifacts**
 match, zero pacman alterations; connected/visible. Backend **83441d0** is pushed
 and its matching Docker image published. All five exact-SHA CI/Android/Docker workflows pass.
 
-**Hosted rollout is pending deploy access.** The live endpoint lacks the new
-capability; health is good. No deploy tool/browser is available, and the local
-MCP credential cannot authenticate to the deploy API. Resume the latest section
-of [desktop-session-handoff.md](desktop-session-handoff.md). Later phases and
-human acceptance remain open; client edits/transcript are preserved.
+**Hosted rollout was pending deploy access on 2026-10-13.** The live endpoint
+then lacked the new capability. Recheck current deployment state before acting;
+the [desktop-session-handoff.md](desktop-session-handoff.md) is historical.
+Later phases and human acceptance remained open at that checkpoint.
 
 ## Device-local crop memory installed — 2026-10-13
 
@@ -186,7 +191,9 @@ server changes also commit/push to the deployment branch and verify rollout.
 
 ## Resume and user acceptance
 
-Resume from [desktop-session-handoff.md](desktop-session-handoff.md).
+The linked [desktop-session-handoff.md](desktop-session-handoff.md) is a dated
+record; use [docs/STATUS.md](STATUS.md) and the relevant roadmap issue for
+current work.
 On 2026-10-02 the user confirmed desktop voice and streaming work and marked that
 acceptance checkpoint complete. Persistent upload/failed-send/reconnect feedback
 is now implemented in the working tree. Channel creation and unsaved-settings protection are also implemented. Minimum-size dark/light conversation, keyboard search and recovery acceptance now pass.

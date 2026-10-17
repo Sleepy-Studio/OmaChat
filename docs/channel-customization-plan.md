@@ -1,5 +1,10 @@
 # Channel customization plan
 
+**Historical implementation and rollout log.** Installed-package, deployment,
+and test statements below describe the dates recorded in each section. Check
+[docs/STATUS.md](STATUS.md) for current checkout state before acting on a
+rollout note.
+
 
 ## Shared framing continuation — local install, rollout pending (2026-10-13)
 
@@ -12,11 +17,10 @@ QML lints and independent review pass. All **127 installed/runtime artifacts**
 match, zero pacman alterations; connected/visible. Backend **83441d0** is pushed
 and its matching Docker image published. All five exact-SHA CI/Android/Docker workflows pass.
 
-**Hosted rollout is pending deploy access.** The live endpoint lacks the new
-capability; health is good. No deploy tool/browser is available, and the local
-MCP credential cannot authenticate to the deploy API. Resume the latest section
-of [desktop-session-handoff.md](desktop-session-handoff.md). Later phases and
-human acceptance remain open; client edits/transcript are preserved.
+**Hosted rollout was pending deploy access on 2026-10-13.** The live endpoint
+then lacked the new capability. Recheck current deployment state before acting;
+the [desktop-session-handoff.md](desktop-session-handoff.md) is historical.
+Later phases and human acceptance remained open at that checkpoint.
 
 ## Device-local crop memory installed — 2026-10-13
 

@@ -1,9 +1,10 @@
 # omachat add-ons and extension points
 
-Status: design and staged plan, 2026-10-02. Nothing in Phases 2-5 is
-implemented; this records what omachat actually offers today, what can be built
-on it without changing the architecture, and what a real plugin system would
-cost.
+Status: design and staged plan, 2026-10-02. The current extension-system design
+work is tracked in [issue #6](https://github.com/Sleepy-Studio/OmaChat/issues/6).
+Nothing in Phases 2-5 is implemented; this records what omachat actually offers
+today, what can be built on it without changing the architecture, and what a
+real plugin system would cost.
 
 ## Baseline: there is no plugin system
 
@@ -480,7 +481,7 @@ These fall out of the survey, and they apply to every verb above:
 | 3 | `send/<id>?prefill=` | Every automation integration, with no auto-send risk |
 | 4 | Notification default action → `message/…` | Biggest UX win; depends on #1 |
 | 5 | `settings/<section>` | Trivial and safe |
-| 6 | Copy ID / Copy link in menus | Makes the whole scheme self-service; today there is no GUI way to discover an id |
+| 6 | Copy link in menus | Channel menus now provide Copy channel ID; a URI copy action would make channel navigation self-service. Message permalinks still need a signed, scoped token. |
 
 ## Recommendation
 

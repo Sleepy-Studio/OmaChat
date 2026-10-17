@@ -14,6 +14,7 @@ Use this guide when changing, reviewing, building, or integrating omachat. It su
 - Keep voice event subscription opt-in, local, and same-user.
 - Update integration contracts on both sides when an interface changes.
 - Keep docs/STATUS.md dated and accurate about current checks, unrun checks, and observed Git state.
+- Keep current behavior and planned work distinct in README and CAPABILITIES; index planned features in BUILD.md and verify all issue links when the roadmap changes. Label dated handoffs as historical rather than treating old deployment/test snapshots as current.
 - Keep the landing dark-only; use the single footer ombrand link for identity studies.
 
 ## Local launch and updates
