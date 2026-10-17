@@ -4,9 +4,9 @@ Updated: 2026-10-17
 
 ## Current scope
 
-omachat is an independently rooted repository containing the Qt desktop client, per-user daemon, CLI, self-hostable server, and Android client. Its desktop launch identity and packaged desktop entry use lowercase `omachat`. Local IPC exposes generic voice functions used by omachat and omavb; it has no Omkaon inbox, Discord bridge controls, Omkaon UI, or Omkaon-specific storage/API. Experimental Omachat QML panels are archived in the separate omkaon repository at `archive/omachat-ui/`.
+omachat is an independently rooted repository containing the Qt desktop client, per-user daemon, CLI, self-hostable server, and Android client. Its desktop launch identity and packaged desktop entry use lowercase `omachat`. Local IPC exposes generic voice functions used by omachat and omavb; it has no omkaon inbox, Discord bridge controls, omkaon UI, or omkaon-specific storage/API. Experimental Omachat QML panels are archived in the separate omkaon repository at `archive/omachat-ui/`.
 
-The consolidated branch includes remote `main`, the local held worktree, and the two-commit standalone PR branch. Conflicting files were reconciled to retain independent features while removing duplicate IPC registrations and Omkaon-specific functionality. The prior lowercase historical status file is now `docs/development-history.md`; this file is the current status source.
+The consolidated branch includes remote `main`, the local held worktree, and the two-commit standalone PR branch. Conflicting files were reconciled to retain independent features while removing duplicate IPC registrations and omkaon-specific functionality. The prior lowercase historical status file is now `docs/development-history.md`; this file is the current status source.
 
 ## Entry points
 
@@ -23,7 +23,7 @@ The consolidated branch includes remote `main`, the local held worktree, and the
 - `desktop-file-validate packaging/desktop/org.omarchy.omachat.desktop` — passed.
 - `git diff --check` and `git diff --cached --check` — passed before the consolidation commit.
 - Local Markdown link audit found and fixed the development guide’s stale relative path to `scripts/dev-instance.sh`; ignored generated package staging files were excluded from the source audit.
-- Source and documentation search for Omkaon references — no matches in the Omachat worktree outside generated build output.
+- Implementation and product documentation search for omkaon integration references — no matches outside this status snapshot and generated build output.
 - Android build and runtime, live external integrations, and visual review were not checked in this update.
 
 ## Repository snapshot
