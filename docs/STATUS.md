@@ -22,15 +22,16 @@ The consolidated branch includes remote `main`, the local held worktree, and the
 - Restored the regular CMake configuration with server and tests enabled — configure passed. No tests were run during this consolidation.
 - `desktop-file-validate packaging/desktop/org.omarchy.omachat.desktop` — passed.
 - `git diff --check` and `git diff --cached --check` — passed before the consolidation commit.
+- Local Markdown link audit found and fixed the development guide’s stale relative path to `scripts/dev-instance.sh`; ignored generated package staging files were excluded from the source audit.
 - Source and documentation search for Omkaon references — no matches in the Omachat worktree outside generated build output.
 - Android build and runtime, live external integrations, and visual review were not checked in this update.
 
 ## Repository snapshot
 
-Before this status edit, `main` was at `22be6a6b9d236b314a0862d11d7533cb308cfcda` (`Merge remote main and consolidate local omachat work`). It included all commits from `origin/main`, plus 20 commits. The Omachat worktree was clean. No Omachat push had yet occurred.
+Before this status edit, local `main` and `origin/main` both pointed to `9f6cbb137885bbc31e823003bf3b924a92a85fff`, including all commits from the original remote tip. The Omachat worktree was clean.
 
 The Omakaon archive was saved in its separate repository on local `main` as commit `ca67a34` (`Archive experimental omachat UI panels`); only the three `archive/omachat-ui/` files were committed there. Existing unrelated Omakaon worktree changes remain untouched.
 
 ## Next steps
 
-Push Omachat `main` without force, fetch it again, and confirm local and remote `main` point to the same commit with a clean worktree. If the remote advances first, merge its new commits and resolve any conflicts while retaining functionality.
+Continue product work from the synchronized `main`. Recheck the Android build and runtime and the optional external integrations in their target environments when those are in scope.

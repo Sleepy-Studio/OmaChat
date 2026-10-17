@@ -17,7 +17,7 @@ Edit, re-run `./run-local.sh`, see the change. A loop is a rebuild
 (usually seconds) plus one command.
 
 Under the hood `./run-local.sh` builds and delegates to
-[`scripts/dev-instance.sh`](../../scripts/dev-instance.sh), which also has
+[`scripts/dev-instance.sh`](../scripts/dev-instance.sh), which also has
 finer-grained subcommands:
 
 | Command | Effect |
