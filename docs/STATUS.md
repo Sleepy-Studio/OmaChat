@@ -1,5 +1,16 @@
 # omachat status
 
+## Clean-checkout build repair — 2026-10-17
+
+The first exact-SHA desktop CI run at 2e6134c fails in CMake configuration:
+main already lists and instantiates VoiceboardDialog.qml, but its component is
+absent from Git. The missing dialog is now included, using only the existing
+voiceboard properties and controller method. Speaking still requires an explicit
+button press; local monitoring defaults off. No bridge/audio action is executed
+by this validation. A fresh full-client CMake configure passes after the repair;
+full remote build/test results remain pending. This follow-up is separate from
+the personal-status backend patch.
+
 ## Personal voice status server continuation — 2026-10-17
 
 The server adds `voice.status.v1`, a separate SetVoiceStatusRequest and
