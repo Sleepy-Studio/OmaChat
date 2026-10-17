@@ -2,36 +2,59 @@
 
 Updated: 2026-10-17
 
-## Current scope
+## Current behavior
 
-omachat is an independently rooted repository containing the Qt desktop client, per-user daemon, CLI, self-hostable server, and Android client. Its desktop launch identity and packaged desktop entry use lowercase `omachat`. Local IPC exposes generic voice functions used by omachat and omavb; it has no omkaon inbox, Discord bridge controls, omkaon UI, or omkaon-specific storage/API. Experimental Omachat QML panels are archived in the separate omkaon repository at `archive/omachat-ui/`.
+omachat contains the Qt desktop client, per-user daemon, CLI, self-hostable
+server, and Android client. The desktop app keeps its per-user theme at
+`~/.config/omachat/theme.toml`.
 
-The consolidated branch includes remote `main`, the local held worktree, and the two-commit standalone PR branch. Conflicting files were reconciled to retain independent features while removing duplicate IPC registrations and omkaon-specific functionality. The prior lowercase historical status file is now `docs/development-history.md`; this file is the current status source.
+Launching through the Omarchy menu or `./run-local.sh` now fetches every commit
+on `origin/main`, fast-forwards local `main` when possible, and builds the
+client, daemon, and CLI before starting. It rebuilds only when the remote has
+advanced, the source/build marker differs, or a runtime binary is missing.
+Uncommitted edits are preserved and included in the build if local `main` still
+matches the fetched remote tip; if the remote advanced while edits are present,
+launch stops for review. Local-only commits, fetch failures, and build failures
+stop launch without resetting the checkout. A new build closes the old local
+client and daemon before replacing them; repeat launches focus the already
+running local client. The launcher keeps one active local client and daemon and
+passes the existing theme path unchanged.
+When launch work lasts beyond a short delay, a small optional GTK splash uses
+the configured theme colors and closes before the client opens. Missing GTK
+does not block launch.
+
+The `stop` action stops the local instance and restores the packaged user
+service. Startup refuses to open a local client if the packaged window does
+not close, so both clients cannot remain open together. The packaged files and
+the theme configuration are not changed by fetching or building.
 
 ## Entry points
 
 - Desktop client: `omachat`; daemon: `omachatd`; CLI: `omachatctl`.
-- Android project: `android/`.
-- Server and deployment: `server/`, `docs/self-hosting.md`, and `Dockerfile`.
+- Local current-main launcher: `./run-local.sh` and
+  `scripts/dev-instance.sh start`.
 - Build instructions: `docs/development.md`.
+- Android project: `android/`.
 - Local IPC contract: `docs/protocol.md`.
 
 ## Verification for this update
 
-- Fresh CMake configure and build of `omachat`, `omachatd`, and `omachatctl` — passed with server/tests disabled for that build.
-- Restored the regular CMake configuration with server and tests enabled — configure passed. No tests were run during this consolidation.
-- `desktop-file-validate packaging/desktop/org.omarchy.omachat.desktop` — passed.
-- `git diff --check` and `git diff --cached --check` — passed before the consolidation commit.
-- Local Markdown link audit found and fixed the development guide’s stale relative path to `scripts/dev-instance.sh`; ignored generated package staging files were excluded from the source audit.
-- Implementation and product documentation search for omkaon integration references — no matches outside this status snapshot and generated build output.
-- Android build and runtime, live external integrations, and visual review were not checked in this update.
+- `bash -n scripts/dev-instance.sh run-local.sh` — passed.
+- Python syntax compilation of `scripts/startup-splash.py` — passed.
+- `git diff --check` — passed.
+- GTK 4.22 is available on this machine; the splash UI was not launched.
+- No tests, build, fetch-and-launch, or desktop interaction was run.
 
 ## Repository snapshot
 
-Before this status edit, local `main` and `origin/main` both pointed to `9f6cbb137885bbc31e823003bf3b924a92a85fff`, including all commits from the original remote tip. The Omachat worktree was clean.
-
-The Omakaon archive was saved in its separate repository on local `main` as commit `ca67a34` (`Archive experimental omachat UI panels`); only the three `archive/omachat-ui/` files were committed there. Existing unrelated Omakaon worktree changes remain untouched.
+At the last fetch, `main` and `origin/main` both pointed to `59ceb93`. The
+worktree has uncommitted updater, splash, and documentation changes. No commit
+or push has been made for this update yet.
 
 ## Next steps
 
-Continue product work from the synchronized `main`. Recheck the Android build and runtime and the optional external integrations in their target environments when those are in scope.
+After these changes are pushed to `main`, a fresh clone gets the updater and
+delayed themed splash directly from the repository. The next normal launch
+fetches the remote tip and builds matching runtime binaries; subsequent
+launches with no new push or source edit reuse that build and focus the existing
+client.

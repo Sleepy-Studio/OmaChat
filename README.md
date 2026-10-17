@@ -303,9 +303,11 @@ Socket: `$XDG_RUNTIME_DIR/omachat/omachat.sock`.
 ## Development
 
 - **Running a local build against a real server:** see
-  [docs/development.md](docs/development.md) and `./run-local.sh` — same
-  account and hosted server as the installed package, without replacing
-  `/usr/bin`.
+  [docs/development.md](docs/development.md) and `./run-local.sh` — each start
+  fetches the latest pushed `main` and rebuilds when it changes, using the same
+  account and hosted server without replacing `/usr/bin`.
+  `OMACHAT_AUTO_UPDATE=0` opts out for one launch; see the guide for rollback
+  and power-user settings.
 - **Add-ons and extension points** (local IPC, the `omachat://` scheme, a
   per-application theme file, and what a plugin system would actually cost):
   [docs/addons.md](docs/addons.md).

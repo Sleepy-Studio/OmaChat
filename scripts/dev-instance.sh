@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run a LOCAL omachat build against the SAME account and hosted server as the
-# installed package, without touching /usr/bin or pacman's ownership.
+# Run the current origin/main omachat build against the SAME account and hosted
+# server as the installed package, without touching /usr/bin or pacman's ownership.
 #
 # Why this exists
 # ---------------
@@ -26,7 +26,7 @@
 # the database file is safe.
 #
 # Usage:
-#   scripts/dev-instance.sh start    stop packaged, start local daemon + client
+#   scripts/dev-instance.sh start    fast-forward origin/main, build, launch local
 #   scripts/dev-instance.sh daemon   start local daemon only (no GUI)
 #   scripts/dev-instance.sh client   start local client only (daemon assumed up)
 #   scripts/dev-instance.sh stop     stop the local daemon, restore packaged
@@ -38,7 +38,10 @@
 set -euo pipefail
 
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD="$REPO/build"
+BUILD="${OMACHAT_BUILD_DIR:-$REPO/build}"
+BUILD_TYPE="${OMACHAT_BUILD_TYPE:-RelWithDebInfo}"
+UPDATE_REMOTE="${OMACHAT_UPDATE_REMOTE:-origin}"
+UPDATE_BRANCH="${OMACHAT_UPDATE_BRANCH:-main}"
 
 # Keep these socket paths short: sun_path is 107 bytes, and $XDG_RUNTIME_DIR
 # paths are long. /tmp is fine and mirrors what the dev sandbox does.
@@ -51,10 +54,34 @@ LOGFILE="$DEV_ROOT/daemon.log"
 CLIENT_BIN="$BUILD/client/omachat"
 DAEMON_BIN="$BUILD/daemon/omachatd"
 CTL_BIN="$BUILD/cli/omachatctl"
+BUILT_COMMIT_FILE="$BUILD/.omachat-built-commit"
 PACKAGED_CTL="${OMACHAT_PACKAGED_CTL:-/usr/bin/omachatctl}"
+SPLASH_STATUS="$DEV_ROOT/startup.status"
+SPLASH_PID=""
 
 say()  { printf '%s\n' "$*"; }
 die()  { printf 'dev-instance: %s\n' "$*" >&2; exit 1; }
+
+start_startup_splash() {
+    mkdir -p "$DEV_ROOT"
+    printf '%s\n' "Starting omachat…" > "$SPLASH_STATUS"
+    python3 "$REPO/scripts/startup-splash.py" "$SPLASH_STATUS" \
+        >/dev/null 2>&1 &
+    SPLASH_PID=$!
+}
+
+startup_status() {
+    [ -n "$SPLASH_PID" ] || return 0
+    printf '%s\n' "$1" > "$SPLASH_STATUS"
+}
+
+stop_startup_splash() {
+    [ -n "$SPLASH_PID" ] || return 0
+    rm -f "$SPLASH_STATUS"
+    kill "$SPLASH_PID" 2>/dev/null || true
+    wait "$SPLASH_PID" 2>/dev/null || true
+    SPLASH_PID=""
+}
 
 # systemctl --user needs a real XDG_RUNTIME_DIR with a systemd private socket.
 # If the caller's environment has been redirected (a scratch runtime dir, a
@@ -93,7 +120,7 @@ stop_packaged_client() {
         pgrep -f '^/usr/bin/omachat( |$)' >/dev/null 2>&1 || return 0
         sleep 0.1
     done
-    say "packaged omachat did not close cleanly; local client may be hidden by the old window" >&2
+    die "packaged omachat did not close; refusing to start a second client window"
 }
 
 require_build() {
@@ -116,6 +143,114 @@ daemon_pid() {
     cmdline="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
     [[ "$cmdline" == *omachatd*"--socket $DEV_SOCKET"* ]] || return 1
     printf '%s\n' "$pid"
+}
+
+stop_local_instances() {
+    local pids pid
+    pids="$(pgrep -f "^$CLIENT_BIN( |$)" 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+        say "closing local omachat client before updating (pids: $(printf '%s' "$pids" | tr '\n' ' '))"
+        while IFS= read -r pid; do
+            [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+        done <<< "$pids"
+        for _ in $(seq 1 25); do
+            pgrep -f "^$CLIENT_BIN( |$)" >/dev/null 2>&1 || break
+            sleep 0.2
+        done
+        pgrep -f "^$CLIENT_BIN( |$)" >/dev/null 2>&1 &&
+            die "could not stop the old local client safely; no update was applied"
+    fi
+
+    if pid="$(daemon_pid)"; then
+        say "stopping local omachat daemon before updating (pid $pid)"
+        kill "$pid" 2>/dev/null || true
+        for _ in $(seq 1 25); do
+            daemon_pid >/dev/null || break
+            sleep 0.2
+        done
+        if daemon_pid >/dev/null; then
+            kill -9 "$pid" 2>/dev/null || true
+            for _ in $(seq 1 25); do
+                daemon_pid >/dev/null || break
+                sleep 0.2
+            done
+            daemon_pid >/dev/null &&
+                die "could not stop the old local daemon safely; no update was applied"
+        fi
+        rm -f "$DEV_PIDFILE"
+    fi
+}
+
+sync_main_and_build() {
+    local branch current remote previous dirty build_key diff_hash auto_update source_label
+    auto_update="${OMACHAT_AUTO_UPDATE:-1}"
+    case "${auto_update,,}" in
+        1|true|yes|on) auto_update=1 ;;
+        0|false|no|off) auto_update=0 ;;
+        *) die "OMACHAT_AUTO_UPDATE must be 1 or 0" ;;
+    esac
+
+    branch="$(git -C "$REPO" branch --show-current)"
+    dirty="$(git -C "$REPO" status --porcelain)"
+    current="$(git -C "$REPO" rev-parse HEAD)"
+
+    if [ "$auto_update" = 1 ]; then
+        [ "$branch" = "$UPDATE_BRANCH" ] ||
+            die "automatic updates require local branch '$UPDATE_BRANCH' (currently '$branch')"
+        startup_status "Starting omachat…"
+        say "fetching $UPDATE_REMOTE/$UPDATE_BRANCH"
+        git -C "$REPO" fetch --quiet "$UPDATE_REMOTE" "$UPDATE_BRANCH" ||
+            die "could not fetch $UPDATE_REMOTE/$UPDATE_BRANCH; refusing to launch a stale build"
+        remote="$(git -C "$REPO" rev-parse "$UPDATE_REMOTE/$UPDATE_BRANCH")"
+        if ! git -C "$REPO" merge-base --is-ancestor "$current" "$remote"; then
+            die "local branch has commits not on $UPDATE_REMOTE/$UPDATE_BRANCH; refusing to reset or overwrite them"
+        fi
+        if [ -n "$dirty" ] && [ "$current" != "$remote" ]; then
+            die "$UPDATE_REMOTE/$UPDATE_BRANCH advanced while the worktree has local edits; commit or stash them before updating"
+        fi
+
+        if [ "$current" != "$remote" ]; then
+            startup_status "Getting omachat ready…"
+            stop_local_instances
+            say "fast-forwarding local $UPDATE_BRANCH to $(git -C "$REPO" rev-parse --short "$remote")"
+            git -C "$REPO" merge --ff-only "$remote" ||
+                die "could not fast-forward local branch; inspect the checkout before launching"
+        fi
+        source_label="$UPDATE_REMOTE/$UPDATE_BRANCH"
+        current="$remote"
+    else
+        say "automatic updates disabled; using local $branch at $(git -C "$REPO" rev-parse --short HEAD)"
+        source_label="local checkout"
+        remote="$current"
+    fi
+
+    diff_hash="$(
+        {
+            git -C "$REPO" diff --binary HEAD
+            while IFS= read -r -d '' path; do
+                printf '\0%s\0%s\0' "$path" "$(stat -c '%a' "$REPO/$path")"
+                cat -- "$REPO/$path"
+            done < <(git -C "$REPO" ls-files --others --exclude-standard -z)
+        } | sha256sum | awk '{print $1}'
+    )"
+    build_key="$remote:$diff_hash:$BUILD_TYPE"
+    previous="$(cat "$BUILT_COMMIT_FILE" 2>/dev/null || true)"
+    if [ "$previous" != "$build_key" ] || [ ! -x "$CLIENT_BIN" ] || \
+        [ ! -x "$DAEMON_BIN" ] || [ ! -x "$CTL_BIN" ]; then
+        startup_status "Getting omachat ready…"
+        stop_local_instances
+        say "building $source_label"
+        if [ -f "$BUILD/CMakeCache.txt" ]; then
+            cmake -S "$REPO" -B "$BUILD" -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+        else
+            cmake -S "$REPO" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+        fi
+        cmake --build "$BUILD" --target omachat omachatd omachatctl ||
+            die "build failed; the current local binaries were not launched"
+        printf '%s\n' "$build_key" > "$BUILT_COMMIT_FILE"
+    else
+        say "local build already matches $source_label ($(git -C "$REPO" rev-parse --short "$remote"))"
+    fi
 }
 
 ensure_runtime() {
@@ -254,6 +389,19 @@ start_client_foreground() {
     ensure_runtime
     stop_packaged_client
 
+    local existing_pid
+    existing_pid="$(pgrep -f "^$CLIENT_BIN( |$)" 2>/dev/null | head -n 1 || true)"
+    if [ -n "$existing_pid" ]; then
+        if hyprctl clients -j 2>/dev/null | jq -e --arg pid "$existing_pid" \
+            'any(.[]; .class == "org.omarchy.OmaChat" and (.pid | tostring) == $pid)' >/dev/null; then
+            hyprctl eval 'hl.dispatch(hl.dsp.focus({ window = "class:org.omarchy.OmaChat" }))' >/dev/null
+            say "local omachat already running; focused its window (pid $existing_pid)"
+        else
+            say "local omachat is already starting (pid $existing_pid)"
+        fi
+        return 0
+    fi
+
     say "launching local client (runtime $DEV_RUNTIME)"
     local theme_file="${OMACHAT_THEME_FILE:-$HOME/.config/omachat/theme.toml}"
     env XDG_RUNTIME_DIR="$DEV_RUNTIME" OMACHAT_SOCKET="$DEV_SOCKET" \
@@ -384,7 +532,17 @@ do_check() {
 }
 
 case "${1:-status}" in
-    start)   start_daemon; shift; start_client_foreground "$@" ;;
+    start)
+        start_startup_splash
+        trap stop_startup_splash EXIT INT TERM
+        sync_main_and_build
+        startup_status "Opening omachat…"
+        start_daemon
+        stop_startup_splash
+        trap - EXIT INT TERM
+        shift
+        start_client_foreground "$@"
+        ;;
     daemon)  start_daemon ;;
     client)  shift; start_client "$@" ;;
     stop)    stop_all ;;

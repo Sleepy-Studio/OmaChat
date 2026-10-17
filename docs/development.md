@@ -1,28 +1,55 @@
 # Local development against a real server
 
-How to run a **local build** while the packaged `omachat` is installed — same
-account, same hosted server — without replacing `/usr/bin` or disturbing
-pacman's ownership of it.
+How to run the current pushed `main` as a local build while the packaged
+`omachat` is installed — same account, same hosted server — without replacing
+`/usr/bin` or disturbing pacman's ownership of it.
 
 ## Quick start
 
 ```bash
-./run-local.sh              # build, then start the local daemon + GUI
+./run-local.sh              # fetch origin/main, build updates, start daemon + GUI
 ./run-local.sh check        # assert it is on the same account as the package
 ./run-local.sh stop         # stop local, bring the packaged service back
 ./run-local.sh status       # what is running, and as whom
 ```
 
-Edit, re-run `./run-local.sh`, see the change. A loop is a rebuild
-(usually seconds) plus one command.
+Each start fetches every commit pushed to `origin/main`, fast-forwards the
+local `main` checkout when safe, and builds the current client, daemon, and CLI
+before launch. Local edits are preserved and included in the build while
+`main` is still at the fetched remote tip; if the remote advanced while edits
+are present, launch stops for review. Local-only commits are never reset or
+overwritten. If the source and matching build are unchanged, it starts without
+rebuilding. Your `~/.config/omachat/theme.toml` stays outside the repository
+and is passed to the client unchanged.
 
-Under the hood `./run-local.sh` builds and delegates to
+### Opt out, tune, or roll back
+
+To build the checked-out source once without fetching or moving Git refs:
+
+```bash
+OMACHAT_AUTO_UPDATE=0 ./run-local.sh
+```
+
+The next ordinary launch automatically resumes fetching. Defaults require no
+settings. Power users can set `OMACHAT_UPDATE_REMOTE` and
+`OMACHAT_UPDATE_BRANCH` to follow another remote/branch pair (the checked-out
+branch must match), `OMACHAT_BUILD_DIR` and `OMACHAT_BUILD_TYPE` for a separate
+or differently optimized build, `OMACHAT_DEV_ROOT` for isolated runtime files,
+or `OMACHAT_THEME_FILE` for another per-user theme.
+
+To inspect a pinned revision, use a clean checkout such as
+`git switch --detach <commit>` with the one-launch opt-out, then return to the
+tracked branch before launching normally. For a rollback everyone should
+receive, push a forward `git revert <commit>` on `main`; the normal launcher
+will fetch and build that revert. Do not force-reset remote `main`.
+
+Under the hood `./run-local.sh` delegates to
 [`scripts/dev-instance.sh`](../scripts/dev-instance.sh), which also has
 finer-grained subcommands:
 
 | Command | Effect |
 |---|---|
-| `scripts/dev-instance.sh start` | stop packaged, start local daemon + GUI |
+| `scripts/dev-instance.sh start` | fetch, fast-forward, build if needed, and start local daemon + GUI |
 | `scripts/dev-instance.sh daemon` | local daemon only, no GUI |
 | `scripts/dev-instance.sh client` | local GUI only (daemon must be up) |
 | `scripts/dev-instance.sh stop` | stop local, restart packaged service |
@@ -146,12 +173,11 @@ scripts/dev-sandbox.sh stop
 
 ## Upstream status
 
-`run-local.sh` and `scripts/dev-instance.sh` are **not yet upstreamed** — they
-are committed locally only.
-
-They are a candidate for a pull request: self-contained, no dependencies beyond
-the tools already required to build, and the two environment overrides they
-rely on are documented stable behavior (`OMACHAT_SOCKET`, `XDG_RUNTIME_DIR`).
-Before proposing them, review whether the hardcoded `OMACHAT_DEV_ROOT` default
-of `/tmp/omachat-dev`, and the local-machine assumptions in `check`, belong in
-an upstream patch or should be parameterized.
+`run-local.sh` and `scripts/dev-instance.sh` are tracked on `main`. The start
+path fetches only `origin/main` and fast-forwards local `main`; it never resets
+local commits. Uncommitted edits may be built when `main` is already at the
+fetched remote tip. The per-user theme configuration stays outside the update.
+When startup takes longer than 0.7 seconds, a small splash uses the configured
+theme colors while the launcher works, then closes before the client opens.
+It is optional: if GTK 4 is unavailable, the normal launcher continues without
+the splash.
