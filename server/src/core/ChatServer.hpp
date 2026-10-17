@@ -105,6 +105,7 @@ private:
         bool serverDeaf = false;
         std::uint32_t streamId = 0;
         bool streaming = false;
+        QString statusText;
     };
 
     // ---- connection lifecycle
@@ -231,6 +232,7 @@ private:
     void handleJoinVoice(Session& s, std::uint64_t rid, const proto::JoinVoiceRequest& m);
     void handleLeaveVoice(Session& s, std::uint64_t rid);
     void handleSetVoiceState(Session& s, std::uint64_t rid, const proto::SetVoiceStateRequest& m);
+    void handleSetVoiceStatus(Session& s, std::uint64_t rid, const proto::SetVoiceStatusRequest& m);
     void handleSetStreaming(Session& s, std::uint64_t rid, const proto::SetStreamingRequest& m);
     void handleWatchStream(Session& s, std::uint64_t rid, const proto::WatchStreamRequest& m);
     void handleServerMute(Session& s, std::uint64_t rid, const proto::ServerMuteRequest& m);

@@ -375,3 +375,8 @@ See [mobile protocol changes](mobile-protocol-changes.md) for additive capabilit
 `config.set_ui` accepts optional `scale` (number, 0.5–3.0) and
 `reduced_motion` (boolean). It atomically saves these preferences and returns
 the saved values; invalid input or failed storage leaves the existing preferences intact.
+
+## Personal voice status (`voice.status.v1`)
+
+See [the wire contract](voice-status-protocol.md) for ownership, bounds, lifetime
+and compatibility. Companion desktop IPC/UI is in a separate continuation.

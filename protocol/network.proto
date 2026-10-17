@@ -1,4 +1,4 @@
-// omachat reliable control protocol (TCP + TLS 1.3).
+// OmaChat reliable control protocol (TCP + TLS 1.3).
 //
 // Framing: every frame is a 4-byte big-endian unsigned length followed by
 // exactly that many bytes of a serialized `Envelope`. Frames larger than
@@ -153,6 +153,7 @@ message VoiceState {
   uint32 stream_id = 7;      // media stream id for speaking indicators
   bool streaming = 8;        // sharing their screen (1.2, "video.h264")
   uint64 owner_session_id = 9; // voice.ownership.v1; 0 on legacy servers
+  string status_text = 10; // voice.status.v1; until cleared or this room is left
 }
 
 message Invite {
@@ -719,6 +720,7 @@ message JoinVoiceRequest {
   bool transfer = 4; // explicit user consent when another session owns voice
 }
 message LeaveVoiceRequest {}
+message SetVoiceStatusRequest { string text = 1; } // empty clears; max 80 Unicode scalars
 message SetVoiceStateRequest {
   bool self_mute = 1;
   bool self_deaf = 2;
@@ -938,6 +940,7 @@ message Envelope {
     VoiceSession voice_session = 73;
     SetStreamingRequest set_streaming = 74;
     WatchStreamRequest watch_stream = 75;
+    SetVoiceStatusRequest set_voice_status = 76;
 
     // moderation / roles
     KickRequest kick = 80;

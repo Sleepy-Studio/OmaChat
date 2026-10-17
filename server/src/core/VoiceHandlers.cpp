@@ -44,6 +44,9 @@ void ChatServer::handleJoinVoice(Session& s, std::uint64_t rid, const proto::Joi
         // Moderation belongs to the account, and survives ownership transfer.
         v.serverMute = existing->second.serverMute;
         v.serverDeaf = existing->second.serverDeaf;
+        // An explicit same-room device transfer keeps the account's status.
+        if (existing->second.channelId == c->id)
+            v.statusText = existing->second.statusText;
         // Replace the relay stream directly. A transient leave event would make
         // the old client think it was evicted before learning who now owns it.
         m_relay.removeStream(existing->second.streamId);
@@ -123,6 +126,44 @@ void ChatServer::handleSetVoiceState(Session& s, std::uint64_t rid, const proto:
     const bool canSpeak = m_state.can(v.channelId, s.userId, Speak) && !v.selfMute && !v.serverMute;
     m_relay.setStreamFlags(v.streamId, canSpeak, v.selfDeaf || v.serverDeaf);
     publishVoiceState(s.userId, v, v.channelId);
+    replyOk(s, rid);
+}
+
+void ChatServer::handleSetVoiceStatus(Session& s, std::uint64_t rid, const proto::SetVoiceStatusRequest& m)
+{
+    const auto it = m_voice.find(s.userId);
+    if (it == m_voice.end()) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("not in a voice channel"));
+        return;
+    }
+    if (it->second.ownerConnId != s.connId) {
+        replyError(s, rid, proto::ERROR_CONFLICT, QStringLiteral("voice belongs to another device"));
+        return;
+    }
+    const auto& bytes = m.text();
+    if (bytes.size() > 320) {
+        replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("voice status is limited to 80 characters"));
+        return;
+    }
+    const auto text = QString::fromUtf8(bytes.data(), static_cast<qsizetype>(bytes.size()));
+    bool valid = text.toUtf8().toStdString() == bytes && text.toUcs4().size() <= 80;
+    for (const auto ch : text) {
+        // Single-line plain text; reject control/bidi formatting characters.
+        if (ch.category() == QChar::Other_Control || ch.category() == QChar::Other_Format
+            || ch.category() == QChar::Separator_Line || ch.category() == QChar::Separator_Paragraph)
+            valid = false;
+    }
+    if (!valid) {
+        replyError(
+            s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("voice status must be up to 80 single-line characters"));
+        return;
+    }
+    auto& v = it->second;
+    const auto next = text.trimmed();
+    if (v.statusText != next) {
+        v.statusText = next;
+        publishVoiceState(s.userId, v, v.channelId);
+    }
     replyOk(s, rid);
 }
 

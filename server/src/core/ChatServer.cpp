@@ -427,6 +427,9 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
     case P::kSetVoiceState:
         handleSetVoiceState(s, rid, env.set_voice_state());
         break;
+    case P::kSetVoiceStatus:
+        handleSetVoiceStatus(s, rid, env.set_voice_status());
+        break;
     case P::kServerMute:
         handleServerMute(s, rid, env.server_mute());
         break;
@@ -687,6 +690,7 @@ proto::VoiceState ChatServer::toProto(Id userId, const VoiceRec& v) const
     p.set_stream_id(v.streamId);
     p.set_streaming(v.streaming);
     p.set_owner_session_id(v.ownerSessionId);
+    p.set_status_text(v.statusText.toStdString());
     return p;
 }
 

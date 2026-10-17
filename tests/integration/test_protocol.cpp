@@ -1706,3 +1706,105 @@ TEST_F(Fixture, UnreadSummaryAdvertisesCapabilityAndDefinesEncryptedConversation
     ASSERT_TRUE(result && result->has_error());
     EXPECT_EQ(result->error().code(), proto::ERROR_NOT_FOUND);
 }
+
+TEST_F(Fixture, VoiceStatusSynchronizesSnapshotsAndLegacyMutePreservesIt)
+{
+    auto owner = client("status-owner");
+    const auto sid = createServer(*owner, "Voice status");
+    auto peer = client("status-peer");
+    ASSERT_TRUE(join(*peer, invite(*owner, sid)).has_server());
+    const auto room = channelNamed(sync(*owner), "General", proto::CHANNEL_TYPE_VOICE);
+    proto::Envelope request;
+    request.mutable_join_voice()->set_channel_id(room);
+    ASSERT_TRUE(owner->call(request)->has_voice_session());
+    request.clear_payload();
+    request.mutable_set_voice_status()->set_text("  BRB <smoking> ☕  ");
+    ASSERT_TRUE(owner->call(request)->has_ok());
+    auto event = peer->waitEvent([](const proto::Event& e) {
+        return e.has_voice_state_update() && e.voice_state_update().status_text() == "BRB <smoking> ☕";
+    });
+    ASSERT_TRUE(event);
+    EXPECT_EQ(event->voice_state_update().channel_id(), room);
+    request.clear_payload();
+    request.mutable_set_voice_state()->set_self_mute(true); // legacy request: no status field
+    ASSERT_TRUE(owner->call(request)->has_ok());
+    const auto state = sync(*peer);
+    ASSERT_EQ(state.voice_states_size(), 1);
+    EXPECT_EQ(state.voice_states(0).status_text(), "BRB <smoking> ☕");
+    EXPECT_TRUE(state.voice_states(0).self_mute());
+    request.clear_payload();
+    request.mutable_set_voice_status()->set_text("");
+    ASSERT_TRUE(owner->call(request)->has_ok());
+    EXPECT_TRUE(sync(*peer).voice_states(0).status_text().empty());
+}
+
+TEST_F(Fixture, VoiceStatusValidatesTextAndRejectsNonOwnerWithoutMutation)
+{
+    auto owner = client("status-owner");
+    createServer(*owner, "Voice status");
+    auto phone = client("status-owner");
+    const auto room = channelNamed(sync(*owner), "General", proto::CHANNEL_TYPE_VOICE);
+    proto::Envelope request;
+    request.mutable_set_voice_status()->set_text("BRB");
+    EXPECT_EQ(owner->call(request)->error().code(), proto::ERROR_BAD_REQUEST);
+    request.clear_payload();
+    request.mutable_join_voice()->set_channel_id(room);
+    ASSERT_TRUE(owner->call(request)->has_voice_session());
+    request.clear_payload();
+    request.mutable_set_voice_status()->set_text("BRB");
+    ASSERT_TRUE(owner->call(request)->has_ok());
+    EXPECT_EQ(phone->call(request)->error().code(), proto::ERROR_CONFLICT);
+    for (const auto& text : {std::string(81, 'x'), std::string("line\nbreak"), std::string("tab\ttext"),
+             std::string("\xe2\x80\xae"), std::string(321, 'x')}) {
+        request.mutable_set_voice_status()->set_text(text);
+        EXPECT_EQ(owner->call(request)->error().code(), proto::ERROR_BAD_REQUEST);
+        EXPECT_EQ(sync(*phone).voice_states(0).status_text(), "BRB");
+    }
+    request.mutable_set_voice_status()->set_text(QString(80, QChar(0x2615)).toStdString());
+    ASSERT_TRUE(owner->call(request)->has_ok());
+    EXPECT_EQ(QString::fromStdString(sync(*phone).voice_states(0).status_text()).size(), 80);
+}
+
+TEST_F(Fixture, VoiceStatusTransfersWithOwnershipAndClearsOnMoveAndLeave)
+{
+    auto owner = client("status-owner");
+    const auto sid = createServer(*owner, "Voice status");
+    const auto room = channelNamed(sync(*owner), "General", proto::CHANNEL_TYPE_VOICE);
+    proto::Envelope request;
+    request.mutable_join_voice()->set_channel_id(room);
+    ASSERT_TRUE(owner->call(request)->has_voice_session());
+    request.clear_payload();
+    request.mutable_set_voice_status()->set_text("BRB");
+    ASSERT_TRUE(owner->call(request)->has_ok());
+    auto phone = client("status-owner");
+    request.clear_payload();
+    request.mutable_join_voice()->set_channel_id(room);
+    request.mutable_join_voice()->set_transfer(true);
+    ASSERT_TRUE(phone->call(request)->has_voice_session());
+    EXPECT_EQ(sync(*phone).voice_states(0).status_text(), "BRB");
+    request.clear_payload();
+    request.mutable_set_voice_status()->set_text("stale device");
+    EXPECT_EQ(owner->call(request)->error().code(), proto::ERROR_CONFLICT);
+    request.clear_payload();
+    auto* create = request.mutable_create_channel();
+    create->set_server_id(sid);
+    create->set_name("Other");
+    create->set_type(proto::CHANNEL_TYPE_VOICE);
+    const auto other = phone->call(request);
+    ASSERT_TRUE(other && other->has_channel());
+    request.clear_payload();
+    request.mutable_join_voice()->set_channel_id(other->channel().id());
+    ASSERT_TRUE(phone->call(request)->has_voice_session());
+    EXPECT_TRUE(sync(*phone).voice_states(0).status_text().empty());
+    request.clear_payload();
+    request.mutable_set_voice_status()->set_text("away");
+    ASSERT_TRUE(phone->call(request)->has_ok());
+    request.clear_payload();
+    request.mutable_leave_voice();
+    ASSERT_TRUE(phone->call(request)->has_ok());
+    EXPECT_EQ(sync(*phone).voice_states_size(), 0);
+    request.clear_payload();
+    request.mutable_join_voice()->set_channel_id(room);
+    ASSERT_TRUE(phone->call(request)->has_voice_session());
+    EXPECT_TRUE(sync(*phone).voice_states(0).status_text().empty());
+}

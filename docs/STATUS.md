@@ -1,5 +1,23 @@
 # omachat status
 
+## Personal voice status server continuation — 2026-10-17
+
+The server adds `voice.status.v1`, a separate SetVoiceStatusRequest and
+VoiceState.status_text. Only the device that owns voice may change the status;
+legacy mute/deafen preserves it. It is single-line plain text bounded to 80
+Unicode scalars/320 UTF-8 bytes, cleared on leave/move, and retained on a same-room
+device transfer. Existing channel audiences and sync snapshots carry the value.
+No database migration, status history, microphone capture or new voice engine is
+added. Desktop editor/display work is in a separate local continuation; this
+server-only patch does not claim that main's GUI has that companion feature.
+
+Three new real-TLS checks pass for peer delivery/snapshot and legacy mute,
+validation/non-owner rejection, and ownership transfer/move/leave/rejoin.
+A clean Release warnings-as-errors server/integration build passes. All 117 non-voice server integration checks pass; serial voice checks and
+remote deployment verification are still pending at this local checkpoint. The patch is isolated from the existing
+desktop dirty tree, based on 0887490. No unrelated launcher/layout change is
+reverted.
+
 Updated: 2026-10-17
 
 ## Product roadmap index
