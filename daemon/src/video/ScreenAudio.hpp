@@ -26,10 +26,10 @@ public:
     virtual int applications() const { return 0; } // how many programs are being heard
 };
 
-// Every application's audio output except OmaChat's own: a PipeWire input
+// Every application's audio output except omachat's own: a PipeWire input
 // node that is linked, port by port, to each other program's playback
 // stream as they come and go. Linking into one mono port lets PipeWire mix
-// and downmix; OmaChat's voice playback is never included, so people on the
+// and downmix; omachat's voice playback is never included, so people on the
 // call do not hear themselves echoed back through the share.
 std::unique_ptr<ScreenAudioSource> makeApplicationAudioSource(QObject* parent = nullptr);
 

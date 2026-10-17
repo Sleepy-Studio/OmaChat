@@ -1,4 +1,4 @@
-// OmaChat reliable control protocol (TCP + TLS 1.3).
+// omachat reliable control protocol (TCP + TLS 1.3).
 //
 // Framing: every frame is a 4-byte big-endian unsigned length followed by
 // exactly that many bytes of a serialized `Envelope`. Frames larger than

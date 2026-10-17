@@ -34,3 +34,6 @@ __pycache__/
 
 # Local agent conversation exports
 /session-*.md
+
+# Historical empty AWS marker (never source material)
+/.aws

@@ -37,7 +37,7 @@ Implementation gates:
    interface and acceptable licensing. Pin its version and test vectors.
 2. Add server storage/relay for key packages, Welcome, proposals and commits.
    The server must not decide the group transcript or hold the group secret.
-3. Bind MLS credentials to pinned OmaChat device keys and safety numbers.
+3. Bind MLS credentials to pinned omachat device keys and safety numbers.
    Persist per-device group state in encrypted local storage; a crash between
    sending a commit and storing the new epoch must recover without key reuse.
 4. Migrate each DM/group independently. Block sends during an unresolved

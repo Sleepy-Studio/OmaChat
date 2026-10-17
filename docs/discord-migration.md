@@ -2,14 +2,14 @@
 
 ## In the client
 
-On an updated OmaChat server, open **Add Server → Create a server → Import
+On an updated omachat server, open **Add Server → Create a server → Import
 Discord**. Enter the new server name, choose the JSON channel exports, and
 select **Create and import**. The dialog checks the files before creating the
 server, then shows batch progress. The client transfers the history and local
 assets over its existing encrypted connection; no access to the server's
 filesystem is needed. The account creating the server owns it. Imported
 authors remain separate archive profiles; an export cannot claim authorship
-on a live OmaChat account.
+on a live omachat account.
 
 Select exports from one Discord guild. Each JSON file may be up to 128 MB;
 the selection may total 256 MB and 100 files. Local attachments must be beside
@@ -21,22 +21,22 @@ Discord message IDs are tracked so the remaining history can be retried.
 
 ## Offline operator tool
 
-OmaChat can also import **DiscordChatExporter JSON** channel exports into an existing
-OmaChat server. This is an offline operator tool: it edits the server's SQLite
+omachat can also import **DiscordChatExporter JSON** channel exports into an existing
+omachat server. This is an offline operator tool: it edits the server's SQLite
 database and attachment directory, so stop `omachat-server` before applying an
 import and start it afterward. Back up both the database and files directory.
 
 Export each Discord text channel as JSON. Enable **Download assets** if you
-want attachments copied into OmaChat. Keep each JSON file beside its downloaded
+want attachments copied into omachat. Keep each JSON file beside its downloaded
 assets. You can pass several channel files in one command; they must come from
 the same Discord guild. The importer creates categories and text channels,
 stores original message dates and edits, and links replies across the supplied
-files. It creates archival, passwordless OmaChat profiles for authors who have
-not already linked their Discord account to an OmaChat account. Repeating the
+files. It creates archival, passwordless omachat profiles for authors who have
+not already linked their Discord account to an omachat account. Repeating the
 same import skips messages already mapped from their Discord IDs.
 
 First start the updated server once to migrate its database to schema 6, then
-stop it. Find the OmaChat server ID with `omachatctl server list`. Run a dry run:
+stop it. Find the omachat server ID with `omachatctl server list`. Run a dry run:
 
 ```sh
 python3 scripts/import-discord.py \
@@ -58,9 +58,9 @@ available; the importer does not fetch them. Embed descriptions and links and
 sticker URLs are appended to text. Discord voice channels, roles, permission
 overrides, pins, polls, and exact reaction counts without user lists have no
 matching import representation yet. Thread exports become text channels.
-Archived profiles do not grant their owners access to OmaChat; only already
-linked Discord identities map to live OmaChat accounts.
+Archived profiles do not grant their owners access to omachat; only already
+linked Discord identities map to live omachat accounts.
 
 Use exports produced by [DiscordChatExporter](https://github.com/Tyrrrz/DiscordChatExporter),
 which provides JSON output and an option to download assets. Keep any account
-token used for export out of the OmaChat import command and logs.
+token used for export out of the omachat import command and logs.

@@ -139,6 +139,7 @@ void IpcServer::onNewConnection()
         });
         connect(socket, &QLocalSocket::disconnected, this, [this, socket] {
             m_clients.remove_if([socket](const Client& c) { return c.socket == socket; });
+            emit subscriptionsChanged();
             emit clientDisconnected(socket);
             socket->deleteLater();
         });
@@ -181,11 +182,13 @@ void IpcServer::onReadyRead(Client& c)
             for (const auto& t : params.value(QStringLiteral("topics")).toArray())
                 current->topics << t.toString();
             send(socket, ipc::makeResult(id, {{"subscribed", true}}));
+            emit subscriptionsChanged();
             continue;
         }
         if (method == u"events.unsubscribe") {
             current->subscribed = false;
             send(socket, ipc::makeResult(id));
+            emit subscriptionsChanged();
             continue;
         }
         if (m_handler)
@@ -193,6 +196,15 @@ void IpcServer::onReadyRead(Client& c)
         else
             send(socket, ipc::makeError(id, ipc::errors::Internal, QStringLiteral("daemon not ready")));
     }
+}
+
+bool IpcServer::hasSubscribers(const QString& topic) const
+{
+    for (const auto& c : m_clients) {
+        if (c.subscribed && c.topics.contains(topic))
+            return true;
+    }
+    return false;
 }
 
 void IpcServer::send(QLocalSocket* socket, const QJsonObject& msg)
@@ -214,6 +226,9 @@ void IpcServer::broadcast(const QString& event, const QJsonObject& data)
     QByteArray encoded;
     for (auto& c : m_clients) {
         if (!c.subscribed)
+            continue;
+        // Decrypted remote voice is sent only to an explicit audio subscriber.
+        if (event == u"voice.audio" && !c.topics.contains(QStringLiteral("voice.audio")))
             continue;
         if (!c.topics.isEmpty()) {
             bool match = false;

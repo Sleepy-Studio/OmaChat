@@ -127,7 +127,7 @@ void ChatServer::handleOAuthLogin(Session& s, std::uint64_t rid, const proto::OA
             }
             // The display name comes from the provider profile; the username
             // is derived from it and made unique, since providers don't
-            // guarantee OmaChat's stricter charset or uniqueness.
+            // guarantee omachat's stricter charset or uniqueness.
             const QString displayName = profile->displayName.isEmpty() ? providerName : profile->displayName;
             const QString username = uniqueUsernameFrom(profile->username);
             UserRecord user{m_ids.next(), username, displayName, profile->avatarUrl.value_or(QString()), QString(),
@@ -185,7 +185,7 @@ void ChatServer::handleOAuthLink(Session& s, std::uint64_t rid, const proto::OAu
             if (const auto existing = m_store.oauthIdentity(providerName, profile->id)) {
                 if (existing->userId != userId) {
                     replyError(*sp, rid, proto::ERROR_CONFLICT,
-                        QStringLiteral("that %1 account is already linked to a different OmaChat account")
+                        QStringLiteral("that %1 account is already linked to a different omachat account")
                             .arg(providerName));
                     return;
                 }

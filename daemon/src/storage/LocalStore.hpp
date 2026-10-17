@@ -21,6 +21,15 @@ struct Account {
     std::int64_t lastUsed = 0;
 };
 
+struct OmkaonInboxMessage {
+    QString id;
+    QString sender;
+    QString content;
+    std::int64_t receivedAt = 0;
+    QString kind = QStringLiteral("message");
+    QString replyTo;
+};
+
 // $XDG_DATA_HOME/omachat/omachat.db: known accounts, pinned certificates,
 // local per-user volume, muted channels and small UI state. Secrets are
 // never stored here (refresh tokens live in the system keyring).
@@ -57,6 +66,11 @@ public:
 
     QString value(const QString& key, const QString& fallback = {});
     bool setValue(const QString& key, const QString& value);
+
+    bool addOmkaonInboxMessage(const QString& id, const QString& sender, const QString& content,
+        const QString& kind, const QString& replyTo, bool* inserted = nullptr);
+    std::vector<OmkaonInboxMessage> omkaonInboxMessages() const;
+    bool deleteOmkaonInboxMessage(const QString& id);
 
 private:
     bool exec(const QString& sql);

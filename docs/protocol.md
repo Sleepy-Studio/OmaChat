@@ -1,6 +1,6 @@
 # Protocols
 
-OmaChat has three wire formats: the reliable server protocol, the UDP media
+omachat has three wire formats: the reliable server protocol, the UDP media
 protocol ([media.md](media.md)), and the local IPC protocol.
 
 ## Reliable protocol (client ⇄ server)
@@ -90,7 +90,7 @@ because JavaScript numbers cannot hold 64-bit integers.
 `ImportDiscordBatch{server_id, guild_id, channel_id, channel_name,
 category_id, messages}` is owner-only and returns `ImportDiscordBatchResult`.
 Each batch has at most 50 messages; the source Discord IDs make retries
-idempotent. Imported timestamps are stored separately from OmaChat IDs, so
+idempotent. Imported timestamps are stored separately from omachat IDs, so
 history and search order remain correct for messages before 2025. The local
 `server.create_from_discord` IPC method reads selected DiscordChatExporter JSON
 files, creates a server, and streams bounded batches to this request.
@@ -218,7 +218,7 @@ Channel/server/user parameters accept an id, a name, or `Server/channel`.
 
 | Area | Methods |
 |---|---|
-| daemon | `daemon.status`, `daemon.version`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe` |
+| daemon | `daemon.status`, `daemon.version` → `{version, ipc, protocol_major, features[]}`, `state.snapshot`, `events.subscribe {topics?}`, `events.unsubscribe`, `omkaon.inbox.deliver {message_id, sender, content, kind?, reply_to?}`, `omkaon.inbox.list`, `omkaon.inbox.delete {message_id}` (local omkaon inbox extension) |
 | accounts | `account.list`, `account.add`, `account.login`, `account.register`, `account.oauthLogin {host, port, provider: discord\|github\|google}`, `account.oauthLink {provider}` (attaches a provider to the signed-in account), `account.oauthUnlink {provider}`, `account.oauthIdentities` → `{identities: [{provider, username, linked_at}]}`, `account.logout`, `account.remove`, `account.forgetDuplicate {account}`, `account.switch {account}`, `connect`, `disconnect`, `certificate.trust {fingerprint}` |
 
 | servers | `server.list`, `server.create`, `server.create_from_discord {name, files}`, `server.join {invite}`, `server.leave`, `server.delete`, `invite.create`, `invite.list`, `member.list` |
@@ -295,8 +295,28 @@ See [desktop-send-recovery-design.md](desktop-send-recovery-design.md) for bound
 
 `account.forgetDuplicate {account}` removes only a legacy local `oauth-*` placeholder and its local credentials. It requires the active account and placeholder to be connected to the same server and authenticated as the same remote user. It never deletes the server account.
 
+`config.get` returns notification preferences for direct messages, channel
+messages, @mentions, and voice joins. `config.set_notifications` accepts the
+corresponding `messages`, `channel_messages`, `mentions`, and `voice_join`
+boolean fields. Channel message notifications are enabled by default; mentions
+can still notify when ordinary channel message notifications are disabled.
+Desktop alerts are suppressed for the channel currently being read, muted
+channels, and Do Not Disturb status.
+
 Push-to-talk held by a client is released automatically if that client
 disconnects.
+
+`omkaon.inbox.deliver` is a same-user local IPC extension used by the omkaon
+connector after it decrypts a portal envelope on the owner's device. It
+validates bounded sender/message text, a `message` or `call_request` kind, and
+an optional bounded reply method, then stores them in the local omachat
+database, deduplicated by message id. A call request is only a request to
+arrange a call; it does not initiate media. It can also display a generic
+desktop notification without message content. `omkaon.inbox.list` returns the newest 200 locally stored
+entries; `omkaon.inbox.delete` removes one. The entries are local inbox data,
+not network messages, and never impersonate an omachat account. Local storage
+keeps the newest 200 messages and expires entries older than 90 days. The
+private Unix socket remains local; never expose it to a network listener.
 
 Messages of encrypted conversations arrive decrypted, with `"e2e": "ok"`
 (`"unverified"`: the sending device is not one we know for the author;
@@ -310,6 +330,9 @@ the real file name, type and size, and `attachment.download` decrypts them.
 `typing`, `channel.created/updated/deleted/muted`, `member.joined/updated/left`,
 `server.updated/removed`, `user.updated`, `presence`, `role.updated/deleted`,
 `voice.state`, `voice.speaking`, `voice.self`, `voice.ptt`, `voice.error`,
+`voice.audio` (explicit `events.subscribe {topics:["voice.audio"]}` only;
+48 kHz mono f32le, 20 ms frames in base64 `pcm_f32le`; decrypted received
+call mix, so consumers must treat it as sensitive and avoid recording),
 `audio.devices`, `ui.navigate`, `transfer.progress` (`{id, direction,
 name, transferred, total, waiting, account}` plus `complete` or `error` at
 the end; `waiting` while the connection is down), `account.activity`
@@ -336,8 +359,8 @@ does not cancel them.
   "reconnect_in_ms": 0,
   "account": {"id": "1", "host": "chat.example.org", "port": 6473, "username": "howie"},
   "accounts": [{"id": "1", "host": "chat.example.org", "port": 6473, "username": "howie",
-                "state": "connected", "active": true, "instance": "OmaChat", "unread": 0, "mentions": 0}],
-  "instance": "OmaChat",
+                "state": "connected", "active": true, "instance": "omachat", "unread": 0, "mentions": 0}],
+  "instance": "omachat",
   "max_upload_bytes": 52428800,
   "capabilities": ["resume", "search.server", "dm.group", "attachments", "video.h264", "…"],
   "user": {"id": "2301…", "username": "howie", "display_name": "Howie", "status": "online"},

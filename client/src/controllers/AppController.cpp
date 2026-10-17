@@ -193,6 +193,7 @@ void AppController::onDaemonConnected()
             return;
         const QJsonObject n = r.result.value(QStringLiteral("notifications")).toObject();
         m_config.notifications.messages = n.value(QStringLiteral("messages")).toBool(true);
+        m_config.notifications.channelMessages = n.value(QStringLiteral("channel_messages")).toBool(true);
         m_config.notifications.mentions = n.value(QStringLiteral("mentions")).toBool(true);
         m_config.notifications.voiceJoin = n.value(QStringLiteral("voice_join")).toBool(false);
         const QJsonObject ui = r.result.value(QStringLiteral("ui")).toObject();
@@ -855,8 +856,9 @@ QVariantList AppController::commandHelp() const
 
 QVariantMap AppController::notificationSettings() const
 {
-    return {{"messages", m_config.notifications.messages}, {"mentions", m_config.notifications.mentions},
-        {"voice_join", m_config.notifications.voiceJoin}};
+    return {{"messages", m_config.notifications.messages},
+        {"channel_messages", m_config.notifications.channelMessages},
+        {"mentions", m_config.notifications.mentions}, {"voice_join", m_config.notifications.voiceJoin}};
 }
 
 // ------------------------------------------------------------------- rows

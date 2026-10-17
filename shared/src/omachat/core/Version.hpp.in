@@ -5,7 +5,7 @@
 namespace omachat {
 
 inline constexpr const char* kVersion = "@PROJECT_VERSION@";
-inline constexpr const char* kAppId = "org.omarchy.OmaChat";
+inline constexpr const char* kAppId = "org.omarchy.omachat";
 
 // Reliable protocol version. A major mismatch is rejected; minor versions
 // negotiate through capability strings.

@@ -1847,6 +1847,8 @@ void AppController::setNotification(const QString& key, bool enabled)
 {
     if (key == u"messages")
         m_config.notifications.messages = enabled;
+    else if (key == u"channel_messages")
+        m_config.notifications.channelMessages = enabled;
     else if (key == u"mentions")
         m_config.notifications.mentions = enabled;
     else if (key == u"voice_join")

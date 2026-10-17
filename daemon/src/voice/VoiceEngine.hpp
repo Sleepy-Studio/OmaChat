@@ -9,6 +9,7 @@
 #include "voice/SpscRing.hpp"
 
 #include <QObject>
+#include <QByteArray>
 
 #include <atomic>
 #include <functional>
@@ -60,6 +61,7 @@ public:
     bool start(const Session& session, QString* error);
     void stop();
     bool active() const { return m_running.load(); }
+    void setPlaybackAudioSubscribed(bool subscribed) { m_playbackAudioSubscribed.store(subscribed); }
 
     void setMuted(bool muted) { m_muted.store(muted); }
     void setDeafened(bool deafened) { m_deafened.store(deafened); }
@@ -67,6 +69,7 @@ public:
     bool pushToTalk() const { return m_ptt.load(); }
     bool transmitting() const { return m_transmitting.load(); }
     float inputLevelDb() const { return m_inputLevelDb.load(); }
+    std::size_t enqueueSpeech(std::span<const float> samples, bool final);
 
     // Client-local gain for one remote user, 0.0 .. 2.0.
     void setUserGain(std::uint64_t userId, double gain);
@@ -97,6 +100,7 @@ signals:
     void transmittingChanged(bool transmitting);
     void registeredChanged(bool registered);
     void failed(const QString& reason);
+    void playbackAudioFrame(const QByteArray& pcmF32le);
 
 private:
     struct Speaker {
@@ -124,8 +128,11 @@ private:
     std::uint64_t m_selfUserId = 0;
 
     SpscRing<float> m_captureRing{48000}; // 1 s headroom
+    SpscRing<float> m_speechRing{48000 * 10}; // 10 s TTS headroom
     SpscRing<float> m_playbackRing{48000};
     std::atomic<bool> m_captureReady{false};
+    std::atomic<bool> m_speechActive{false};
+    std::atomic<bool> m_speechFinal{false};
     std::atomic<bool> m_playbackNeeded{false};
     std::atomic<std::uint32_t> m_lastQuantum{960};
 
@@ -138,6 +145,7 @@ private:
     std::atomic<int> m_mode{0};
     std::atomic<float> m_outputVolume{1.0f};
     std::atomic<bool> m_settingsDirty{false};
+    std::atomic<bool> m_playbackAudioSubscribed{false};
 
     std::mutex m_speakersMutex;
     std::map<std::uint64_t, std::unique_ptr<Speaker>> m_speakers;

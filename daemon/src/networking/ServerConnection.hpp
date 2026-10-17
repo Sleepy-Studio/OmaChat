@@ -46,7 +46,7 @@ struct OAuthProviderInfo {
     QString scope;
 };
 
-// The daemon's single control connection to an OmaChat server: TLS, version
+// The daemon's single control connection to an omachat server: TLS, version
 // negotiation, authentication, session resume, synchronization, reconnect.
 class ServerConnection : public QObject {
     Q_OBJECT

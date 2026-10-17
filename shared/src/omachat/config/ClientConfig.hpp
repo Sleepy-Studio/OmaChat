@@ -47,6 +47,7 @@ struct ClientConfig {
 
     struct Notifications {
         bool messages = true;
+        bool channelMessages = true;
         bool mentions = true;
         bool voiceJoin = false;
     } notifications;

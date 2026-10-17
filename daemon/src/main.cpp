@@ -34,7 +34,7 @@ int main(int argc, char** argv)
     QCoreApplication::setApplicationVersion(QString::fromLatin1(kVersion));
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("OmaChat communications daemon"));
+    parser.setApplicationDescription(QStringLiteral("omachat communications daemon"));
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addOption(

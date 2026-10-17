@@ -3,6 +3,23 @@
 Handoff notes for whoever picks this up next (human or agent). Last updated
 2026-10-01. "Current source" below means `main`.
 
+## Channel notifications — 2026-10-17
+
+- Added a default-on channel message notification setting, separate from direct
+  message notifications. @mentions still notify when channel message alerts
+  are disabled, if the mentions setting is enabled.
+- Incoming message notifications play the desktop's `message-new-instant`
+  sound at a quiet volume when `canberra-gtk-play` is installed. DND, muted
+  channels, and the focused channel continue to suppress notifications before
+  playback.
+- Toast placement, stacking, timers, and dismissal remain owned by the active
+  notification server. The separate `omka.notifications` Omarchy plugin work
+  is held outside this standalone omachat branch.
+- Verification on `review/omachat-standalone`: clean CMake configure and
+  `cmake --build /tmp/omachat-pr-build --target omachat omachatd -j2` passed.
+  No tests run. The complete worktree remains preserved on
+  `holding/omachat-complete-worktree`.
+
 ## 0.2.2 conversation UI release
 
 The conversation view now has responsive channel and member drawers, a visible
@@ -38,7 +55,7 @@ have not been performed. Source is uncommitted, uninstalled, and undeployed.
 
 ## Where things are
 
-- Remote: `github.com/Sleepy-Studio/OmaChat` (**public** as of 2026-09-28), branch `main`.
+- Remote: `github.com/Sleepy-Studio/omachat` (**public** as of 2026-09-28), branch `main`.
 - Latest tagged release: **0.2.2** (`v0.2.2`), tagged 2026-10-01. It adds the
   conversation UI improvements above. The previous 0.2.1 release bundled
   everything added since 0.2.0 — OAuth, profiles, server-side account
@@ -114,7 +131,7 @@ VAD/PTT), reconnect/resume, CLI, Omarchy bar widget, Arch packaging, and:
   AMF / x264, keyframe-on-demand over the relay, decoded in the daemon and
   shown from shared memory (voice panel monitor button; LIVE badge → click
   to watch; CLI `stream …`; Settings → Screen sharing). Carries other
-  applications' sound (PipeWire links into a private capture node; OmaChat's
+  applications' sound (PipeWire links into a private capture node; omachat's
   own sound excluded), played to watchers only.
 - End-to-end encryption of direct and group conversations, text and files,
   with key-change warnings and safety numbers (lock icon; CLI `e2e …`).
@@ -218,7 +235,7 @@ two-machine baseline is measured.
 
 ## Decisions to keep
 
-- **No ONCE / HTTP-only hosting.** ONCE only proxies HTTP on port 80; OmaChat
+- **No ONCE / HTTP-only hosting.** ONCE only proxies HTTP on port 80; omachat
   needs TLS TCP 6473 + UDP 6474, and tunnelling voice over TCP costs
   latency. Deployment stays systemd + PKGBUILD.
 - Attachments share the control connection (512 KiB chunks, four in flight)

@@ -1,5 +1,7 @@
 #include "platform/ThemeProvider.hpp"
 
+#include "omachat/core/Paths.hpp"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -108,6 +110,17 @@ QString ThemeProvider::themeDirectory() const
     if (state.isEmpty() || !QDir::isAbsolutePath(state))
         state = QDir::homePath() + QStringLiteral("/.local/state");
     return state + QStringLiteral("/omarchy/current/theme");
+}
+
+// Per-application override. Env-first so it is testable without touching the
+// real config, matching how OMACHAT_THEME already overrides the built-in theme.
+QString ThemeProvider::localThemeFile() const
+{
+    const QString override = qEnvironmentVariable("OMACHAT_THEME_FILE");
+    if (!override.isEmpty())
+        return override;
+    const QString candidate = paths::configDir() + QStringLiteral("/theme.toml");
+    return QFileInfo::exists(candidate) ? candidate : QString();
 }
 
 void ThemeProvider::setScale(double s)
@@ -221,11 +234,17 @@ bool ThemeProvider::loadFile(const QString& path)
 
 void ThemeProvider::reload()
 {
+    // An OmaChat-local theme wins over the Omarchy one, so a user can recolour
+    // this application alone without editing the desktop's theme files. It is
+    // resolved before the Omarchy path and uses the same schema, so a partial
+    // local file simply falls through to Omarchy for the keys it omits.
     const QString dir = themeDirectory();
-    const QString colors = dir + QStringLiteral("/colors.toml");
+    const QString omarchyColors = dir + QStringLiteral("/colors.toml");
+    const QString localColors = localThemeFile();
     const QString current = QFileInfo(dir).absolutePath(); // .../omarchy/current
 
-    if (!QFileInfo::exists(colors) || !loadFile(colors))
+    const bool loadedLocal = !localColors.isEmpty() && loadFile(localColors);
+    if (!loadedLocal && (!QFileInfo::exists(omarchyColors) || !loadFile(omarchyColors)))
         applyFallback();
 
     // Re-arm watches: theme switches may replace files and directories.
@@ -233,8 +252,8 @@ void ThemeProvider::reload()
         m_watcher.removePaths(m_watcher.files());
     if (!m_watcher.directories().isEmpty())
         m_watcher.removePaths(m_watcher.directories());
-    for (const QString& p : {colors, current + QStringLiteral("/theme.name")}) {
-        if (QFileInfo::exists(p))
+    for (const QString& p : {localColors, omarchyColors, current + QStringLiteral("/theme.name")}) {
+        if (!p.isEmpty() && QFileInfo::exists(p))
             m_watcher.addPath(p);
     }
     if (QFileInfo::exists(current))

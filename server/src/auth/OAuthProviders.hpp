@@ -26,7 +26,7 @@ struct OAuthProviderMeta {
     QString scope;
 };
 
-// Returns nullptr if `provider` is not one OmaChat supports.
+// Returns nullptr if `provider` is not one omachat supports.
 const OAuthProviderMeta* metaFor(proto::OAuthProvider provider);
 const OAuthProviderMeta* metaByName(const QString& name);
 
@@ -41,7 +41,7 @@ struct OAuthProfile {
     std::optional<QString> bio;
 };
 
-// Parse only fields suitable for OmaChat's profile. Missing provider fields
+// Parse only fields suitable for omachat's profile. Missing provider fields
 // stay absent so a sign-in does not erase locally edited values.
 std::optional<OAuthProfile> parseProfile(proto::OAuthProvider provider, const QJsonObject& obj);
 

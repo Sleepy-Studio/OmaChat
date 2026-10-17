@@ -28,6 +28,7 @@ add_executable(omachat_unit_tests
     unit/test_send_recovery.cpp
     unit/test_video.cpp
     unit/test_e2e.cpp
+    unit/test_notification_actions.cpp
 )
 if(OMACHAT_BUILD_CLIENT)
     target_sources(omachat_unit_tests PRIVATE unit/test_markdown.cpp unit/test_commands.cpp unit/test_paste.cpp

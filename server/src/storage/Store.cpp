@@ -182,7 +182,7 @@ const char* const kSchemaV5[] = {
 const char* const kSchemaV6[] = {
     "ALTER TABLE messages ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0",
     // Existing message ids encode their creation time. Imported history can
-    // predate the OmaChat snowflake epoch, so its time must live separately.
+    // predate the omachat snowflake epoch, so its time must live separately.
     "UPDATE messages SET created_at = 1735689600000 + (id >> 22)",
     "CREATE INDEX messages_by_channel_time ON messages(channel_id, created_at DESC, id DESC)",
     R"(CREATE TABLE discord_import_map(
@@ -540,7 +540,7 @@ bool Store::exec(const QString& sql, const std::vector<QVariant>& binds)
         return false;
     }
     for (const auto& b : binds) {
-        // A null QString binds as SQL NULL; OmaChat text columns are NOT NULL
+        // A null QString binds as SQL NULL; omachat text columns are NOT NULL
         // and use '' for "empty".
         if (b.typeId() == QMetaType::QString && b.toString().isNull())
             q.addBindValue(QStringLiteral(""));

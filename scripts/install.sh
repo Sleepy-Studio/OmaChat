@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# One-line OmaChat install for Arch Linux / Omarchy:
+# One-line omachat install for Arch Linux / Omarchy:
 #
-#   curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/OmaChat/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Sleepy-Studio/omachat/main/scripts/install.sh | bash
 #
 # Installs build dependencies, builds the package with makepkg, and installs
 # it with pacman. Safe to re-run to upgrade to the latest commit on main.
@@ -44,7 +44,7 @@ _run() {
 if [[ ! -f /etc/arch-release ]]; then
     echo "omachat install: this script is for Arch Linux / Omarchy only." >&2
     echo "For other distributions, self-host the server with Docker (see README)" >&2
-    echo "or build from source: https://github.com/Sleepy-Studio/OmaChat#build" >&2
+    echo "or build from source: https://github.com/Sleepy-Studio/omachat#build" >&2
     exit 1
 fi
 
@@ -53,7 +53,7 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
-REPO="https://github.com/Sleepy-Studio/OmaChat.git"
+REPO="https://github.com/Sleepy-Studio/omachat.git"
 REF="${OMACHAT_REF:-main}"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -65,11 +65,11 @@ _run "installing dependencies" sudo pacman -S --needed --noconfirm \
     tomlplusplus rnnoise ffmpeg
 
 echo "omachat install: fetching $REF"
-git clone --quiet --depth 1 --branch "$REF" "$REPO" "$WORKDIR/OmaChat" \
-    || git clone --quiet "$REPO" "$WORKDIR/OmaChat"
+git clone --quiet --depth 1 --branch "$REF" "$REPO" "$WORKDIR/omachat" \
+    || git clone --quiet "$REPO" "$WORKDIR/omachat"
 
 echo "omachat install: building (this takes a few minutes; set OMACHAT_VERBOSE=1 for full output)"
-cd "$WORKDIR/OmaChat/packaging/arch"
-OMACHAT_SRC="$WORKDIR/OmaChat" BUILDDIR="$WORKDIR/build" OMACHAT_VERBOSE="$VERBOSE" makepkg -si --noconfirm
+cd "$WORKDIR/omachat/packaging/arch"
+OMACHAT_SRC="$WORKDIR/omachat" BUILDDIR="$WORKDIR/build" OMACHAT_VERBOSE="$VERBOSE" makepkg -si --noconfirm
 
 echo "omachat install: done. Run 'omachat' to start, or see the README for the CLI and self-hosting a server."

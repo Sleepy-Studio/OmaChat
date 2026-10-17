@@ -81,12 +81,12 @@ Built-in roles on server creation: Guest (default, read + join voice), Member
 - Sharing needs `STREAM` in the voice channel. The relay forwards video only
   to members of the same voice channel who explicitly asked to watch; a
   permission change that removes `STREAM` ends the share.
-- What is shared is chosen in the desktop's own portal dialog; OmaChat never
+- What is shared is chosen in the desktop's own portal dialog; omachat never
   captures the screen without it.
 - Shared sound is off by default in current source. If you turn it on in
   Settings → Screen sharing or pass `stream start --audio`, it captures
   everything other applications play (not only the shared window; not
-  OmaChat's own sound). The GUI asks for confirmation each time sound is
+  omachat's own sound). The GUI asks for confirmation each time sound is
   enabled. A CLI `stream start` without `--audio` stays silent even if an old
   config file contains `audio = true`.
 - Decoded frames sit in `$XDG_RUNTIME_DIR/omachat/video` (0700 directory,
@@ -117,7 +117,7 @@ What the server can read:
 How it works (libsodium):
 
 - Each device creates an X25519 key pair per account. The secret key lives
-  in your keyring (`e2e/<account>`), never in OmaChat's files; the public
+  in your keyring (`e2e/<account>`), never in omachat's files; the public
   key is published to the server, at most 10 devices per user.
 - A message body (text plus each attachment's name, type, size and file
   key) is encrypted with a fresh random key using XChaCha20-Poly1305. The
@@ -133,7 +133,7 @@ How it works (libsodium):
 - Keys are trusted on first use and pinned per contact. When a contact's
   devices change afterwards, you are warned, their safety number changes,
   and any earlier verification is cleared. Compare the 60-digit safety
-  number with them outside OmaChat and mark it verified (lock icon in the
+  number with them outside omachat and mark it verified (lock icon in the
   conversation, or `omachatctl e2e safety USER` / `e2e verify USER`).
 - No silent downgrade: when the server supports it, conversations are always
   encrypted. If a participant has no device key (an old client), sending

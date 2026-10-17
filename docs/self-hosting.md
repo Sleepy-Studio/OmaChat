@@ -53,20 +53,20 @@ Its `OMACHAT_IMAGE_TAG` variable defaults to `latest` and can be set to a
 published version tag for a controlled upgrade.
 
 Coolify automatically generates `SERVICE_FQDN_OMACHAT_SERVER` for this Compose
-service and passes that hostname to OmaChat as `OMACHAT_HOSTNAME`. To use your
+service and passes that hostname to omachat as `OMACHAT_HOSTNAME`. To use your
 own domain, first configure the server's Wildcard Domain in Coolify and point
 wildcard DNS at the server; Coolify cannot create DNS records from Compose.
 Without a wildcard domain, Coolify can generate an `sslip.io` hostname from
 the server IP. Check that the resulting hostname resolves to the server before
-handing it to clients. A generated Coolify web URL is not an OmaChat endpoint:
+handing it to clients. A generated Coolify web URL is not an omachat endpoint:
 clients connect to the hostname on TCP port 6473 (or your chosen port), while
 media uses UDP port 6474 (or your chosen port). The Coolify HTTP proxy route
-associated with the generated domain is unused and cannot terminate OmaChat's
+associated with the generated domain is unused and cannot terminate omachat's
 TLS or carry its UDP traffic. Do not append `:6473` to Coolify's **Domains for
 omachat-server** field: a port there selects an internal HTTP proxy target,
 not the public client port. Coolify may warn that it is an unrecognized
 internal port; that warning does not describe the Compose `ports:` mappings.
-In the OmaChat client, enter only the hostname in **Server** and `6473` in
+In the omachat client, enter only the hostname in **Server** and `6473` in
 **Port**.
 
 Review the environment defaults for server name, TCP and UDP ports,
@@ -118,7 +118,7 @@ Any of these work:
       --name chat.example.org --name 203.0.113.10
   ```
 
-  It prints the SHA-256 fingerprint. Give that to your users: OmaChat shows
+  It prints the SHA-256 fingerprint. Give that to your users: omachat shows
   the server's fingerprint on first connection and asks them to trust it.
   The server log also prints it at startup (`tls identity loaded`).
 
@@ -152,7 +152,7 @@ Relative paths are resolved against the config file's directory. Other keys:
 
 Add a `[oauth.discord]`, `[oauth.github]` and/or `[oauth.google]` section
 with `client_id` and `client_secret` from that provider's developer console.
-OmaChat only advertises providers you configure; leave a section out to keep
+omachat only advertises providers you configure; leave a section out to keep
 it off. See `server.toml.example` for the exact keys.
 
 When registering the app on each provider's side, set its redirect/callback
@@ -191,7 +191,7 @@ Without systemd: `omachat-server --config /path/to/server.toml`
 
 ## 6. First use
 
-1. In OmaChat choose **Register**, enter your server's host and port.
+1. In omachat choose **Register**, enter your server's host and port.
 2. Trust the certificate fingerprint if it is self-signed.
 3. Create a server (the `+` in the server rail) and copy an invite
    (`/invite`, or the people icon). Invites look like

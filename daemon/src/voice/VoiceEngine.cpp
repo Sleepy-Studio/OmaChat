@@ -1,5 +1,7 @@
 #include "voice/VoiceEngine.hpp"
 
+#include <bit>
+
 #include "omachat/core/Log.hpp"
 
 #include <QJsonArray>
@@ -8,6 +10,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
+#include <thread>
 
 namespace omachat::voice {
 
@@ -55,6 +59,9 @@ bool VoiceEngine::start(const Session& session, QString* error)
         return false;
 
     m_captureRing.clear();
+    m_speechRing.clear();
+    m_speechActive.store(false);
+    m_speechFinal.store(false);
     m_playbackRing.clear();
     m_running.store(true);
     m_settingsDirty.store(true);
@@ -78,6 +85,22 @@ bool VoiceEngine::start(const Session& session, QString* error)
     }
     OMA_INFO("voice", "engine started", {"stream", session.streamId}, {"audio", m_backend.name()});
     return true;
+}
+
+std::size_t VoiceEngine::enqueueSpeech(std::span<const float> samples, bool final)
+{
+    if (!m_running.load() || samples.empty())
+        return 0;
+    const std::size_t pushed = m_speechRing.push(samples.data(), samples.size());
+    if (pushed > 0)
+        m_speechActive.store(true, std::memory_order_release);
+    if (final)
+        m_speechFinal.store(true, std::memory_order_release);
+    if (pushed > 0 || final) {
+        m_captureReady.store(true, std::memory_order_release);
+        m_captureReady.notify_one();
+    }
+    return pushed;
 }
 
 void VoiceEngine::stop()
@@ -181,24 +204,67 @@ void VoiceEngine::encoderLoop()
             encoder.setFec(m_settings.fec, m_settings.fec ? 5 : 0);
         }
 
-        while (m_captureRing.size() >= static_cast<std::size_t>(kFrameSamples)) {
-            m_captureRing.pop(frame.data(), frame.size());
-            const auto result = processor.process(frame);
+        while (m_captureRing.size() >= static_cast<std::size_t>(kFrameSamples)
+            || (m_speechActive.load(std::memory_order_acquire)
+                && (m_speechRing.size() >= static_cast<std::size_t>(kFrameSamples)
+                    || m_speechFinal.load(std::memory_order_acquire)))) {
+            // Do not fall back to the physical microphone while a generated
+            // utterance is active. IPC chunks can arrive a few milliseconds
+            // apart; consuming a mic frame in that gap creates an early
+            // end-of-speech marker and makes the remote side cut the utterance
+            // off before the final generated samples arrive.
+            if (m_speechActive.load(std::memory_order_acquire)
+                && m_speechRing.size() < static_cast<std::size_t>(kFrameSamples)
+                && !m_speechFinal.load(std::memory_order_acquire)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+
+            bool speechFrame = false;
+            if (m_speechActive.load(std::memory_order_acquire)
+                && (m_speechRing.size() >= static_cast<std::size_t>(kFrameSamples)
+                    || m_speechFinal.load(std::memory_order_acquire))) {
+                speechFrame = true;
+                const std::size_t got = m_speechRing.pop(frame.data(), frame.size());
+                if (got < frame.size())
+                    std::fill(frame.begin() + static_cast<std::ptrdiff_t>(got), frame.end(), 0.0f);
+                if (m_speechFinal.load(std::memory_order_acquire) && m_speechRing.size() == 0)
+                    m_speechActive.store(false, std::memory_order_release);
+            } else {
+                m_captureRing.pop(frame.data(), frame.size());
+            }
+            AudioProcessor::Result result;
+            if (speechFrame) {
+                // TTS is already rendered audio. Preserve the generated
+                // waveform exactly; mic high-pass/RNNoise/AGC can remove or
+                // heavily distort synthetic speech before Opus encoding.
+                result.voice = true;
+                result.levelDb = 0.0f;
+            } else {
+                result = processor.process(frame);
+            }
             m_inputLevelDb.store(result.levelDb, std::memory_order_relaxed);
 
-            bool transmit = false;
+            // TTS is already known speech. Do not run it through microphone
+            // VAD: synthetic speech can be rejected as silence, which makes
+            // the sender count frames without producing a talk burst remotely.
+            bool transmit = speechFrame;
             if (!m_muted.load() && !m_deafened.load()) {
-                switch (static_cast<InputMode>(m_mode.load())) {
-                case InputMode::PushToTalk:
-                    transmit = m_ptt.load();
-                    break;
-                case InputMode::AlwaysTransmit:
-                    transmit = true;
-                    break;
-                case InputMode::VoiceActivity:
-                    transmit = result.voice;
-                    break;
+                if (!speechFrame) {
+                    switch (static_cast<InputMode>(m_mode.load())) {
+                    case InputMode::PushToTalk:
+                        transmit = m_ptt.load();
+                        break;
+                    case InputMode::AlwaysTransmit:
+                        transmit = true;
+                        break;
+                    case InputMode::VoiceActivity:
+                        transmit = result.voice;
+                        break;
+                    }
                 }
+            } else {
+                transmit = false;
             }
 
             if (transmit || wasTransmitting) {
@@ -221,6 +287,11 @@ void VoiceEngine::encoderLoop()
                     },
                     Qt::QueuedConnection);
             }
+            // A soundboard stream must arrive at real-time audio cadence.
+            // Draining the IPC queue as fast as possible makes the relay/jitter
+            // buffer discard the burst before the other participant can hear it.
+            if (speechFrame)
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
             timestamp += kFrameSamples;
         }
     }
@@ -286,6 +357,18 @@ void VoiceEngine::mixerLoop()
                 // Gentle soft clip keeps several loud speakers from wrapping.
                 const float y = x * vol;
                 x = std::abs(y) < 0.9f ? y : std::tanh(y);
+            }
+            if (m_playbackAudioSubscribed.load(std::memory_order_relaxed)) {
+                QByteArray frame(static_cast<qsizetype>(mix.size() * sizeof(float)), Qt::Uninitialized);
+                for (std::size_t i = 0; i < mix.size(); ++i) {
+                    const std::uint32_t bits = std::bit_cast<std::uint32_t>(mix[i]);
+                    const auto offset = static_cast<qsizetype>(i * 4);
+                    frame[offset] = static_cast<char>(bits & 0xff);
+                    frame[offset + 1] = static_cast<char>((bits >> 8) & 0xff);
+                    frame[offset + 2] = static_cast<char>((bits >> 16) & 0xff);
+                    frame[offset + 3] = static_cast<char>((bits >> 24) & 0xff);
+                }
+                emit playbackAudioFrame(frame);
             }
             m_playbackRing.push(mix.data(), mix.size());
             for (const auto& [id, speaking] : changes) {

@@ -244,7 +244,7 @@ void E2EManager::seal(Id channelId, proto::E2EBody body, SealDone done)
                 const proto::User* user = m_conn.model().user(u);
                 done(std::nullopt,
                     QStringLiteral("%1 has not set up encryption yet, so this conversation cannot be sent to "
-                                   "them securely (they need OmaChat 0.2 or newer)")
+                                   "them securely (they need omachat 0.2 or newer)")
                         .arg(user ? QString::fromStdString(user->display_name()) : QStringLiteral("Someone")));
                 return;
             }

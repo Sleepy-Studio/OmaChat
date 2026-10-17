@@ -191,7 +191,7 @@ void exchangeAndFetchProfile(QNetworkAccessManager& net, const OAuthProviderMeta
         QNetworkRequest profileReq{QUrl(meta.profileUrl)};
         profileReq.setRawHeader("Authorization", "Bearer " + accessToken.toUtf8());
         // GitHub's API requires a User-Agent on every request.
-        profileReq.setRawHeader("User-Agent", "OmaChat-Server");
+        profileReq.setRawHeader("User-Agent", "omachat-Server");
         auto* profileReply = net.get(profileReq);
         QObject::connect(profileReply, &QNetworkReply::finished, profileReply, [&meta, profileReply, done] {
             profileReply->deleteLater();

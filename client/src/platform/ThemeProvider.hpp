@@ -110,6 +110,9 @@ private:
     void derive(const QColor& bg, const QColor& fg, const QColor& accent, const QColor& selection, const QColor& red,
         const QColor& green, const QColor& yellow);
     QString themeDirectory() const;
+    // Optional per-application override, empty when not configured.
+    // ~/.config/omachat/theme.toml wins over the Omarchy colors.toml.
+    QString localThemeFile() const;
 
     QFileSystemWatcher m_watcher;
     QTimer m_debounce;

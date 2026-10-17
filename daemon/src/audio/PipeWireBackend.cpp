@@ -149,11 +149,11 @@ struct PipeWireBackend::Impl {
     pw_stream* makeStream(bool isCapture, const QString& target, spa_hook* listener, const pw_stream_events* events)
     {
         pw_properties* props = pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY,
-            isCapture ? "Capture" : "Playback", PW_KEY_MEDIA_ROLE, "Communication", PW_KEY_APP_NAME, "OmaChat",
-            PW_KEY_APP_ID, "org.omarchy.OmaChat", PW_KEY_NODE_LATENCY, "480/48000", nullptr);
+            isCapture ? "Capture" : "Playback", PW_KEY_MEDIA_ROLE, "Communication", PW_KEY_APP_NAME, "omachat",
+            PW_KEY_APP_ID, "org.omarchy.omachat", PW_KEY_NODE_LATENCY, "480/48000", nullptr);
         if (!target.isEmpty() && target != u"default")
             pw_properties_set(props, PW_KEY_TARGET_OBJECT, target.toUtf8().constData());
-        pw_stream* s = pw_stream_new(core, isCapture ? "OmaChat Microphone" : "OmaChat Voice", props);
+        pw_stream* s = pw_stream_new(core, isCapture ? "omachat Microphone" : "omachat Voice", props);
         if (!s)
             return nullptr;
         pw_stream_add_listener(s, listener, events, this);
