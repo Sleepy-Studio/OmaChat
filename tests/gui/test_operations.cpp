@@ -1003,11 +1003,15 @@ ApplicationWindow {
             ASSERT_TRUE(waitFor([&] { return input->hasActiveFocus(); }));
             input->setProperty("text", "");
             if (compact) {
+                // Narrow layout keeps the channel sidebar docked (the channels
+                // drawer was removed with the compact rework); Ctrl+L focuses
+                // the channel list in place instead of opening a popup.
+                auto* channels = object->findChild<QObject*>("channelList");
+                ASSERT_TRUE(channels);
+                EXPECT_TRUE(channels->property("visible").toBool());
                 QTest::keyClick(window, Qt::Key_L, Qt::ControlModifier);
-                auto* drawer = object->findChild<QObject*>("channelsDrawer");
-                ASSERT_TRUE(drawer);
-                ASSERT_TRUE(waitFor([&] { return drawer->property("opened").toBool(); }));
-                QTest::keyClick(window, Qt::Key_Escape);
+                ASSERT_TRUE(waitFor([&] { return channels->property("activeFocus").toBool(); }));
+                input->forceActiveFocus();
                 ASSERT_TRUE(waitFor([&] { return input->hasActiveFocus(); }));
                 ASSERT_TRUE(QMetaObject::invokeMethod(view, "toggleMembers"));
                 auto* members = object->findChild<QObject*>("membersDrawer");
