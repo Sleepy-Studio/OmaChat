@@ -31,10 +31,12 @@ enum Permission : Bits {
     AttachFiles = Bits{1} << 17,
     AddReactions = Bits{1} << 18,
     ManageEmoji = Bits{1} << 19,
+    MentionRoles = Bits{1} << 20,
+    MentionEveryone = Bits{1} << 21,
     Administrator = Bits{1} << 40,
 };
 
-inline constexpr Bits kAll = ((Bits{1} << 20) - 1) | Administrator;
+inline constexpr Bits kAll = ((Bits{1} << 22) - 1) | Administrator;
 
 // Built-in role presets created with every new server.
 inline constexpr Bits kGuestDefaults = ViewChannel | ReadHistory | ConnectVoice;

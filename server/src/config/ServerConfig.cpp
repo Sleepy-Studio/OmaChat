@@ -1,6 +1,7 @@
 #include "config/ServerConfig.hpp"
 
 #include <QFileInfo>
+#include <QHostAddress>
 #include <QtGlobal>
 
 #include <toml++/toml.hpp>
@@ -114,6 +115,45 @@ bool ServerConfig::load(const QString& path, ServerConfig& out, QString* error)
     auto refresh = integer(t["auth"]["refresh_token_days"], out.refreshTokenDays, 1, 365, "auth.refresh_token_days");
     auto perIp = integer(
         t["limits"]["max_connections_per_ip"], out.maxConnectionsPerIp, 1, 10000, "limits.max_connections_per_ip");
+    if (t["webhooks"]["enabled"] && !t["webhooks"]["enabled"].value<bool>()) {
+        if (error)
+            *error = QStringLiteral("webhooks.enabled must be a boolean");
+        return false;
+    }
+    out.webhooksEnabled = t["webhooks"]["enabled"].value_or(false);
+    if (!parseEnvBool("OMACHAT_WEBHOOKS_ENABLED", &out.webhooksEnabled, error))
+        return false;
+    if (t["webhooks"]["bind"] && !t["webhooks"]["bind"].value<std::string>()) {
+        if (error)
+            *error = QStringLiteral("webhooks.bind must be a numeric IP address");
+        return false;
+    }
+    out.webhooksBind = str(t["webhooks"]["bind"], out.webhooksBind);
+    const auto envBind = QString::fromLocal8Bit(qgetenv("OMACHAT_WEBHOOKS_BIND")).trimmed();
+    if (!envBind.isEmpty())
+        out.webhooksBind = envBind;
+    if (QHostAddress(out.webhooksBind).isNull()) {
+        if (error)
+            *error = QStringLiteral("webhooks.bind / OMACHAT_WEBHOOKS_BIND must be a numeric IP address");
+        return false;
+    }
+    auto webhookPort = integer(t["webhooks"]["port"], out.webhooksPort, 1, 65535, "webhooks.port");
+    const auto envPort = QString::fromLocal8Bit(qgetenv("OMACHAT_WEBHOOKS_PORT")).trimmed();
+    if (!envPort.isEmpty()) {
+        bool valid = false;
+        const auto value = envPort.toULongLong(&valid);
+        for (const auto ch : envPort)
+            valid = valid && ch >= u'0' && ch <= u'9';
+        if (!valid || value < 1 || value > 65535) {
+            if (error)
+                *error = QStringLiteral("OMACHAT_WEBHOOKS_PORT must be an integer in [1, 65535]");
+            return false;
+        }
+        webhookPort = static_cast<std::int64_t>(value);
+    }
+    if (!webhookPort)
+        return false;
+    out.webhooksPort = static_cast<std::uint16_t>(*webhookPort);
     out.logLevel = str(t["log"]["level"], out.logLevel);
 
     auto oauth = [&](OAuthProviderSettings& p, const char* section) {

@@ -22,12 +22,14 @@ public:
     ~TestServer();
 
     bool start(quint16 port = 0, quint16 mediaPort = 0);
+    void setWebhooksEnabled(bool enabled) { m_webhooksEnabled = enabled; }
     void setOperatorUserId(server::Id userId) { m_operatorUserId = userId; }
     void stop();
     quint16 port() const { return m_port; }
     quint16 mediaPort() const { return m_mediaPort; }
     const QSslCertificate& certificate() const { return m_identity.chain.first(); }
     QString fingerprint() const;
+    QString databasePath() const { return m_dir.filePath(QStringLiteral("server.db")); }
     server::ChatServer* server() { return m_server.get(); }
     // Server-side user id for a registered username (0 when unknown).
     // Call while the server is stopped so its SQLite file is idle.
@@ -37,6 +39,7 @@ private:
     QTemporaryDir m_dir;
     server::TlsIdentity m_identity;
     std::unique_ptr<server::ChatServer> m_server;
+    bool m_webhooksEnabled = false;
     quint16 m_port = 0;
     quint16 m_mediaPort = 0;
     server::Id m_operatorUserId = 0;
@@ -81,7 +84,7 @@ public:
     explicit TestDaemon(const QString& name);
     ~TestDaemon();
 
-    bool start();
+    bool start(const std::function<void(daemon::DaemonOptions&)>& configure = {});
     ipc::Reply call(const QString& method, const QJsonObject& params = {}, int timeoutMs = 15000);
     std::optional<QJsonObject> waitEvent(
         const QString& name, const std::function<bool(const QJsonObject&)>& pred = {}, int timeoutMs = 5000);

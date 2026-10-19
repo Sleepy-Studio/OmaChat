@@ -76,6 +76,9 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->set_protocol_major(kProtocolMajor);
     r->set_protocol_minor(kProtocolMinor);
     r->set_server_version(kVersion);
+    r->add_capabilities("calls.direct.v1");
+    if (m_config.webhooksEnabled)
+        r->add_capabilities("incoming.webhooks.v1");
     r->add_capabilities("voice.opus");
     r->add_capabilities("media.chacha20poly1305");
     r->add_capabilities("search.fts");
@@ -86,6 +89,8 @@ void ChatServer::handleHello(Session& s, std::uint64_t rid, const proto::Hello& 
     r->add_capabilities("messages.idempotency.v1");
     r->add_capabilities("read.markers.v1");
     r->add_capabilities("read.summary.v1");
+    r->add_capabilities("mentions.kinds.v1");
+    r->add_capabilities("read.attention.v1");
     r->add_capabilities("voice.ownership.v1");
     r->add_capabilities("voice.status.v1");
     const QString instanceId = m_store.instanceId();
@@ -284,9 +289,22 @@ void ChatServer::handleResume(Session& s, std::uint64_t rid, const proto::Resume
     attachUser(s, grant.userId, grant.sessionId, token);
 
     std::vector<proto::Event> missed;
-    const bool ok
-        = m_events.replay(grant.userId, m.last_sequence(), [&](const proto::Event& e) { missed.push_back(e); });
-    if (!ok) {
+    bool replayAccessible = true;
+    const bool ok = m_events.replay(grant.userId, m.last_sequence(), [&](const proto::Event& event) {
+        const auto* message = event.has_message_create() ? &event.message_create()
+            : event.has_message_update()                 ? &event.message_update()
+                                                         : nullptr;
+        // Historical audience membership cannot authorize today's history access.
+        // Reject the whole replay so its count/cursor stays intact and the client
+        // rebuilds its currently accessible snapshot through full synchronization.
+        if (message
+            && !m_state.can(message->channel_id(), grant.userId, permissions::ViewChannel | permissions::ReadHistory)) {
+            replayAccessible = false;
+            return;
+        }
+        missed.push_back(event);
+    });
+    if (!ok || !replayAccessible) {
         // Authenticated, but the gap cannot be filled: client must SyncRequest.
         replyError(s, rid, proto::ERROR_RESUME_FAILED, QStringLiteral("full synchronization required"));
         return;

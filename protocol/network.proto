@@ -140,9 +140,26 @@ message ChatMessage {
   repeated Attachment attachments = 9;
   repeated Reaction reactions = 10;
   bool is_action = 11;       // "/me" message
+  MentionClassification mention_classification = 13;
+  uint64 integration_id = 14; // inbound webhook identity; never a human sender
+  string integration_name = 15;
   bytes encrypted = 12;      // E2EPayload (direct/group conversations); content is empty
 }
 
+// Authenticated channel-management API. Token appears only in create response.
+message CreateWebhookRequest { uint64 channel_id = 1; string name = 2; }
+message ListWebhooksRequest { uint64 channel_id = 1; }
+message RevokeWebhookRequest { uint64 channel_id = 1; uint64 webhook_id = 2; }
+message IncomingWebhook { uint64 id = 1; uint64 channel_id = 2; string name = 3; string token = 4; }
+message WebhookList { repeated IncomingWebhook webhooks = 1; }
+
+message DirectCall { uint64 id=1; uint64 channel_id=2; uint64 caller_id=3; uint64 callee_id=4; string state=5; string reason=6; uint64 caller_session_id=7; uint64 callee_session_id=8; }
+message StartDirectCallRequest { uint64 channel_id=1; }
+message DirectCallActionRequest { uint64 call_id=1; string action=2; }
+message MentionTarget { uint32 kind=1; uint64 target_id=2; }
+message MentionClassification { uint32 version=1; bool classified=2; repeated MentionTarget targets=3; uint32 reason_mask=4; }
+message GetAttentionSummaryRequest { uint64 channel_id=1; }
+message AttentionSummary { UnreadSummary unread=1; repeated uint64 mask_counts=2; bool classification_complete=3; }
 message VoiceState {
   uint64 user_id = 1;
   uint64 channel_id = 2;     // 0 = not in voice
@@ -814,6 +831,7 @@ message DeviceKeysChangedEvent { uint64 user_id = 1; }
 message Event {
   uint64 sequence = 1;   // 0 for ephemeral events (typing) that are not replayed
   oneof kind {
+    DirectCall direct_call_changed=33;
     ChatMessage message_create = 10;
     ChatMessage message_update = 11;
     MessageDeleteEvent message_delete = 12;
@@ -850,6 +868,11 @@ message Envelope {
   Error error = 2;
 
   oneof payload {
+    StartDirectCallRequest start_direct_call=230;
+    DirectCallActionRequest direct_call_action=231;
+    DirectCall direct_call=232;
+    GetAttentionSummaryRequest get_attention_summary=165;
+    AttentionSummary attention_summary=166;
     // handshake/auth
     Hello hello = 10;
     HelloReply hello_reply = 11;
@@ -921,6 +944,12 @@ message Envelope {
     ReadMarker read_marker = 158;
     GetUnreadSummaryRequest get_unread_summary = 163;
     UnreadSummary unread_summary = 164;
+
+    CreateWebhookRequest create_webhook = 240;
+    ListWebhooksRequest list_webhooks = 241;
+    RevokeWebhookRequest revoke_webhook = 242;
+    IncomingWebhook incoming_webhook = 243;
+    WebhookList webhook_list = 244;
 
     // attachments
     BeginUploadRequest begin_upload = 60;

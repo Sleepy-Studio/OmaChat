@@ -393,6 +393,7 @@ void ClientState::apply(const proto::Event& e, std::vector<ModelEvent>& out, boo
         out.push_back(
             {QStringLiteral("e2e.device_keys_changed"), {{"user_id", idString(e.device_keys_changed().user_id())}}});
         break;
+    case proto::Event::kDirectCallChanged: // New signaling is unavailable in this legacy desktop.
     case proto::Event::KIND_NOT_SET:
         break;
     }

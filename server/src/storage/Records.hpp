@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -152,6 +153,20 @@ struct AttachmentRecord {
     QByteArray artworkFraming; // immutable validated protobuf; empty for legacy assets
 };
 
+struct WebhookRecord {
+    Id id = 0;
+    Id channelId = 0;
+    Id creatorId = 0;
+    QString name;
+    QByteArray digest;
+};
+
+struct MentionSnapshot {
+    // Targets use reason bits 1 individual, 2 role, 4 everyone (ID zero).
+    std::vector<std::pair<unsigned, Id>> targets;
+    std::map<Id, unsigned> recipients;
+};
+
 struct MessageRecord {
     Id id = 0;
     Id channelId = 0;
@@ -164,6 +179,9 @@ struct MessageRecord {
     std::vector<AttachmentRecord> attachments; // declared last: aggregate init keeps working
     QByteArray encrypted; // end-to-end payload (DMs); content is empty then
     std::int64_t createdAt = 0; // 0 for legacy callers; Store derives it from the id
+    Id integrationId = 0;
+    QString integrationName{};
+    std::optional<MentionSnapshot> mentionSnapshot = std::nullopt;
 };
 
 struct DeviceKeyRecord {

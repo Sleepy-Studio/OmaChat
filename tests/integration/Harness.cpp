@@ -44,6 +44,8 @@ bool TestServer::start(quint16 port, quint16 mediaPort)
     cfg.filesPath = m_dir.filePath(QStringLiteral("files"));
     cfg.maxConnectionsPerIp = 1000;
     cfg.operatorUserId = m_operatorUserId;
+    cfg.webhooksEnabled = m_webhooksEnabled;
+    cfg.webhooksPort = 0;
     m_server = std::make_unique<server::ChatServer>(cfg);
     QString error;
     if (!m_server->start(m_identity, &error)) {
@@ -222,7 +224,7 @@ TestDaemon::~TestDaemon()
         m_daemon->shutdown();
 }
 
-bool TestDaemon::start()
+bool TestDaemon::start(const std::function<void(daemon::DaemonOptions&)>& configure)
 {
     daemon::DaemonOptions opt;
     opt.socketPath = m_socket;
@@ -232,6 +234,8 @@ bool TestDaemon::start()
     opt.nullAudio = true;
     opt.syntheticScreen = true;
     opt.notifications = false;
+    if (configure)
+        configure(opt);
     m_daemon = std::make_unique<daemon::Daemon>(opt);
     QString error;
     if (!m_daemon->start(&error)) {

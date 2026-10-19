@@ -114,6 +114,21 @@ bool ChatServer::start(const TlsIdentity& identity, QString* error)
                          .arg(*error);
         return false;
     }
+    if (m_config.webhooksEnabled) {
+        m_webhooks.handler
+            = [this](const QString& token, const QByteArray& body) { return receiveWebhook(token, body); };
+        const QHostAddress bindAddress(m_config.webhooksBind);
+        if (bindAddress.isNull()) {
+            if (error)
+                *error = QStringLiteral("webhooks.bind must be a numeric IP address");
+            return false;
+        }
+        if (!m_webhooks.listen(bindAddress, m_config.webhooksPort)) {
+            if (error)
+                *error = m_webhooks.errorString();
+            return false;
+        }
+    }
     m_housekeeping.start();
     m_startedAt = now();
     OMA_INFO("server", "listening", {"control", QStringLiteral("%1:%2").arg(m_config.bind).arg(controlPort())},
@@ -177,6 +192,7 @@ void ChatServer::onClosed(quint64 connId)
         return;
     std::unique_ptr<Session> s = std::move(it->second);
     m_sessions.erase(it);
+    disconnectDirectCalls(connId);
 
     detachUploadsOf(connId);
     const QString ip = s->peer.toString();
@@ -360,6 +376,24 @@ void ChatServer::onEnvelope(quint64 connId, const proto::Envelope& env)
         break;
     case P::kLeaveGroupDm:
         handleLeaveGroupDm(s, rid, env.leave_group_dm());
+        break;
+    case P::kStartDirectCall:
+        handleStartDirectCall(s, rid, env.start_direct_call());
+        break;
+    case P::kDirectCallAction:
+        handleDirectCallAction(s, rid, env.direct_call_action());
+        break;
+    case P::kCreateWebhook:
+        handleCreateWebhook(s, rid, env.create_webhook());
+        break;
+    case P::kListWebhooks:
+        handleListWebhooks(s, rid, env.list_webhooks());
+        break;
+    case P::kRevokeWebhook:
+        handleRevokeWebhook(s, rid, env.revoke_webhook());
+        break;
+    case P::kGetAttentionSummary:
+        handleGetAttentionSummary(s, rid, env.get_attention_summary());
         break;
     case P::kSendMessage:
         handleSendMessage(s, rid, env.send_message());
@@ -650,6 +684,8 @@ proto::ChatMessage ChatServer::toProto(const MessageRecord& m, Id viewer)
     p.set_id(m.id);
     p.set_channel_id(m.channelId);
     p.set_author_id(m.authorId);
+    p.set_integration_id(m.integrationId);
+    p.set_integration_name(m.integrationName.toStdString());
     p.set_timestamp(m.createdAt ? m.createdAt : decodeSnowflake(m.id).unixMs);
     p.set_content(m.content.toStdString());
     p.set_reply_to(m.replyTo);
@@ -674,6 +710,19 @@ proto::ChatMessage ChatServer::toProto(const MessageRecord& m, Id viewer)
             pr->set_count(r.count);
             pr->set_me(r.me);
         }
+    }
+    auto snapshot = m.mentionSnapshot ? m.mentionSnapshot : m_store.mentionSnapshot(m.id, viewer);
+    if (snapshot) {
+        auto* classification = p.mutable_mention_classification();
+        classification->set_version(1);
+        classification->set_classified(true);
+        for (auto [kind, id] : snapshot->targets) {
+            auto* target = classification->add_targets();
+            target->set_kind(kind);
+            target->set_target_id(id);
+        }
+        auto it = snapshot->recipients.find(viewer);
+        classification->set_reason_mask(it == snapshot->recipients.end() ? 0 : it->second);
     }
     return p;
 }

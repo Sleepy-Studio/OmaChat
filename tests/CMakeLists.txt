@@ -24,6 +24,7 @@ add_executable(omachat_unit_tests
     unit/test_server_state.cpp
     unit/test_server_config_env.cpp
     unit/test_store.cpp
+    unit/test_migration_backup.cpp
     unit/test_artwork_images.cpp
     unit/test_send_recovery.cpp
     unit/test_video.cpp
@@ -77,6 +78,10 @@ add_executable(omachat_integration_tests
     integration/test_main.cpp
     integration/Harness.cpp
     integration/test_protocol.cpp
+    integration/test_webhooks.cpp
+    integration/test_mention_protocol.cpp
+    integration/test_direct_call_protocol.cpp
+    integration/test_resume_access.cpp
     integration/test_daemon.cpp
     integration/test_voice.cpp
     integration/test_channel_details.cpp

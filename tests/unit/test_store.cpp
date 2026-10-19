@@ -15,7 +15,7 @@ TEST(ServerStore, UsersSessionsAndConflicts)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(dir.filePath(QStringLiteral("s.db")), &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 15);
+    EXPECT_EQ(store.schemaVersion(), 17);
     const QString instance = store.instanceId();
     EXPECT_FALSE(instance.isEmpty());
     EXPECT_EQ(store.instanceId(), instance);
@@ -56,6 +56,11 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
         db.setDatabaseName(path);
         ASSERT_TRUE(db.open());
         QSqlQuery q(db);
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE message_attention")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE message_classification")));
+        ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE incoming_webhooks")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN integration_id")));
+        ASSERT_TRUE(q.exec(QStringLiteral("ALTER TABLE messages DROP COLUMN integration_name")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TRIGGER message_operation_tombstone")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE message_operations")));
         ASSERT_TRUE(q.exec(QStringLiteral("DROP TABLE read_markers")));
@@ -87,7 +92,7 @@ TEST(ServerStore, VersionOneDatabasesAreMigrated)
     server::Store store;
     QString error;
     ASSERT_TRUE(store.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(store.schemaVersion(), 15);
+    EXPECT_EQ(store.schemaVersion(), 17);
     EXPECT_TRUE(store.userByName(QStringLiteral("a")).has_value()) << "existing data survives";
     EXPECT_EQ(store.pendingAttachmentCount(1), 0);
 
@@ -448,6 +453,11 @@ TEST(ServerStore, VersionFourteenArtworkMigratesWithoutChangingReferences)
         ASSERT_TRUE(query.exec("CREATE INDEX attachments_by_message ON attachments(message_id)"));
         ASSERT_TRUE(
             query.exec("CREATE INDEX attachments_pending ON attachments(uploader_id) WHERE message_id IS NULL"));
+        ASSERT_TRUE(query.exec("DROP TABLE message_attention"));
+        ASSERT_TRUE(query.exec("DROP TABLE message_classification"));
+        ASSERT_TRUE(query.exec("DROP TABLE incoming_webhooks"));
+        ASSERT_TRUE(query.exec("ALTER TABLE messages DROP COLUMN integration_id"));
+        ASSERT_TRUE(query.exec("ALTER TABLE messages DROP COLUMN integration_name"));
         ASSERT_TRUE(query.exec("PRAGMA user_version=14"));
         db.close();
     }
@@ -455,7 +465,7 @@ TEST(ServerStore, VersionFourteenArtworkMigratesWithoutChangingReferences)
     server::Store migrated;
     QString error;
     ASSERT_TRUE(migrated.open(path, &error)) << error.toStdString();
-    EXPECT_EQ(migrated.schemaVersion(), 15);
+    EXPECT_EQ(migrated.schemaVersion(), 17);
     ASSERT_TRUE(migrated.attachment(30));
     EXPECT_TRUE(migrated.attachment(30)->artworkFraming.isEmpty());
     EXPECT_EQ(migrated.artworkChannel(30), 20u);
@@ -563,6 +573,11 @@ TEST(ServerStore, FailedArtworkMigrationRollsBackAndRestoresForeignKeys)
         QSqlQuery query(db);
         ASSERT_TRUE(query.exec("ALTER TABLE attachments DROP COLUMN artwork_framing"));
         ASSERT_TRUE(query.exec("INSERT INTO emoji VALUES(40, 10, 'broken', 999, 1, 0)"));
+        ASSERT_TRUE(query.exec("DROP TABLE message_attention"));
+        ASSERT_TRUE(query.exec("DROP TABLE message_classification"));
+        ASSERT_TRUE(query.exec("DROP TABLE incoming_webhooks"));
+        ASSERT_TRUE(query.exec("ALTER TABLE messages DROP COLUMN integration_id"));
+        ASSERT_TRUE(query.exec("ALTER TABLE messages DROP COLUMN integration_name"));
         ASSERT_TRUE(query.exec("PRAGMA user_version=14"));
         db.close();
     }

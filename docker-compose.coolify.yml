@@ -36,6 +36,12 @@ services:
       OMACHAT_NODE_ID: ${OMACHAT_NODE_ID:-1}
       OMACHAT_MAX_UPLOAD_MB: ${OMACHAT_MAX_UPLOAD_MB:-50}
       OMACHAT_LOG_LEVEL: ${OMACHAT_LOG_LEVEL:-info}
+      # Optional inbound HTTP, reachable only on the private Compose network.
+      # Configure an HTTPS proxy to internal 6475 and keep /hooks paths intact.
+      # No raw HTTP host port is published.
+      OMACHAT_WEBHOOKS_ENABLED: ${OMACHAT_WEBHOOKS_ENABLED:-false}
+      OMACHAT_WEBHOOKS_BIND: ${OMACHAT_WEBHOOKS_BIND:-127.0.0.1}
+      OMACHAT_WEBHOOKS_PORT: ${OMACHAT_WEBHOOKS_PORT:-6475}
 
       # Optional: instance operator console. Set to your numeric server user
       # id to reveal the Instance console in that account's client menu;

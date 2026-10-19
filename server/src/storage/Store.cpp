@@ -1,5 +1,6 @@
 #include "storage/Store.hpp"
 #include "omachat/core/Snowflake.hpp"
+#include "storage/MigrationBackup.hpp"
 
 #include "omachat/core/Log.hpp"
 
@@ -12,7 +13,18 @@
 namespace omachat::server {
 namespace {
 
-constexpr int kSchemaVersion = 15;
+constexpr int kSchemaVersion = 17;
+const char* const kSchemaV16[] = {"CREATE TABLE message_classification(message_id INTEGER PRIMARY KEY REFERENCES "
+                                  "messages(id) ON DELETE CASCADE, targets BLOB NOT NULL)",
+    "CREATE TABLE message_attention(message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, user_id "
+    "INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, mask INTEGER NOT NULL CHECK(mask BETWEEN 1 AND 7), "
+    "PRIMARY KEY(message_id,user_id))",
+    "CREATE INDEX message_attention_user ON message_attention(user_id,message_id)"};
+const char* const kSchemaV17[] = {"CREATE TABLE incoming_webhooks(id INTEGER PRIMARY KEY, channel_id INTEGER NOT NULL "
+                                  "REFERENCES channels(id) ON DELETE CASCADE, creator_id INTEGER NOT NULL REFERENCES "
+                                  "users(id) ON DELETE CASCADE, name TEXT NOT NULL, digest BLOB NOT NULL UNIQUE)",
+    "ALTER TABLE messages ADD COLUMN integration_id INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE messages ADD COLUMN integration_name TEXT NOT NULL DEFAULT ''"};
 
 const char* const kSchemaV14[] = {
     R"(CREATE TABLE message_operations(
@@ -182,7 +194,7 @@ const char* const kSchemaV5[] = {
 const char* const kSchemaV6[] = {
     "ALTER TABLE messages ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0",
     // Existing message ids encode their creation time. Imported history can
-    // predate the omachat snowflake epoch, so its time must live separately.
+    // predate the OmaChat snowflake epoch, so its time must live separately.
     "UPDATE messages SET created_at = 1735689600000 + (id >> 22)",
     "CREATE INDEX messages_by_channel_time ON messages(channel_id, created_at DESC, id DESC)",
     R"(CREATE TABLE discord_import_map(
@@ -302,6 +314,8 @@ MessageRecord readMessage(const QSqlQuery& q)
     m.mentions = splitIds(q.value(7).toString());
     m.encrypted = q.value(8).toByteArray();
     m.createdAt = q.value(9).toLongLong();
+    m.integrationId = uid(q.value(10));
+    m.integrationName = q.value(11).toString();
     return m;
 }
 
@@ -325,8 +339,8 @@ AttachmentRecord readAttachment(const QSqlQuery& q)
 constexpr const char* kAttachmentColumns = "id, channel_id, uploader_id, message_id, filename, mime_type, size, "
                                            "sha256, created_at, artwork, artwork_framing";
 
-constexpr const char* kMessageColumns
-    = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions, encrypted, created_at";
+constexpr const char* kMessageColumns = "id, channel_id, author_id, content, reply_to, edited_at, is_action, mentions, "
+                                        "encrypted, created_at, integration_id, integration_name";
 
 } // namespace
 
@@ -344,6 +358,7 @@ Store::~Store()
 
 bool Store::open(const QString& path, QString* error)
 {
+    m_migrationBackupPath.clear();
     m_db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
     m_db.setDatabaseName(path);
     if (!m_db.open()) {
@@ -351,11 +366,15 @@ bool Store::open(const QString& path, QString* error)
             *error = m_db.lastError().text();
         return false;
     }
-    exec(QStringLiteral("PRAGMA journal_mode=WAL"));
-    exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
     exec(QStringLiteral("PRAGMA foreign_keys=ON"));
     exec(QStringLiteral("PRAGMA busy_timeout=5000"));
-    return migrate(error);
+    // journal_mode is persistent: do not alter an old database before its
+    // verified backup exists and migration has succeeded.
+    if (!migrate(error))
+        return false;
+    exec(QStringLiteral("PRAGMA journal_mode=WAL"));
+    exec(QStringLiteral("PRAGMA synchronous=NORMAL"));
+    return true;
 }
 
 int Store::schemaVersion() const
@@ -452,6 +471,14 @@ bool Store::migrate(QString* error)
     if (current == kSchemaVersion)
         return true;
 
+    if (current > 0 && !m_db.databaseName().isEmpty() && m_db.databaseName() != QStringLiteral(":memory:")) {
+        const auto backup = storage::migrationBackup(m_db, current, error);
+        if (!backup)
+            return false;
+        m_migrationBackupPath = *backup;
+        OMA_INFO("storage", "pre-migration backup verified", {"from", current}, {"to", kSchemaVersion});
+    }
+
     // SQLite cannot change foreign_keys inside a transaction. The scope guard
     // rolls back before restoring enforcement on every failure path.
     if (!exec(QStringLiteral("PRAGMA foreign_keys=OFF")))
@@ -508,6 +535,10 @@ bool Store::migrate(QString* error)
         return false;
     if (current < 15 && !apply(kSchemaV15))
         return false;
+    if (current < 16 && !apply(kSchemaV16))
+        return false;
+    if (current < 17 && !apply(kSchemaV17))
+        return false;
     QSqlQuery check(m_db);
     if (!check.exec(QStringLiteral("PRAGMA foreign_key_check")) || check.next()) {
         if (error)
@@ -540,7 +571,7 @@ bool Store::exec(const QString& sql, const std::vector<QVariant>& binds)
         return false;
     }
     for (const auto& b : binds) {
-        // A null QString binds as SQL NULL; omachat text columns are NOT NULL
+        // A null QString binds as SQL NULL; OmaChat text columns are NOT NULL
         // and use '' for "empty".
         if (b.typeId() == QMetaType::QString && b.toString().isNull())
             q.addBindValue(QStringLiteral(""));
@@ -1139,17 +1170,55 @@ bool Store::resolveDiscordReplies(Id serverId)
         {sid(serverId)});
 }
 
+bool Store::createWebhook(const WebhookRecord& r)
+{
+    return exec(QStringLiteral("INSERT INTO incoming_webhooks VALUES(?,?,?,?,?)"),
+        {sid(r.id), sid(r.channelId), sid(r.creatorId), r.name, r.digest});
+}
+std::vector<WebhookRecord> Store::webhooks(Id channelId)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral(
+        "SELECT id,channel_id,creator_id,name,digest FROM incoming_webhooks WHERE channel_id=? ORDER BY id"));
+    q.addBindValue(sid(channelId));
+    std::vector<WebhookRecord> out;
+    if (q.exec())
+        while (q.next())
+            out.push_back(
+                {uid(q.value(0)), uid(q.value(1)), uid(q.value(2)), q.value(3).toString(), q.value(4).toByteArray()});
+    return out;
+}
+std::optional<WebhookRecord> Store::webhook(const QByteArray& digest)
+{
+    QSqlQuery q(m_db);
+    q.prepare(QStringLiteral("SELECT id,channel_id,creator_id,name,digest FROM incoming_webhooks WHERE digest=?"));
+    q.addBindValue(digest);
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return WebhookRecord{
+        uid(q.value(0)), uid(q.value(1)), uid(q.value(2)), q.value(3).toString(), q.value(4).toByteArray()};
+}
+bool Store::revokeWebhook(Id channelId, Id webhookId)
+{
+    return exec(
+        QStringLiteral("DELETE FROM incoming_webhooks WHERE channel_id=? AND id=?"), {sid(channelId), sid(webhookId)});
+}
+
 bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QString& discordId,
     const QByteArray& operationId, const QByteArray& digest, const QByteArray& result)
 {
     if (!begin())
         return false;
     bool ok = exec(QStringLiteral("INSERT INTO messages(id, channel_id, author_id, content, reply_to, edited_at, "
-                                  "is_action, mentions, encrypted, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)"),
+                                  "is_action, mentions, encrypted, created_at, integration_id, integration_name) "
+                                  "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"),
         {sid(m.id), sid(m.channelId), sid(m.authorId), m.content, sid(m.replyTo), qint64(m.editedAt),
             m.isAction ? 1 : 0, joinIds(m.mentions),
             m.encrypted.isEmpty() ? QVariant(QMetaType(QMetaType::QByteArray)) : QVariant(m.encrypted),
-            qint64(m.createdAt ? m.createdAt : decodeSnowflake(m.id).unixMs)});
+            qint64(m.createdAt ? m.createdAt : decodeSnowflake(m.id).unixMs), sid(m.integrationId),
+            m.integrationName.isNull() ? QStringLiteral("") : m.integrationName});
+    if (ok)
+        ok = writeMentionSnapshot(m.id, m.mentionSnapshot);
     for (const auto& a : m.attachments) {
         if (!ok)
             break;
@@ -1173,7 +1242,10 @@ bool Store::insertMessage(const MessageRecord& m, Id importServerId, const QStri
         rollback();
         return false;
     }
-    return commit();
+    if (commit())
+        return true;
+    rollback();
+    return false;
 }
 
 std::optional<Store::MessageOperation> Store::messageOperation(Id userId, const QByteArray& operationId)
@@ -1226,7 +1298,7 @@ std::optional<proto::UnreadSummary> Store::unreadSummary(Id userId, Id channelId
             SELECT message_id, timestamp FROM read_markers WHERE user_id=:user AND channel_id=:channel
         ), unread AS (
             SELECT id, created_at, mentions, encrypted IS NOT NULL AS is_encrypted FROM messages
-            WHERE channel_id=:channel AND author_id<>:user
+            WHERE channel_id=:channel AND (author_id<>:user OR integration_id<>0)
               AND (NOT EXISTS(SELECT 1 FROM marker)
                    OR (created_at,id)>(SELECT timestamp,message_id FROM marker))
         )

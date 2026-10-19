@@ -615,8 +615,16 @@ ApplicationWindow {
         QTest::qWait(160);
         EXPECT_TRUE(
             window->grabWindow().save(light ? "/tmp/omachat-main-light-150.png" : "/tmp/omachat-main-dark-150.png"));
+        auto* dismiss = textControl(window->contentItem(), "Dismiss");
+        ASSERT_TRUE(dismiss);
+        const auto dismissBounds = dismiss->mapRectToScene(dismiss->boundingRect());
+        EXPECT_GE(dismissBounds.left(), 0);
+        EXPECT_LE(dismissBounds.right(), window->width());
+        EXPECT_GE(dismissBounds.top(), 0);
+        EXPECT_LE(dismissBounds.bottom(), window->height());
         clickText(window, "Dismiss");
-        EXPECT_EQ(app->failedSendCount(), 0);
+        // Durable deletion is acknowledged by the daemon asynchronously.
+        ASSERT_TRUE(waitFor([&] { return app->failedSendCount() == 0; }));
     }
 }
 

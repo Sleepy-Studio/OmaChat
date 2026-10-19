@@ -27,6 +27,8 @@ public:
 
     bool open(const QString& path, QString* error);
     int schemaVersion() const;
+    // Local diagnostic only: never send this path over the network.
+    QString migrationBackupPath() const { return m_migrationBackupPath; }
     QString instanceId();
     std::optional<bool> registrationOverride();
     bool setRegistrationOverride(bool open);
@@ -111,6 +113,13 @@ public:
 
     // ---- messages
     // Also claims m.attachments (by id) for the message, atomically.
+    std::optional<MentionSnapshot> mentionSnapshot(Id messageId, Id viewerId = 0);
+    std::optional<proto::AttentionSummary> attentionSummary(Id userId, Id channelId);
+    bool updateClassifiedMessage(const MessageRecord& message);
+    bool createWebhook(const WebhookRecord& record);
+    std::vector<WebhookRecord> webhooks(Id channelId);
+    std::optional<WebhookRecord> webhook(const QByteArray& digest);
+    bool revokeWebhook(Id channelId, Id webhookId);
     bool insertMessage(const MessageRecord& m, Id importServerId = 0, const QString& discordId = {},
         const QByteArray& operationId = {}, const QByteArray& digest = {}, const QByteArray& result = {});
     struct MessageOperation {
@@ -168,9 +177,11 @@ public:
 
 private:
     bool exec(const QString& sql, const std::vector<QVariant>& binds = {});
+    bool writeMentionSnapshot(Id messageId, const std::optional<MentionSnapshot>& snapshot);
     bool migrate(QString* error);
     bool reclaimDetachedAttachments();
 
+    QString m_migrationBackupPath;
     QString m_connectionName;
     QSqlDatabase m_db;
 };

@@ -27,11 +27,11 @@ bool isMessageChannel(const ChannelRecord& c)
 
 std::vector<Id> ChatServer::extractMentions(Id channelId, const QString& content) const
 {
-    static const QRegularExpression re(
-        QStringLiteral(R"((?:^|[^\w@])@([a-z0-9][a-z0-9_.\-]{1,31}))"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression re(QStringLiteral(R"((?<![\w@])@([a-z0-9][a-z0-9_.\-]{1,31})(?![a-z0-9_.\-]))"),
+        QRegularExpression::CaseInsensitiveOption);
     std::vector<Id> out;
     auto it = re.globalMatch(content);
-    while (it.hasNext() && out.size() < 50) {
+    while (it.hasNext()) {
         const auto match = it.next();
         const UserRecord* u = m_state.userByName(match.captured(1).toLower());
         if (!u || std::ranges::find(out, u->id) != out.end())
@@ -141,10 +141,6 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("this channel does not accept messages"));
         return;
     }
-    if (!m_state.can(c->id, s.userId, SendMessages)) {
-        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot send messages here"));
-        return;
-    }
     const QByteArray operationId = QByteArray::fromStdString(m.operation_id());
     if (!operationId.isEmpty() && operationId.size() != 16) {
         replyError(s, rid, proto::ERROR_BAD_REQUEST, QStringLiteral("operation IDs must be 16 bytes"));
@@ -173,6 +169,10 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
             reply(s, rid, std::move(env));
             return;
         }
+    }
+    if (!m_state.can(c->id, s.userId, SendMessages)) {
+        replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you cannot send messages here"));
+        return;
     }
     std::vector<AttachmentRecord> attachments;
     if (m.attachment_ids_size() > kMaxAttachmentsPerMessage) {
@@ -216,10 +216,11 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
         if (parent && parent->channelId == c->id)
             msg.replyTo = parent->id;
     }
-    msg.mentions = extractMentions(c->id, msg.content);
     msg.attachments = std::move(attachments);
     msg.encrypted = QByteArray::fromStdString(m.encrypted());
-    const auto accepted = toProto(msg, 0);
+    if (!classifyMentions(s, rid, *c, msg))
+        return;
+    const auto accepted = toProto(msg, s.userId);
     if (!m_store.insertMessage(
             msg, 0, {}, operationId, digest, QByteArray::fromStdString(accepted.SerializeAsString()))) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not store message"));
@@ -227,10 +228,10 @@ void ChatServer::handleSendMessage(Session& s, std::uint64_t rid, const proto::S
     }
     proto::Event e;
     *e.mutable_message_create() = toProto(msg, 0);
-    publish(e, m_state.channelAudience(c->id));
+    publishMessage(e, msg);
 
     proto::Envelope env;
-    *env.mutable_chat_message() = e.message_create();
+    *env.mutable_chat_message() = toProto(msg, s.userId);
     reply(s, rid, std::move(env));
 }
 
@@ -243,7 +244,7 @@ void ChatServer::handleEditMessage(Session& s, std::uint64_t rid, const proto::E
         replyError(s, rid, proto::ERROR_NOT_FOUND, QStringLiteral("message not found"));
         return;
     }
-    if (msg->authorId != s.userId) {
+    if (msg->integrationId || msg->authorId != s.userId) {
         replyError(s, rid, proto::ERROR_PERMISSION_DENIED, QStringLiteral("you can only edit your own messages"));
         return;
     }
@@ -261,17 +262,18 @@ void ChatServer::handleEditMessage(Session& s, std::uint64_t rid, const proto::E
     }
     msg->content = *content;
     msg->editedAt = now();
-    msg->mentions = extractMentions(msg->channelId, msg->content);
     msg->encrypted = QByteArray::fromStdString(m.encrypted());
-    if (!m_store.updateMessage(msg->id, msg->content, msg->editedAt, msg->mentions, msg->encrypted)) {
+    if (!c || !classifyMentions(s, rid, *c, *msg))
+        return;
+    if (!m_store.updateClassifiedMessage(*msg)) {
         replyError(s, rid, proto::ERROR_INTERNAL, QStringLiteral("could not update message"));
         return;
     }
     proto::Event e;
     *e.mutable_message_update() = toProto(*msg, 0);
-    publish(e, m_state.channelAudience(msg->channelId));
+    publishMessage(e, *msg);
     proto::Envelope env;
-    *env.mutable_chat_message() = e.message_update();
+    *env.mutable_chat_message() = toProto(*msg, s.userId);
     reply(s, rid, std::move(env));
 }
 

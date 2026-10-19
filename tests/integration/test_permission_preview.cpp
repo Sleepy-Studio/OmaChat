@@ -120,7 +120,7 @@ protected:
             }
         }
         EXPECT_TRUE(found);
-        EXPECT_EQ(preview.permissions_size(), 21);
+        EXPECT_EQ(preview.permissions_size(), 23);
         permissions::Bits rebuilt = 0;
         for (const auto& entry : preview.permissions())
             if (entry.allowed())
@@ -230,7 +230,7 @@ TEST_F(PermissionPreview, DaemonForwardsReadOnlyPreviewAndDenials)
     ASSERT_TRUE(explicitSelf.ok) << explicitSelf.errorMessage.toStdString();
     EXPECT_EQ(explicitSelf.result.value("user_id").toString(), QString::number(memberId));
     const auto entries = reply.result.value("permissions").toArray();
-    EXPECT_EQ(entries.size(), 21);
+    EXPECT_EQ(entries.size(), 23);
     bool found = false;
     for (const auto& value : entries) {
         const auto entry = value.toObject();

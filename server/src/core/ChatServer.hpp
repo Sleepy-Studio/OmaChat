@@ -9,6 +9,7 @@
 #include "omachat/protocol/ProtocolConnection.hpp"
 #include "storage/Store.hpp"
 #include "transport/Certificates.hpp"
+#include "transport/WebhookIngress.hpp"
 #include "voice/MediaRelay.hpp"
 
 #include <QCryptographicHash>
@@ -45,6 +46,7 @@ public:
     bool start(const TlsIdentity& identity, QString* error);
 
     quint16 controlPort() const;
+    quint16 webhookPort() const { return m_webhooks.serverPort(); }
     quint16 mediaPort() const { return m_relay.port(); }
     const MediaRelay& relay() const { return m_relay; }
 
@@ -194,6 +196,30 @@ private:
     void handleCreateGroupDm(Session& s, std::uint64_t rid, const proto::CreateGroupDmRequest& m);
     void handleAddGroupDmRecipient(Session& s, std::uint64_t rid, const proto::AddGroupDmRecipientRequest& m);
     void handleLeaveGroupDm(Session& s, std::uint64_t rid, const proto::LeaveGroupDmRequest& m);
+
+    struct CallRec {
+        proto::DirectCall state;
+        quint64 callerConn = 0;
+        quint64 calleeConn = 0;
+    };
+    std::map<Id, CallRec> m_calls;
+    void handleStartDirectCall(Session&, std::uint64_t, const proto::StartDirectCallRequest&);
+    void handleDirectCallAction(Session&, std::uint64_t, const proto::DirectCallActionRequest&);
+    void endDirectCall(Id, const QString&);
+    void disconnectDirectCalls(quint64);
+    bool directVoiceAllowed(const Session&, Id) const;
+    void publishDirectCall(const CallRec&);
+    void handleCreateWebhook(Session&, std::uint64_t, const proto::CreateWebhookRequest&);
+    void handleListWebhooks(Session&, std::uint64_t, const proto::ListWebhooksRequest&);
+    void handleRevokeWebhook(Session&, std::uint64_t, const proto::RevokeWebhookRequest&);
+    bool classifyMentions(Session&, uint64_t, const ChannelRecord&, MessageRecord&);
+    void publishMessage(proto::Event, const MessageRecord&);
+    void handleGetAttentionSummary(Session&, uint64_t, const proto::GetAttentionSummaryRequest&);
+    bool manageWebhook(Session&, std::uint64_t, Id);
+    int receiveWebhook(const QString&, const QByteArray&);
+    WebhookIngress m_webhooks;
+    TokenBucket m_webhookGlobal{60, 10};
+    std::map<Id, TokenBucket> m_webhookRates;
 
     // ---- handlers: messages & presence (MessageHandlers.cpp)
     void handleSendMessage(Session& s, std::uint64_t rid, const proto::SendMessageRequest& m);

@@ -241,6 +241,8 @@ Item {
                             wrapMode: Text.Wrap
                             color: Theme.textMuted
                             font.pixelSize: Metrics.px(12)
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
                             text: sendRow.modelData.pending ? qsTr("Sending message…")
                                 : sendRow.modelData.retryable ? qsTr("Message not sent: %1").arg(sendRow.modelData.error)
                                 : qsTr("Delivery unconfirmed: %1. Check this conversation before sending again.").arg(sendRow.modelData.error)
@@ -257,20 +259,28 @@ Item {
                             color: Theme.text
                             font.pixelSize: Metrics.px(12)
                         }
-                        RowLayout {
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: Metrics.px(6)
                             visible: !sendRow.modelData.pending
                             FlatButton {
+                                leftPadding: Metrics.px(4)
+                                rightPadding: Metrics.px(4)
                                 visible: sendRow.modelData.retryable
                                 text: qsTr("Retry")
                                 enabled: App.canSend && App.state === "connected" && App.daemonState === "connected"
                                 onClicked: App.retrySend(sendRow.modelData.id)
                             }
                             FlatButton {
+                                leftPadding: Metrics.px(4)
+                                rightPadding: Metrics.px(4)
                                 visible: sendRow.modelData.text.length > 0
                                 text: qsTr("Copy text")
                                 onClicked: App.copyText(sendRow.modelData.text)
                             }
                             FlatButton {
+                                leftPadding: Metrics.px(4)
+                                rightPadding: Metrics.px(4)
                                 text: qsTr("Dismiss")
                                 onClicked: App.dismissSend(sendRow.modelData.id)
                             }

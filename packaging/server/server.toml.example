@@ -1,11 +1,22 @@
 # omachat-server configuration. Copy to /etc/omachat/server.toml.
 
 [server]
-name = "omachat"
+name = "OmaChat"
 bind = "0.0.0.0"
 port = 6473              # TCP, TLS 1.3 control/text
 registration_open = true # set false after creating your accounts
 node_id = 1              # 0..1023, unique per server process
+
+# Incoming HTTP webhooks are opt-in and belong behind an HTTPS reverse proxy.
+# Keep the listener private; avoid access logs containing /hooks/<secret> paths.
+# Environment overrides: OMACHAT_WEBHOOKS_ENABLED, OMACHAT_WEBHOOKS_BIND,
+# OMACHAT_WEBHOOKS_PORT. Unset/empty values preserve these TOML values.
+# A container may explicitly bind 0.0.0.0 on a private network for its proxy;
+# do not publish that HTTP port directly. See docs/webhooks.md.
+[webhooks]
+enabled = false
+bind = "127.0.0.1"         # numeric IPv4/IPv6 address only
+port = 6475
 
 [media]
 udp_port = 6474          # UDP voice/media

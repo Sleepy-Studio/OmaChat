@@ -20,7 +20,7 @@ struct OAuthProviderSettings {
 };
 
 struct ServerConfig {
-    QString instanceName = QStringLiteral("omachat");
+    QString instanceName = QStringLiteral("OmaChat");
     QString bind = QStringLiteral("0.0.0.0");
     std::uint16_t port = 6473;
     bool registrationOpen = true;
@@ -46,6 +46,10 @@ struct ServerConfig {
     int refreshTokenDays = 30;
     int maxConnectionsPerIp = 16;
 
+    bool webhooksEnabled = false;
+    QString webhooksBind = QStringLiteral("127.0.0.1");
+    std::uint16_t webhooksPort = 6475;
+
     QString logLevel = QStringLiteral("info");
 
     OAuthProviderSettings oauthDiscord;
@@ -54,7 +58,9 @@ struct ServerConfig {
 
     // Loads TOML. Unknown keys are ignored; invalid values produce an error.
     // OMACHAT_OPERATOR_USER_ID and OMACHAT_OPERATOR_REMOTE_RESTART override
-    // the [operator] section when set and non-empty, so container hosts can
+    // the [operator] section when set and non-empty. OMACHAT_WEBHOOKS_ENABLED,
+    // OMACHAT_WEBHOOKS_BIND and OMACHAT_WEBHOOKS_PORT override [webhooks]
+    // with the same non-empty convention, so container hosts can
     // configure them without editing the persisted file.
     static bool load(const QString& path, ServerConfig& out, QString* error);
 };
